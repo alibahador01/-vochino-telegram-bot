@@ -135,6 +135,7 @@ const texts = {
   }
 };
 
+// Clean main menu without extra hardcoded items
 const mainMenuButtons = [
   { key: 'buy', text: '🛒 خرید' },
   { key: 'sell', text: '💸 فروش' },
@@ -144,9 +145,7 @@ const mainMenuButtons = [
   { key: 'referral', text: '🎁 زیرمجموعه' },
   { key: 'support', text: '📞 پشتیبانی' },
   { key: 'rules', text: '📖 قوانین' },
-  { key: 'education', text: '📚 آموزش' },
-  { key: 'vpn', text: '⚡️ فیلترشکن' },
-  { key: 'stars', text: '⭐ تلگرام استارز' }
+  { key: 'education', text: '📚 آموزش' }
 ];
 
 function showMainMenu(ctx) {
@@ -223,14 +222,14 @@ bot.command('setreaction', (ctx) => {
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Helper function to apply configured reaction on start using Telegraf shortcut
+// Safe reaction trigger on start
 async function triggerStartReaction(ctx) {
   try {
     const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
     const emoji = setting ? setting.value : '❤️';
     await ctx.setReaction(emoji);
   } catch (e) {
-    console.log('Reaction error: ' + e.message);
+    console.log('Reaction note: unable to set reaction automatically (requires chat admin rights or proper bot scope).');
   }
 }
 
@@ -349,16 +348,6 @@ bot.action(/^menu_.+/, (ctx) => {
   const actionKey = ctx.match[0];
   if (actionKey === 'menu_wallet' || actionKey === 'menu_referral') return;
   ctx.answerCbQuery();
-  
-  if (actionKey === 'menu_vpn') {
-    ctx.reply('⚡️ بخش خرید و مدیریت فیلترشکن‌ها به‌زودی از طریق پنل ادمین قابل تنظیم خواهد بود 🛠');
-    return;
-  }
-  if (actionKey === 'menu_stars') {
-    ctx.reply('⭐ بخش تلگرام استارز به‌زودی راه‌اندازی می‌شود 🛠');
-    return;
-  }
-
   ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
 });
 
