@@ -67,7 +67,7 @@ db.exec(
 // Set default start reaction if not exists
 const defaultReaction = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
 if (!defaultReaction) {
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('start_reaction', '🔥');
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('start_reaction', '❤');
 }
 
 // Default Required Channel
@@ -81,6 +81,18 @@ if (!existingChannel) {
 const ADMIN_IDS = [8231962200];
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
+
+// لیست ایموجی‌های مجاز تلگرام برای ری‌اکشن روی پیام (Bot API فقط همین‌ها را قبول می‌کند)
+const ALLOWED_REACTIONS = [
+  '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱',
+  '🤬', '😢', '🎉', '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡',
+  '🥱', '🥴', '😍', '🐳', '❤‍🔥', '🌚', '🌭', '💯', '🤣', '⚡',
+  '🍌', '🏆', '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈',
+  '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈', '😇', '😨',
+  '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿',
+  '🆒', '💘', '🙉', '🦄', '😘', '💊', '🙊', '😎', '👾', '🤷‍♂',
+  '🤷', '🤷‍♀', '😡'
+];
 
 const DEPOSIT_CARDS = [
   { number: '6219861819068106', owner: 'علی بهادر' },
@@ -207,8 +219,8 @@ function showJoinPrompt(ctx) {
   ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
 }
 
-// Set reaction command for admin
-bot.command('setreaction', (ctx) => {
+// Set reaction command for admin — حالا قبل از ذخیره، ایموجی را با تست واقعی روی همین پیام بررسی می‌کند
+bot.command('setreaction', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
@@ -217,17 +229,44 @@ bot.command('setreaction', (ctx) => {
     return;
   }
   const newEmoji = args[1];
+
+  if (ALLOWED_REACTIONS.indexOf(newEmoji) === -1) {
+    ctx.reply(
+      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست (تلگرام فقط یک لیست ثابت را قبول می‌کند).\n' +
+      'چند نمونه‌ی مجاز:\n❤ 🔥 👍 🎉 🥰 😍 👏 💯 💔 🙏 😢 🤩 😱 😈'
+    );
+    return;
+  }
+
+  try {
+    // تست واقعی: همین ایموجی را روی پیام /setreaction خود ادمین می‌زند تا مطمئن شویم تلگرام آن را قبول می‌کند
+    await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
+      reaction: [{ type: 'emoji', emoji: newEmoji }],
+      is_big: true
+    });
+  } catch (e) {
+    ctx.reply('⚠️ تلگرام این ایموجی را نپذیرفت. یک ایموجی دیگر از لیست مجاز امتحان کنید.');
+    return;
+  }
+
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('start_reaction', newEmoji);
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Fixed reaction trigger using proper Bot API method
+// Fixed reaction trigger — با افکت بزرگ (پخش‌شدن قلب‌ها مثل عکسی که فرستادی) و ایموجی fallback معتبر
 async function triggerStartReaction(ctx) {
   try {
     const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
-    const emoji = setting ? setting.value : '🔥';
+    let emoji = setting ? setting.value : '❤';
+
+    // اگر به هر دلیلی مقدار ذخیره‌شده در دیتابیس نامعتبر شده باشد، به ❤ برمی‌گردیم
+    if (ALLOWED_REACTIONS.indexOf(emoji) === -1) {
+      emoji = '❤';
+    }
+
     await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
-      reaction: [{ type: 'emoji', emoji: emoji }]
+      reaction: [{ type: 'emoji', emoji: emoji }],
+      is_big: true
     });
   } catch (e) {
     console.log('Reaction error details: ' + e.message);
