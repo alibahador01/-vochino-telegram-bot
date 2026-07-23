@@ -1,4 +1,371 @@
+const { Telegraf, Markup } = require('telegraf');
+const Database = require('better-sqlite3');
+const express = require('express');
 
+// Express Server for Render Health Check
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => { res.send('Bot is alive!'); });
+app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
+
+// Initialize Bot & DB
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const db = new Database('bot.db');
+
+// Database Tables Initialization
+db.exec(
+  'CREATE TABLE IF NOT EXISTS users (' +
+  'telegram_id TEXT PRIMARY KEY, ' +
+  'phone TEXT, ' +
+  'full_name TEXT, ' +
+  'card_number TEXT, ' +
+  'language TEXT, ' +
+  'balance INTEGER DEFAULT 0, ' +
+  'registered_at TEXT' +
+  ')'
+);
+
+db.exec(
+  'CREATE TABLE IF NOT EXISTS cards (' +
+  'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+  'telegram_id TEXT, ' +
+  'card_number TEXT, ' +
+  'created_at TEXT' +
+  ')'
+);
+
+db.exec(
+  'CREATE TABLE IF NOT EXISTS wallet_requests (' +
+  'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+  'telegram_id TEXT, ' +
+  'type TEXT, ' +
+  'amount INTEGER, ' +
+  'card_number TEXT, ' +
+  'receipt_file_id TEXT, ' +
+  'status TEXT, ' +
+  'created_at TEXT' +
+  ')'
+);
+
+db.exec(
+  'CREATE TABLE IF NOT EXISTS required_channels (' +
+  'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+  'chat_id TEXT, ' +
+  'invite_link TEXT, ' +
+  'title TEXT, ' +
+  'active INTEGER DEFAULT 1' +
+  ')'
+);
+
+// Default Required Channel
+const existingChannel = db.prepare('SELECT * FROM required_channels WHERE chat_id = ?').get('-1003953090902');
+if (!existingChannel) {
+  db.prepare(
+    'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES (?, ?, ?, 1)'
+  ).run('-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی');
+}
+
+const ADMIN_IDS = [8231962200];
+const DAILY_LIMIT_TEXT = '2,000,000';
+const MIN_WITHDRAW = 100000;
+
+const DEPOSIT_CARDS = [
+  { number: '6219861819068106', owner: 'علی بهادر' },
+  { number: '5047061669481125', owner: 'علی بهادر' }
+];
+
+const texts = {
+  fa: {
+    chooseLanguage: 'زبان خود را انتخاب کنید / Please choose your language:',
+    welcome: 'به ربات خوش آمدید! 🌟',
+    requestPhone: 'برای تکمیل ثبت‌نام، لطفاً شماره تلفن خود را با دکمه‌ی زیر ارسال کنید 👇',
+    sharePhoneButton: '📱 ارسال شماره تلفن',
+    requestName: 'لطفاً نام و نام خانوادگی خود را وارد کنید:',
+    requestCard: 'لطفاً شماره کارت بانکی خود را وارد کنید (کارتی که برای واریز استفاده می‌کنید):',
+    rulesText: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.',
+    confirmRulesButton: '✅ قوانین را می‌پذیرم',
+    registrationSuccess: 'ثبت‌نام شما با موفقیت انجام شد ✅\nسقف خرید روزانه شما: ' + DAILY_LIMIT_TEXT + ' تومان',
+    welcomeBack: 'خوش برگشتید! 👋',
+
+    mustJoinTitle: 'برای استفاده از ربات، ابتدا باید عضو کانال زیر شوید:',
+    joinChannelButton: '📢 عضویت در کانال',
+    checkMembershipButton: '✅ عضو شدم',
+    stillNotMember: 'هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید، سپس دوباره تلاش کنید.',
+
+    walletTitle: '👛 کیف پول',
+    walletBalance: 'موجودی فعلی شما: ',
+    walletIncrease: '➕ افزایش موجودی',
+    walletWithdraw: '💳 برداشت موجودی',
+    walletAddCard: '➕ افزودن کارت جدید',
+    backButton: '🔙 بازگشت',
+
+    depositMethodTitle: 'روش افزایش موجودی را انتخاب کنید:',
+    depositCard2Card: '💳 کارت به کارت',
+    depositTron: '🪙 ترون (تتر)',
+    depositGateway: '🌐 درگاه پرداخت',
+    comingSoon: 'به‌زودی 🙂',
+
+    depositCardsTrust: '✅ پرداخت شما مستقیماً به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر تاکنون از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:',
+    depositAskAmount: 'مبلغ واریزی خود را به تومان وارد کنید:',
+    depositAskReceipt: 'رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎',
+    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، موجودی شما به‌روزرسانی خواهد شد.',
+
+    withdrawAskAmount: 'مبلغ برداشت خود را به تومان وارد کنید (حداقل ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان):',
+    withdrawMinError: 'حداقل مبلغ برداشت ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان است. لطفاً دوباره وارد کنید:',
+    withdrawSelectCard: 'شماره کارت خود را انتخاب کنید:',
+    withdrawSubmitted: 'درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.',
+
+    addCardAsk: 'شماره کارت جدید را وارد کنید (۱۶ رقم):',
+    addCardInvalid: 'شماره کارت وارد شده معتبر نیست. لطفاً دوباره تلاش کنید:',
+    addCardSuccess: 'کارت جدید با موفقیت ثبت شد ✅',
+    addCardButton: '➕ افزودن کارت جدید'
+  }
+};
+
+const mainMenuButtons = [
+  { key: 'buy', text: '🛒 خرید' },
+  { key: 'sell', text: '💸 فروش' },
+  { key: 'wallet', text: '👛 کیف پول' },
+  { key: 'orders', text: '📦 سفارش‌های من' },
+  { key: 'account', text: '👤 حساب کاربری' },
+  { key: 'referral', text: '🎁 زیرمجموعه' },
+  { key: 'support', text: '📞 پشتیبانی' },
+  { key: 'rules', text: '📖 قوانین' },
+  { key: 'education', text: '📚 آموزش' }
+];
+
+function showMainMenu(ctx) {
+  const rows = [];
+  for (let i = 0; i < mainMenuButtons.length; i += 2) {
+    const row = [];
+    row.push({ text: mainMenuButtons[i].text, callback_data: 'menu_' + mainMenuButtons[i].key });
+    if (mainMenuButtons[i + 1]) {
+      row.push({ text: mainMenuButtons[i + 1].text, callback_data: 'menu_' + mainMenuButtons[i + 1].key });
+    }
+    rows.push(row);
+  }
+  ctx.reply('منوی اصلی 🏠', { reply_markup: { inline_keyboard: rows } });
+}
+
+const sessions = {};
+
+function getUser(telegramId) {
+  return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(String(telegramId));
+}
+
+function getUserCards(telegramId) {
+  const user = getUser(telegramId);
+  const extraCards = db.prepare('SELECT * FROM cards WHERE telegram_id = ?').all(String(telegramId));
+  const list = [];
+  if (user && user.card_number) {
+    list.push({ card_number: user.card_number });
+  }
+  extraCards.forEach(function (c) { list.push({ card_number: c.card_number }); });
+  return list;
+}
+
+async function checkMembership(ctx) {
+  const channels = db.prepare('SELECT * FROM required_channels WHERE active = 1').all();
+  if (channels.length === 0) return true;
+
+  for (const channel of channels) {
+    try {
+      const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
+      if (member.status === 'left' || member.status === 'kicked') {
+        return false;
+      }
+    } catch (e) {
+      console.log('خطا در بررسی عضویت: ' + e.message);
+      return false;
+    }
+  }
+  return true;
+}
+
+function showJoinPrompt(ctx) {
+  const t = texts.fa;
+  const channels = db.prepare('SELECT * FROM required_channels WHERE active = 1').all();
+
+  const buttons = channels.map(function (c) {
+    return [{ text: t.joinChannelButton, url: c.invite_link }];
+  });
+  buttons.push([{ text: t.checkMembershipButton, callback_data: 'check_membership' }]);
+
+  ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
+}
+
+bot.action('check_membership', async (ctx) => {
+  ctx.answerCbQuery();
+  const isMember = await checkMembership(ctx);
+
+  if (!isMember) {
+    ctx.reply(texts.fa.stillNotMember);
+    return;
+  }
+
+  ctx.deleteMessage().catch(function () {});
+  const existingUser = getUser(ctx.from.id);
+  if (existingUser) {
+    const lang = existingUser.language || 'fa';
+    ctx.reply(texts[lang].welcomeBack);
+    showMainMenu(ctx);
+  } else {
+    ctx.reply(texts.fa.chooseLanguage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
+            { text: '🇬🇧 English', callback_data: 'lang_en' }
+          ]
+        ]
+      }
+    });
+  }
+});
+
+bot.start(async (ctx) => {
+  const isMember = await checkMembership(ctx);
+  if (!isMember) {
+    showJoinPrompt(ctx);
+    return;
+  }
+
+  const existingUser = getUser(ctx.from.id);
+  if (existingUser) {
+    const lang = existingUser.language || 'fa';
+    ctx.reply(texts[lang].welcomeBack);
+    showMainMenu(ctx);
+    return;
+  }
+
+  ctx.reply(texts.fa.chooseLanguage, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
+          { text: '🇬🇧 English', callback_data: 'lang_en' }
+        ]
+      ]
+    }
+  });
+});
+
+function handleLanguageChoice(ctx, lang) {
+  sessions[ctx.from.id] = { flow: 'registration', step: 'waiting_phone', lang: lang, data: {} };
+  const t = texts[lang] || texts.fa;
+  ctx.editMessageText(t.welcome);
+
+  ctx.reply(
+    t.requestPhone,
+    Markup.keyboard([
+      Markup.button.contactRequest(t.sharePhoneButton)
+    ]).resize().oneTime()
+  );
+}
+
+bot.action('lang_fa', (ctx) => handleLanguageChoice(ctx, 'fa'));
+bot.action('lang_en', (ctx) => handleLanguageChoice(ctx, 'fa'));
+
+bot.on('contact', (ctx) => {
+  const session = sessions[ctx.from.id];
+  if (!session || session.flow !== 'registration') return;
+
+  session.data.phone = ctx.message.contact.phone_number;
+  session.step = 'waiting_name';
+
+  const t = texts[session.lang] || texts.fa;
+  ctx.reply(t.requestName, { reply_markup: { remove_keyboard: true } });
+});
+
+function showWalletMenu(ctx) {
+  const t = texts.fa;
+  const user = getUser(ctx.from.id);
+  const balance = user ? user.balance : 0;
+
+  ctx.reply(t.walletTitle + '\n\n' + t.walletBalance + balance.toLocaleString('en-US') + ' تومان', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: t.walletIncrease, callback_data: 'wallet_deposit' }],
+        [{ text: t.walletWithdraw, callback_data: 'wallet_withdraw' }],
+        [{ text: t.walletAddCard, callback_data: 'wallet_addcard' }]
+      ]
+    }
+  });
+}
+
+bot.action('menu_wallet', (ctx) => {
+  ctx.answerCbQuery();
+  showWalletMenu(ctx);
+});
+
+bot.action('menu_referral', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply('به‌زودی 🙂');
+});
+
+bot.action(/^menu_.+/, (ctx) => {
+  if (ctx.match[0] === 'menu_wallet' || ctx.match[0] === 'menu_referral') return;
+  ctx.answerCbQuery();
+  ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
+});
+
+bot.action('wallet_deposit', (ctx) => {
+  ctx.answerCbQuery();
+  const t = texts.fa;
+  ctx.reply(t.depositMethodTitle, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: t.depositCard2Card, callback_data: 'deposit_card2card' }],
+        [{ text: t.depositTron, callback_data: 'deposit_tron' }],
+        [{ text: t.depositGateway, callback_data: 'deposit_gateway' }]
+      ]
+    }
+  });
+});
+
+bot.action('deposit_tron', (ctx) => { ctx.answerCbQuery(); ctx.reply(texts.fa.comingSoon); });
+bot.action('deposit_gateway', (ctx) => { ctx.answerCbQuery(); ctx.reply(texts.fa.comingSoon); });
+
+bot.action('deposit_card2card', (ctx) => {
+  ctx.answerCbQuery();
+  const t = texts.fa;
+
+  let cardsMessage = t.depositCardsTrust + '\n\n';
+  DEPOSIT_CARDS.forEach(function (c) {
+    cardsMessage += '`' + c.number + '`' + '\n' + c.owner + '\n\n';
+  });
+
+  ctx.reply(cardsMessage, { parse_mode: 'Markdown' }).then(function () {
+    sessions[ctx.from.id] = { flow: 'deposit', step: 'waiting_amount', lang: 'fa', data: {} };
+    ctx.reply(t.depositAskAmount);
+  });
+});
+
+bot.action('wallet_withdraw', (ctx) => {
+  ctx.answerCbQuery();
+  sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: 'fa', data: {} };
+  ctx.reply(texts.fa.withdrawAskAmount);
+});
+
+bot.action(/^withdraw_card_/, (ctx) => {
+  ctx.answerCbQuery();
+  const cardNumber = ctx.match[0].replace('withdraw_card_', '');
+  const session = sessions[ctx.from.id];
+  const amount = session && session.data ? session.data.amount : null;
+
+  db.prepare(
+    'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(String(ctx.from.id), 'withdraw', amount, cardNumber, 'pending', new Date().toISOString());
+
+  delete sessions[ctx.from.id];
+  ctx.reply(texts.fa.withdrawSubmitted);
+});
+
+bot.action('wallet_addcard', (ctx) => {
+  ctx.answerCbQuery();
+  sessions[ctx.from.id] = { flow: 'addcard', step: 'waiting_card', lang: 'fa', data: {} };
+  ctx.reply(texts.fa.addCardAsk);
+});
 
 bot.action('confirm_rules', (ctx) => {
   ctx.deleteMessage().catch(function () {});
@@ -208,31 +575,6 @@ bot.action(/^admin_reject_/, (ctx) => {
   ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
 });
 
+// Launch Bot
 bot.launch();
 console.log('ربات با موفقیت روشن شد');
-
-const express = require('express');
-const app = express();
-app.get('/', function (req, res) { res.send('Bot is alive!'); });
-app.listen(3000, function () { console.log('Web server is running on port 3000'); });// ==========================================
-// بخش تنظیم واکنش (مخصوص Telegraf / GrammY)
-// ==========================================
-bot.command('setreaction', (ctx) => {
-  const ADMIN_ID = 8231962200;
-
-  // بررسی دسترسی ادمین
-  if (ctx.from?.id !== ADMIN_ID) {
-    return ctx.reply("⚠️ شما دسترسی مدیریت این ربات را ندارید.");
-  }
-
-  // گرفتن ایموجی ارسال شده
-  const textParts = ctx.message.text.split(' ');
-  const emoji = textParts[1];
-
-  if (!emoji) {
-    return ctx.reply("راهنما: لطفاً ایموجی را همراه دستور بفرستید.\nمثال:\n/setreaction 👍");
-  }
-
-  // پاسخ موفقیت‌آمیز
-  return ctx.reply(`✅ ایموجی واکنش با موفقیت روی ${emoji} تنظیم شد.`);
-});
