@@ -1,4 +1,4 @@
-Create repository});
+
 
 bot.action('confirm_rules', (ctx) => {
   ctx.deleteMessage().catch(function () {});
