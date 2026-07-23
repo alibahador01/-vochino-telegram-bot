@@ -67,7 +67,7 @@ db.exec(
 // Set default start reaction if not exists
 const defaultReaction = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
 if (!defaultReaction) {
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('start_reaction', '❤️');
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('start_reaction', '🔥');
 }
 
 // Default Required Channel
@@ -135,7 +135,6 @@ const texts = {
   }
 };
 
-// Clean main menu without extra hardcoded items
 const mainMenuButtons = [
   { key: 'buy', text: '🛒 خرید' },
   { key: 'sell', text: '💸 فروش' },
@@ -214,7 +213,7 @@ bot.command('setreaction', (ctx) => {
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
     const current = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction').value;
-    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n`/setreaction ❤️`', { parse_mode: 'Markdown' });
+    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n`/setreaction 🔥`', { parse_mode: 'Markdown' });
     return;
   }
   const newEmoji = args[1];
@@ -222,14 +221,16 @@ bot.command('setreaction', (ctx) => {
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Safe reaction trigger on start
+// Fixed reaction trigger using proper Bot API method
 async function triggerStartReaction(ctx) {
   try {
     const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
-    const emoji = setting ? setting.value : '❤️';
-    await ctx.setReaction(emoji);
+    const emoji = setting ? setting.value : '🔥';
+    await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
+      reaction: [{ type: 'emoji', emoji: emoji }]
+    });
   } catch (e) {
-    console.log('Reaction note: unable to set reaction automatically (requires chat admin rights or proper bot scope).');
+    console.log('Reaction error details: ' + e.message);
   }
 }
 
