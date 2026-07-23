@@ -57,6 +57,20 @@ db.exec(
   ')'
 );
 
+// Settings table for dynamic configurations (like start reaction, texts, etc.)
+db.exec(
+  'CREATE TABLE IF NOT EXISTS settings (' +
+  'key TEXT PRIMARY KEY, ' +
+  'value TEXT' +
+  ')'
+);
+
+// Set default start reaction if not exists
+const defaultReaction = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
+if (!defaultReaction) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('start_reaction', '❤️');
+}
+
 // Default Required Channel
 const existingChannel = db.prepare('SELECT * FROM required_channels WHERE chat_id = ?').get('-1003953090902');
 if (!existingChannel) {
@@ -131,7 +145,10 @@ const mainMenuButtons = [
   { key: 'referral', text: '🎁 زیرمجموعه' },
   { key: 'support', text: '📞 پشتیبانی' },
   { key: 'rules', text: '📖 قوانین' },
-  { key: 'education', text: '📚 آموزش' }
+  { key: 'education', text: '📚 آموزش' },
+  // گزینه‌های پیشنهادی برای توسعه‌های بعدی (مثل استارز، گیفت کارت، فیلترشکن و...)
+  { key: 'vpn', text: '⚡️ فیلترشکن' },
+  { key: 'stars', text: '⭐ تلگرام استارز' }
 ];
 
 function showMainMenu(ctx) {
@@ -194,6 +211,33 @@ function showJoinPrompt(ctx) {
   ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
 }
 
+// Dynamic Admin Command to set Start Reaction (e.g. /setreaction ❤️)
+bot.command('setreaction', (ctx) => {
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    const current = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction').value;
+    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n`/setreaction ❤️`', { parse_mode: 'Markdown' });
+    return;
+  }
+  const newEmoji = args[1];
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('start_reaction', newEmoji);
+  ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
+});
+
+// Helper function to apply configured reaction on start
+async function triggerStartReaction(ctx) {
+  try {
+    const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
+    const emoji = setting ? setting.value : '❤️';
+    await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
+      reaction: [{ type: 'emoji', emoji: emoji }]
+    });
+  } catch (e) {
+    console.log('Reaction error: ' + e.message);
+  }
+}
+
 bot.action('check_membership', async (ctx) => {
   ctx.answerCbQuery();
   const isMember = await checkMembership(ctx);
@@ -224,6 +268,8 @@ bot.action('check_membership', async (ctx) => {
 });
 
 bot.start(async (ctx) => {
+  triggerStartReaction(ctx);
+
   const isMember = await checkMembership(ctx);
   if (!isMember) {
     showJoinPrompt(ctx);
@@ -304,8 +350,19 @@ bot.action('menu_referral', (ctx) => {
 });
 
 bot.action(/^menu_.+/, (ctx) => {
-  if (ctx.match[0] === 'menu_wallet' || ctx.match[0] === 'menu_referral') return;
+  const actionKey = ctx.match[0];
+  if (actionKey === 'menu_wallet' || actionKey === 'menu_referral') return;
   ctx.answerCbQuery();
+  
+  if (actionKey === 'menu_vpn') {
+    ctx.reply('⚡️ بخش خرید و مدیریت فیلترشکن‌ها به‌زودی از طریق پنل ادمین قابل تنظیم خواهد بود 🛠');
+    return;
+  }
+  if (actionKey === 'menu_stars') {
+    ctx.reply('⭐ بخش تلگرام استارز به‌زودی راه‌اندازی می‌شود 🛠');
+    return;
+  }
+
   ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
 });
 
@@ -474,8 +531,13 @@ function isAdmin(telegramId) {
 
 function showAdminMenu(ctx) {
   const pendingCount = db.prepare('SELECT COUNT(*) AS c FROM wallet_requests WHERE status = ?').get('pending').c;
+  const currentReaction = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction').value;
 
-  ctx.reply('👑 پنل مدیریت\n\nدرخواست‌های در انتظار: ' + pendingCount, {
+  ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
+    '🔹 درخواست‌های در انتظار: ' + pendingCount + '\n' +
+    '🔹 ایموجی اکشن استارت فعلی: ' + currentReaction + '\n\n' +
+    '💡 برای تغییر ایموجی استارت کافیست بفرستید:\n`/setreaction <ایموجی>`', {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [{ text: '📥 درخواست‌های در انتظار کیف پول', callback_data: 'admin_pending' }]
