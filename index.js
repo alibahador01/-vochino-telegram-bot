@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// Initialize Bot & DB
-const bot = new Telegraf(process.env.BOT_TOKEN);
+// Initialize Bot with Direct Token & DB
+const bot = new Telegraf('7954153926:AAH_jZ0-E2zX1K8X5w8z9y2K3L4M5N6O7P8'); // توکن مستقیماً اینجا قرار گرفت
 const db = new Database('bot.db');
 
 // Database Tables Initialization
