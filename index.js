@@ -57,7 +57,6 @@ db.exec(
   ')'
 );
 
-// Settings table for dynamic configurations (like start reaction, texts, etc.)
 db.exec(
   'CREATE TABLE IF NOT EXISTS settings (' +
   'key TEXT PRIMARY KEY, ' +
@@ -146,7 +145,6 @@ const mainMenuButtons = [
   { key: 'support', text: '📞 پشتیبانی' },
   { key: 'rules', text: '📖 قوانین' },
   { key: 'education', text: '📚 آموزش' },
-  // گزینه‌های پیشنهادی برای توسعه‌های بعدی (مثل استارز، گیفت کارت، فیلترشکن و...)
   { key: 'vpn', text: '⚡️ فیلترشکن' },
   { key: 'stars', text: '⭐ تلگرام استارز' }
 ];
@@ -211,7 +209,7 @@ function showJoinPrompt(ctx) {
   ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
 }
 
-// Dynamic Admin Command to set Start Reaction (e.g. /setreaction ❤️)
+// Set reaction command for admin
 bot.command('setreaction', (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
@@ -225,14 +223,12 @@ bot.command('setreaction', (ctx) => {
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Helper function to apply configured reaction on start
+// Helper function to apply configured reaction on start using Telegraf shortcut
 async function triggerStartReaction(ctx) {
   try {
     const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
     const emoji = setting ? setting.value : '❤️';
-    await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
-      reaction: [{ type: 'emoji', emoji: emoji }]
-    });
+    await ctx.setReaction(emoji);
   } catch (e) {
     console.log('Reaction error: ' + e.message);
   }
