@@ -61,7 +61,7 @@ const texts = {
     checkMembershipButton: '✅ عضو شدم',
     stillNotMember: 'هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید، سپس دوباره تلاش کنید.',
 
-    walletTitle: '👛 کیف پول',
+    walletTitle: '🎒 جیب',
     walletBalance: '💰 موجودی فعلی شما: ',
     walletIncrease: '➕ افزایش موجودی',
     walletWithdraw: '💳 برداشت موجودی',
@@ -125,12 +125,13 @@ const texts = {
 };
 
 const mainMenuButtons = [
-  { key: 'profile', text: '👤 پروفایل' },
-  { key: 'buy', text: '🛒 خرید' },
-  { key: 'sell', text: '💸 فروش' },
-  { key: 'wallet', text: '👛 کیف پول' },
-  { key: 'support', text: '📞 پشتیبانی' },
-  { key: 'game', text: '🎮 بازی‌های بونوس' }
+  { key: 'buy', text: '✨ خرید' },
+  { key: 'sell', text: '✨ فروش' },
+  { key: 'wallet', text: '🎒 جیب' },
+  { key: 'profile', text: '🧢 پروفایل' },
+  { key: 'game', text: '🎮 بازی بونوس' },
+  { key: 'rules_education', text: '📚 قوانین و آموزش' },
+  { key: 'support', text: '📥 پشتیبانی' }
 ];
 
 function showMainMenu(ctx) {
@@ -248,7 +249,7 @@ async function triggerStartReaction(ctx) {
       is_big: true
     });
   } catch (e) {
-    console.log('Reaction error details: ' + e.message);
+    console.log('REACTION ERROR: ' + e.message);
   }
 }
 
@@ -523,9 +524,19 @@ bot.action('game_play_basketball', async (ctx) => {
   await playBonusGame(ctx, '🏀');
 });
 
+bot.action('menu_rules', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply(texts.fa.rulesText);
+});
+
+bot.action('menu_education', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply('📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
+});
+
 bot.action(/^menu_.+/, (ctx) => {
   const actionKey = ctx.match[0];
-  const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game'];
+  const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game', 'menu_rules', 'menu_education'];
   if (known.indexOf(actionKey) !== -1) return;
   ctx.answerCbQuery();
   ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
