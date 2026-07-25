@@ -125,16 +125,12 @@ const texts = {
 };
 
 const mainMenuButtons = [
+  { key: 'profile', text: '👤 پروفایل' },
   { key: 'buy', text: '🛒 خرید' },
   { key: 'sell', text: '💸 فروش' },
   { key: 'wallet', text: '👛 کیف پول' },
-  { key: 'invoices', text: '🧾 فاکتورهای من' },
-  { key: 'profile', text: '👤 پروفایل' },
-  { key: 'referral', text: '🎁 زیرمجموعه' },
-  { key: 'game', text: '🎮 بازی و بونوس' },
   { key: 'support', text: '📞 پشتیبانی' },
-  { key: 'rules', text: '📖 قوانین' },
-  { key: 'education', text: '📚 آموزش' }
+  { key: 'game', text: '🎮 بازی‌های بونوس' }
 ];
 
 function showMainMenu(ctx) {
@@ -351,7 +347,8 @@ async function showWalletMenu(ctx) {
       inline_keyboard: [
         [{ text: t.walletIncrease, callback_data: 'wallet_deposit' }],
         [{ text: t.walletWithdraw, callback_data: 'wallet_withdraw' }],
-        [{ text: t.walletAddCard, callback_data: 'wallet_addcard' }]
+        [{ text: t.walletAddCard, callback_data: 'wallet_addcard' }],
+        [{ text: '🧾 گزارش تراکنش‌ها', callback_data: 'menu_invoices' }]
       ]
     }
   });
