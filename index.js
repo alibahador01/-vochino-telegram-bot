@@ -1,86 +1,30 @@
 const { Telegraf, Markup } = require('telegraf');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const express = require('express');
 
 // Express Server for Render Health Check
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => { res.send('Bot is alive!'); });
+app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// Initialize Bot & DB
+// Initialize Bot & PostgreSQL (Supabase) Pool
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const db = new Database('bot.db');
 
-// Database Tables Initialization
-db.exec(
-  'CREATE TABLE IF NOT EXISTS users (' +
-  'telegram_id TEXT PRIMARY KEY, ' +
-  'phone TEXT, ' +
-  'full_name TEXT, ' +
-  'card_number TEXT, ' +
-  'language TEXT, ' +
-  'balance INTEGER DEFAULT 0, ' +
-  'registered_at TEXT' +
-  ')'
-);
-
-db.exec(
-  'CREATE TABLE IF NOT EXISTS cards (' +
-  'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
-  'telegram_id TEXT, ' +
-  'card_number TEXT, ' +
-  'created_at TEXT' +
-  ')'
-);
-
-db.exec(
-  'CREATE TABLE IF NOT EXISTS wallet_requests (' +
-  'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
-  'telegram_id TEXT, ' +
-  'type TEXT, ' +
-  'amount INTEGER, ' +
-  'card_number TEXT, ' +
-  'receipt_file_id TEXT, ' +
-  'status TEXT, ' +
-  'created_at TEXT' +
-  ')'
-);
-
-db.exec(
-  'CREATE TABLE IF NOT EXISTS required_channels (' +
-  'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
-  'chat_id TEXT, ' +
-  'invite_link TEXT, ' +
-  'title TEXT, ' +
-  'active INTEGER DEFAULT 1' +
-  ')'
-);
-
-db.exec(
-  'CREATE TABLE IF NOT EXISTS settings (' +
-  'key TEXT PRIMARY KEY, ' +
-  'value TEXT' +
-  ')'
-);
-
-// Set default start reaction if not exists
-const defaultReaction = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
-if (!defaultReaction) {
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('start_reaction', '❤');
-}
-
-// Default Required Channel
-const existingChannel = db.prepare('SELECT * FROM required_channels WHERE chat_id = ?').get('-1003953090902');
-if (!existingChannel) {
-  db.prepare(
-    'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES (?, ?, ?, 1)'
-  ).run('-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی');
-}
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 const ADMIN_IDS = [8231962200];
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
+
+// ===== تنظیمات بونوس و بازی (اینجا رو هر موقع خواستی تغییر بده) =====
+const BONUS_THRESHOLD = 500000;      // حداقل مجموع خرید برای فعال شدن بونوس
+const BONUS_AMOUNT = 100000;         // مبلغ جایزه در صورت برد (تومان)
+const BONUS_WIN_PROBABILITY = 0.05;  // شانس برد (0.05 یعنی ۵٪ ، تقریباً ۱ از ۲۰ نفر)
+// =======================================================================
 
 // لیست ایموجی‌های مجاز تلگرام برای ری‌اکشن روی پیام (Bot API فقط همین‌ها را قبول می‌کند)
 const ALLOWED_REACTIONS = [
@@ -102,15 +46,15 @@ const DEPOSIT_CARDS = [
 const texts = {
   fa: {
     chooseLanguage: 'زبان خود را انتخاب کنید / Please choose your language:',
-    welcome: 'به ربات خوش آمدید! 🌟',
+    welcome: 'به خانواده‌ی ما خوش اومدی! 🌟\nاینجا با خیال راحت خرید و فروش کن، ما همیشه پشتتیم.',
     requestPhone: 'برای تکمیل ثبت‌نام، لطفاً شماره تلفن خود را با دکمه‌ی زیر ارسال کنید 👇',
     sharePhoneButton: '📱 ارسال شماره تلفن',
     requestName: 'لطفاً نام و نام خانوادگی خود را وارد کنید:',
     requestCard: 'لطفاً شماره کارت بانکی خود را وارد کنید (کارتی که برای واریز استفاده می‌کنید):',
     rulesText: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.',
     confirmRulesButton: '✅ قوانین را می‌پذیرم',
-    registrationSuccess: 'ثبت‌نام شما با موفقیت انجام شد ✅\nسقف خرید روزانه شما: ' + DAILY_LIMIT_TEXT + ' تومان',
-    welcomeBack: 'خوش برگشتید! 👋',
+    registrationSuccess: '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: ' + DAILY_LIMIT_TEXT + ' تومان',
+    welcomeBack: 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋',
 
     mustJoinTitle: 'برای استفاده از ربات، ابتدا باید عضو کانال زیر شوید:',
     joinChannelButton: '📢 عضویت در کانال',
@@ -118,7 +62,7 @@ const texts = {
     stillNotMember: 'هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید، سپس دوباره تلاش کنید.',
 
     walletTitle: '👛 کیف پول',
-    walletBalance: 'موجودی فعلی شما: ',
+    walletBalance: '💰 موجودی فعلی شما: ',
     walletIncrease: '➕ افزایش موجودی',
     walletWithdraw: '💳 برداشت موجودی',
     walletAddCard: '➕ افزودن کارت جدید',
@@ -130,10 +74,10 @@ const texts = {
     depositGateway: '🌐 درگاه پرداخت',
     comingSoon: 'به‌زودی 🙂',
 
-    depositCardsTrust: '✅ پرداخت شما مستقیماً به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر تاکنون از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:',
+    depositCardsTrust: '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:',
     depositAskAmount: 'مبلغ واریزی خود را به تومان وارد کنید:',
     depositAskReceipt: 'رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎',
-    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، موجودی شما به‌روزرسانی خواهد شد.',
+    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی (معمولاً خیلی سریع)، موجودی شما به‌روزرسانی خواهد شد.',
 
     withdrawAskAmount: 'مبلغ برداشت خود را به تومان وارد کنید (حداقل ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان):',
     withdrawMinError: 'حداقل مبلغ برداشت ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان است. لطفاً دوباره وارد کنید:',
@@ -143,7 +87,40 @@ const texts = {
     addCardAsk: 'شماره کارت جدید را وارد کنید (۱۶ رقم):',
     addCardInvalid: 'شماره کارت وارد شده معتبر نیست. لطفاً دوباره تلاش کنید:',
     addCardSuccess: 'کارت جدید با موفقیت ثبت شد ✅',
-    addCardButton: '➕ افزودن کارت جدید'
+    addCardButton: '➕ افزودن کارت جدید',
+
+    profileTitle: '👤 پروفایل شما',
+    invoicesTitle: '🧾 فاکتورهای من',
+    invoicesEmpty: 'هنوز هیچ فاکتوری برای شما ثبت نشده.',
+
+    supportTitle: '📞 پشتیبانی\n\nقبل از تماس، یه نگاه به سوالات متداول بنداز، شاید جوابت همونجا باشه 👇',
+    supportFaqButton: '❓ سوالات متداول',
+    supportContactButton: '💬 ارتباط با پشتیبانی',
+    supportContactText: 'برای ارتباط مستقیم با پشتیبانی، پیام خودتون رو همینجا بنویسید تا در اسرع وقت جواب بگیرید.',
+    faqText:
+      '❓ سوالات متداول\n\n' +
+      '🔹 چقدر طول می‌کشه شارژم تایید بشه؟\n' +
+      'معمولاً چند دقیقه، حداکثر تا چند ساعت.\n\n' +
+      '🔹 حداقل مبلغ برداشت چقدره؟\n' +
+      MIN_WITHDRAW.toLocaleString('en-US') + ' تومان.\n\n' +
+      '🔹 آیا واریزی از کارت دیگران قبوله؟\n' +
+      'نه، فقط از کارتی که به نام خودتون ثبت شده.\n\n' +
+      '🔹 بونوس بازی چطور فعال می‌شه؟\n' +
+      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس بازی برات فعال می‌شه.',
+
+    gameMenuTitle: '🎮 بازی و بونوس',
+    gameNotEligible:
+      '🔒 هنوز بونوس بازی برات فعال نشده.\n\n' +
+      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی می‌گیری که می‌تونی باهاش بازی کنی و ببری! 🎁',
+    gameEligibleIntro:
+      '🎁 تبریک! یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی داری.\n' +
+      'یکی از بازی‌های زیر رو انتخاب کن و شانستو امتحان کن. اگه ببری، مبلغ مستقیم میاد تو موجودیت و می‌تونی همون لحظه برداشت بزنی 💸',
+    gameAlreadyUsed: 'بونوس بازیت رو قبلاً استفاده کردی. با رسیدن به سقف خرید بعدی، دوباره یه بونوس جدید فعال می‌شه.',
+    gameDiceButton: '🎲 بازی تاس',
+    gameBasketballButton: '🏀 بازی بسکتبال',
+    gamePlaying: '🎲 در حال بازی... منتظر بمون تا نتیجه مشخص بشه...',
+    gameWin: '🎉🎉 تبریک، بردی!!\nمبلغ ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومان به موجودیت اضافه شد. می‌تونی همین الان برداشت بزنی 💸',
+    gameLose: '😔 این بار نبردی، بونوست مصرف شد.\nنگران نباش، با خرید بعدیت دوباره شانس داری!'
   }
 };
 
@@ -151,9 +128,10 @@ const mainMenuButtons = [
   { key: 'buy', text: '🛒 خرید' },
   { key: 'sell', text: '💸 فروش' },
   { key: 'wallet', text: '👛 کیف پول' },
-  { key: 'orders', text: '📦 سفارش‌های من' },
-  { key: 'account', text: '👤 حساب کاربری' },
+  { key: 'invoices', text: '🧾 فاکتورهای من' },
+  { key: 'profile', text: '👤 پروفایل' },
   { key: 'referral', text: '🎁 زیرمجموعه' },
+  { key: 'game', text: '🎮 بازی و بونوس' },
   { key: 'support', text: '📞 پشتیبانی' },
   { key: 'rules', text: '📖 قوانین' },
   { key: 'education', text: '📚 آموزش' }
@@ -174,23 +152,25 @@ function showMainMenu(ctx) {
 
 const sessions = {};
 
-function getUser(telegramId) {
-  return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(String(telegramId));
+async function getUser(telegramId) {
+  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
+  return res.rows[0] || null;
 }
 
-function getUserCards(telegramId) {
-  const user = getUser(telegramId);
-  const extraCards = db.prepare('SELECT * FROM cards WHERE telegram_id = ?').all(String(telegramId));
+async function getUserCards(telegramId) {
+  const user = await getUser(telegramId);
+  const extraRes = await pool.query('SELECT * FROM cards WHERE telegram_id = $1', [String(telegramId)]);
   const list = [];
   if (user && user.card_number) {
     list.push({ card_number: user.card_number });
   }
-  extraCards.forEach(function (c) { list.push({ card_number: c.card_number }); });
+  extraRes.rows.forEach(function (c) { list.push({ card_number: c.card_number }); });
   return list;
 }
 
 async function checkMembership(ctx) {
-  const channels = db.prepare('SELECT * FROM required_channels WHERE active = 1').all();
+  const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
+  const channels = channelsRes.rows;
   if (channels.length === 0) return true;
 
   for (const channel of channels) {
@@ -207,9 +187,10 @@ async function checkMembership(ctx) {
   return true;
 }
 
-function showJoinPrompt(ctx) {
+async function showJoinPrompt(ctx) {
   const t = texts.fa;
-  const channels = db.prepare('SELECT * FROM required_channels WHERE active = 1').all();
+  const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
+  const channels = channelsRes.rows;
 
   const buttons = channels.map(function (c) {
     return [{ text: t.joinChannelButton, url: c.invite_link }];
@@ -219,12 +200,13 @@ function showJoinPrompt(ctx) {
   ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
 }
 
-// Set reaction command for admin — حالا قبل از ذخیره، ایموجی را با تست واقعی روی همین پیام بررسی می‌کند
+// Set reaction command for admin
 bot.command('setreaction', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
-    const current = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction').value;
+    const currentRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
+    const current = currentRes.rows[0] ? currentRes.rows[0].value : '🔥';
     ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n`/setreaction 🔥`', { parse_mode: 'Markdown' });
     return;
   }
@@ -232,36 +214,37 @@ bot.command('setreaction', async (ctx) => {
 
   if (ALLOWED_REACTIONS.indexOf(newEmoji) === -1) {
     ctx.reply(
-      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست (تلگرام فقط یک لیست ثابت را قبول می‌کند).\n' +
-      'چند نمونه‌ی مجاز:\n❤ 🔥 👍 🎉 🥰 😍 👏 💯 💔 🙏 😢 🤩 😱 😈'
+      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست (تلگرام فقط یک لیست ثابت را قبول می‌کند، متأسفانه ایموجی پول/دلار جزو این لیست نیست).\n' +
+      'چند نمونه‌ی مجاز که حس هیجان و خوشحالی می‌دن:\n🎉 🔥 🤩 💯 🏆 ❤ 👏'
     );
     return;
   }
 
   try {
-    // تست واقعی: همین ایموجی را روی پیام /setreaction خود ادمین می‌زند تا مطمئن شویم تلگرام آن را قبول می‌کند
     await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
       reaction: [{ type: 'emoji', emoji: newEmoji }],
       is_big: true
     });
   } catch (e) {
-    ctx.reply('⚠️ تلگرام این ایموجی را نپذیرفت. یک ایموجی دیگر از لیست مجاز امتحان کنید.');
+    ctx.reply('⚠️ خطای واقعی: ' + e.message);
     return;
   }
 
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('start_reaction', newEmoji);
+  await pool.query(
+    'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+    ['start_reaction', newEmoji]
+  );
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Fixed reaction trigger — با افکت بزرگ (پخش‌شدن قلب‌ها مثل عکسی که فرستادی) و ایموجی fallback معتبر
+// Fixed reaction trigger — با افکت بزرگ
 async function triggerStartReaction(ctx) {
   try {
-    const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction');
-    let emoji = setting ? setting.value : '❤';
+    const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
+    let emoji = settingRes.rows[0] ? settingRes.rows[0].value : '🎉';
 
-    // اگر به هر دلیلی مقدار ذخیره‌شده در دیتابیس نامعتبر شده باشد، به ❤ برمی‌گردیم
     if (ALLOWED_REACTIONS.indexOf(emoji) === -1) {
-      emoji = '❤';
+      emoji = '🎉';
     }
 
     await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
@@ -283,7 +266,7 @@ bot.action('check_membership', async (ctx) => {
   }
 
   ctx.deleteMessage().catch(function () {});
-  const existingUser = getUser(ctx.from.id);
+  const existingUser = await getUser(ctx.from.id);
   if (existingUser) {
     const lang = existingUser.language || 'fa';
     ctx.reply(texts[lang].welcomeBack);
@@ -307,11 +290,11 @@ bot.start(async (ctx) => {
 
   const isMember = await checkMembership(ctx);
   if (!isMember) {
-    showJoinPrompt(ctx);
+    await showJoinPrompt(ctx);
     return;
   }
 
-  const existingUser = getUser(ctx.from.id);
+  const existingUser = await getUser(ctx.from.id);
   if (existingUser) {
     const lang = existingUser.language || 'fa';
     ctx.reply(texts[lang].welcomeBack);
@@ -358,12 +341,12 @@ bot.on('contact', (ctx) => {
   ctx.reply(t.requestName, { reply_markup: { remove_keyboard: true } });
 });
 
-function showWalletMenu(ctx) {
+async function showWalletMenu(ctx) {
   const t = texts.fa;
-  const user = getUser(ctx.from.id);
+  const user = await getUser(ctx.from.id);
   const balance = user ? user.balance : 0;
 
-  ctx.reply(t.walletTitle + '\n\n' + t.walletBalance + balance.toLocaleString('en-US') + ' تومان', {
+  ctx.reply(t.walletTitle + '\n\n' + t.walletBalance + Number(balance).toLocaleString('en-US') + ' تومان', {
     reply_markup: {
       inline_keyboard: [
         [{ text: t.walletIncrease, callback_data: 'wallet_deposit' }],
@@ -374,9 +357,9 @@ function showWalletMenu(ctx) {
   });
 }
 
-bot.action('menu_wallet', (ctx) => {
+bot.action('menu_wallet', async (ctx) => {
   ctx.answerCbQuery();
-  showWalletMenu(ctx);
+  await showWalletMenu(ctx);
 });
 
 bot.action('menu_referral', (ctx) => {
@@ -384,9 +367,169 @@ bot.action('menu_referral', (ctx) => {
   ctx.reply('به‌زودی 🙂');
 });
 
+bot.action('menu_profile', async (ctx) => {
+  ctx.answerCbQuery();
+  const t = texts.fa;
+  const user = await getUser(ctx.from.id);
+  if (!user) {
+    ctx.reply('اطلاعاتی برای شما ثبت نشده.');
+    return;
+  }
+  ctx.reply(
+    t.profileTitle + '\n\n' +
+    '👤 نام: ' + (user.full_name || '-') + '\n' +
+    '📱 شماره تلفن: ' + (user.phone || '-') + '\n' +
+    '💳 شماره کارت: ' + (user.card_number || '-') + '\n' +
+    '💰 موجودی: ' + Number(user.balance).toLocaleString('en-US') + ' تومان'
+  );
+});
+
+bot.action('menu_invoices', async (ctx) => {
+  ctx.answerCbQuery();
+  const t = texts.fa;
+  const res = await pool.query(
+    'SELECT * FROM wallet_requests WHERE telegram_id = $1 ORDER BY id DESC LIMIT 10',
+    [String(ctx.from.id)]
+  );
+  if (res.rows.length === 0) {
+    ctx.reply(t.invoicesTitle + '\n\n' + t.invoicesEmpty);
+    return;
+  }
+  let message = t.invoicesTitle + '\n\n';
+  res.rows.forEach(function (r) {
+    const typeLabel = r.type === 'deposit' ? '➕ شارژ' : '💳 برداشت';
+    const statusLabel = r.status === 'pending' ? '⏳ در انتظار' : (r.status === 'approved' ? '✅ تایید شده' : '❌ رد شده');
+    message += typeLabel + ' | ' + Number(r.amount).toLocaleString('en-US') + ' تومان | ' + statusLabel + '\n';
+  });
+  ctx.reply(message);
+});
+
+bot.action('menu_support', (ctx) => {
+  ctx.answerCbQuery();
+  const t = texts.fa;
+  ctx.reply(t.supportTitle, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: t.supportFaqButton, callback_data: 'support_faq' }],
+        [{ text: t.supportContactButton, callback_data: 'support_contact' }]
+      ]
+    }
+  });
+});
+
+bot.action('support_faq', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply(texts.fa.faqText);
+});
+
+bot.action('support_contact', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply(texts.fa.supportContactText);
+});
+
+async function getUserTotalApprovedDeposits(telegramId) {
+  const res = await pool.query(
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM wallet_requests WHERE telegram_id = $1 AND type = 'deposit' AND status = 'approved'",
+    [String(telegramId)]
+  );
+  return Number(res.rows[0].total);
+}
+
+async function getActiveBonus(telegramId) {
+  const res = await pool.query(
+    "SELECT * FROM bonuses WHERE telegram_id = $1 AND status = 'available' ORDER BY id DESC LIMIT 1",
+    [String(telegramId)]
+  );
+  return res.rows[0] || null;
+}
+
+async function grantBonusIfEligible(telegramId) {
+  const total = await getUserTotalApprovedDeposits(telegramId);
+  if (total < BONUS_THRESHOLD) return;
+
+  const existing = await pool.query(
+    'SELECT * FROM bonuses WHERE telegram_id = $1',
+    [String(telegramId)]
+  );
+  if (existing.rows.length > 0) return; // فقط یک‌بار در کل عمر کاربر
+
+  await pool.query(
+    'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
+    [String(telegramId), 'available', BONUS_AMOUNT, new Date().toISOString()]
+  );
+}
+
+bot.action('menu_game', async (ctx) => {
+  ctx.answerCbQuery();
+  const t = texts.fa;
+  const bonus = await getActiveBonus(ctx.from.id);
+
+  if (!bonus) {
+    const hasAnyBonus = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1', [String(ctx.from.id)]);
+    if (hasAnyBonus.rows.length > 0) {
+      ctx.reply(t.gameAlreadyUsed);
+    } else {
+      ctx.reply(t.gameNotEligible);
+    }
+    return;
+  }
+
+  ctx.reply(t.gameEligibleIntro, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: t.gameDiceButton, callback_data: 'game_play_dice' }],
+        [{ text: t.gameBasketballButton, callback_data: 'game_play_basketball' }]
+      ]
+    }
+  });
+});
+
+async function playBonusGame(ctx, emoji) {
+  const t = texts.fa;
+  const bonus = await getActiveBonus(ctx.from.id);
+  if (!bonus) {
+    ctx.reply(t.gameAlreadyUsed);
+    return;
+  }
+
+  // بلافاصله وضعیت بونوس رو قفل می‌کنیم تا کسی نتونه دوبار بازی کنه
+  await pool.query("UPDATE bonuses SET status = 'in_progress' WHERE id = $1", [bonus.id]);
+
+  await ctx.reply(t.gamePlaying);
+  await ctx.sendDice({ emoji: emoji }).catch(function () {});
+
+  const won = Math.random() < BONUS_WIN_PROBABILITY;
+
+  setTimeout(async function () {
+    try {
+      if (won) {
+        await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [BONUS_AMOUNT, String(ctx.from.id)]);
+        await pool.query("UPDATE bonuses SET status = 'used_won' WHERE id = $1", [bonus.id]);
+        ctx.reply(t.gameWin);
+      } else {
+        await pool.query("UPDATE bonuses SET status = 'used_lost' WHERE id = $1", [bonus.id]);
+        ctx.reply(t.gameLose);
+      }
+    } catch (e) {
+      console.log('Game settlement error: ' + e.message);
+    }
+  }, 4000);
+}
+
+bot.action('game_play_dice', async (ctx) => {
+  ctx.answerCbQuery();
+  await playBonusGame(ctx, '🎲');
+});
+
+bot.action('game_play_basketball', async (ctx) => {
+  ctx.answerCbQuery();
+  await playBonusGame(ctx, '🏀');
+});
+
 bot.action(/^menu_.+/, (ctx) => {
   const actionKey = ctx.match[0];
-  if (actionKey === 'menu_wallet' || actionKey === 'menu_referral') return;
+  const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game'];
+  if (known.indexOf(actionKey) !== -1) return;
   ctx.answerCbQuery();
   ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
 });
@@ -429,15 +572,16 @@ bot.action('wallet_withdraw', (ctx) => {
   ctx.reply(texts.fa.withdrawAskAmount);
 });
 
-bot.action(/^withdraw_card_/, (ctx) => {
+bot.action(/^withdraw_card_/, async (ctx) => {
   ctx.answerCbQuery();
   const cardNumber = ctx.match[0].replace('withdraw_card_', '');
   const session = sessions[ctx.from.id];
   const amount = session && session.data ? session.data.amount : null;
 
-  db.prepare(
-    'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(String(ctx.from.id), 'withdraw', amount, cardNumber, 'pending', new Date().toISOString());
+  await pool.query(
+    'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+    [String(ctx.from.id), 'withdraw', amount, cardNumber, 'pending', new Date().toISOString()]
+  );
 
   delete sessions[ctx.from.id];
   ctx.reply(texts.fa.withdrawSubmitted);
@@ -455,7 +599,7 @@ bot.action('confirm_rules', (ctx) => {
   showMainMenu(ctx);
 });
 
-bot.on('text', (ctx, next) => {
+bot.on('text', async (ctx, next) => {
   const session = sessions[ctx.from.id];
   if (!session) return next();
 
@@ -472,9 +616,13 @@ bot.on('text', (ctx, next) => {
     if (session.step === 'waiting_card') {
       session.data.cardNumber = ctx.message.text;
 
-      db.prepare(
-        'INSERT OR REPLACE INTO users (telegram_id, phone, full_name, card_number, language, balance, registered_at) VALUES (?, ?, ?, ?, ?, 0, ?)'
-      ).run(String(ctx.from.id), session.data.phone, session.data.fullName, session.data.cardNumber, session.lang, new Date().toISOString());
+      await pool.query(
+        'INSERT INTO users (telegram_id, phone, full_name, card_number, language, balance, registered_at) ' +
+        'VALUES ($1, $2, $3, $4, $5, 0, $6) ' +
+        'ON CONFLICT (telegram_id) DO UPDATE SET phone = EXCLUDED.phone, full_name = EXCLUDED.full_name, ' +
+        'card_number = EXCLUDED.card_number, language = EXCLUDED.language',
+        [String(ctx.from.id), session.data.phone, session.data.fullName, session.data.cardNumber, session.lang, new Date().toISOString()]
+      );
 
       ctx.reply(t.registrationSuccess).then(function () {
         ctx.reply(t.rulesText, {
@@ -506,7 +654,7 @@ bot.on('text', (ctx, next) => {
 
     session.data.amount = amount;
 
-    const cards = getUserCards(ctx.from.id);
+    const cards = await getUserCards(ctx.from.id);
     const buttons = cards.map(function (c) {
       return [{ text: c.card_number, callback_data: 'withdraw_card_' + c.card_number }];
     });
@@ -524,9 +672,10 @@ bot.on('text', (ctx, next) => {
       return;
     }
 
-    db.prepare(
-      'INSERT INTO cards (telegram_id, card_number, created_at) VALUES (?, ?, ?)'
-    ).run(String(ctx.from.id), cardNumber, new Date().toISOString());
+    await pool.query(
+      'INSERT INTO cards (telegram_id, card_number, created_at) VALUES ($1, $2, $3)',
+      [String(ctx.from.id), cardNumber, new Date().toISOString()]
+    );
 
     delete sessions[ctx.from.id];
     ctx.reply(t.addCardSuccess);
@@ -534,7 +683,7 @@ bot.on('text', (ctx, next) => {
   }
 });
 
-bot.on('photo', (ctx) => {
+bot.on('photo', async (ctx) => {
   const session = sessions[ctx.from.id];
   if (!session || session.flow !== 'deposit' || session.step !== 'waiting_receipt') return;
 
@@ -542,9 +691,10 @@ bot.on('photo', (ctx) => {
   const photos = ctx.message.photo;
   const fileId = photos[photos.length - 1].file_id;
 
-  db.prepare(
-    'INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(String(ctx.from.id), 'deposit', session.data.amount, fileId, 'pending', new Date().toISOString());
+  await pool.query(
+    'INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+    [String(ctx.from.id), 'deposit', session.data.amount, fileId, 'pending', new Date().toISOString()]
+  );
 
   delete sessions[ctx.from.id];
   ctx.reply(t.depositSubmitted);
@@ -554,9 +704,11 @@ function isAdmin(telegramId) {
   return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
 }
 
-function showAdminMenu(ctx) {
-  const pendingCount = db.prepare('SELECT COUNT(*) AS c FROM wallet_requests WHERE status = ?').get('pending').c;
-  const currentReaction = db.prepare('SELECT value FROM settings WHERE key = ?').get('start_reaction').value;
+async function showAdminMenu(ctx) {
+  const pendingRes = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
+  const pendingCount = pendingRes.rows[0].c;
+  const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
+  const currentReaction = settingRes.rows[0] ? settingRes.rows[0].value : '🔥';
 
   ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
     '🔹 درخواست‌های در انتظار: ' + pendingCount + '\n' +
@@ -571,24 +723,25 @@ function showAdminMenu(ctx) {
   });
 }
 
-bot.command('admin', (ctx) => {
+bot.command('admin', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
-  showAdminMenu(ctx);
+  await showAdminMenu(ctx);
 });
 
-bot.action('admin_pending', (ctx) => {
+bot.action('admin_pending', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
 
-  const pendingRequests = db.prepare('SELECT * FROM wallet_requests WHERE status = ? ORDER BY id ASC').all('pending');
+  const pendingRes = await pool.query("SELECT * FROM wallet_requests WHERE status = 'pending' ORDER BY id ASC");
+  const pendingRequests = pendingRes.rows;
 
   if (pendingRequests.length === 0) {
     ctx.reply('در حال حاضر هیچ درخواست در انتظاری وجود ندارد ✅');
     return;
   }
 
-  pendingRequests.forEach(function (req) {
-    const user = getUser(req.telegram_id);
+  for (const req of pendingRequests) {
+    const user = await getUser(req.telegram_id);
     const userName = user ? user.full_name : 'نامشخص';
     const typeLabel = req.type === 'deposit' ? '➕ افزایش موجودی' : '💳 برداشت موجودی';
 
@@ -608,22 +761,23 @@ bot.action('admin_pending', (ctx) => {
     ];
 
     if (req.type === 'deposit' && req.receipt_file_id) {
-      ctx.replyWithPhoto(req.receipt_file_id, {
+      await ctx.replyWithPhoto(req.receipt_file_id, {
         caption: message,
         reply_markup: { inline_keyboard: buttons }
       });
     } else {
-      ctx.reply(message, { reply_markup: { inline_keyboard: buttons } });
+      await ctx.reply(message, { reply_markup: { inline_keyboard: buttons } });
     }
-  });
+  }
 });
 
-bot.action(/^admin_approve_/, (ctx) => {
+bot.action(/^admin_approve_/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
 
   const requestId = ctx.match[0].replace('admin_approve_', '');
-  const request = db.prepare('SELECT * FROM wallet_requests WHERE id = ?').get(requestId);
+  const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+  const request = reqRes.rows[0];
 
   if (!request || request.status !== 'pending') {
     ctx.reply('این درخواست قبلاً بررسی شده است.');
@@ -631,37 +785,119 @@ bot.action(/^admin_approve_/, (ctx) => {
   }
 
   if (request.type === 'deposit') {
-    db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?').run(request.amount, request.telegram_id);
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [request.amount, request.telegram_id]);
     bot.telegram.sendMessage(request.telegram_id, '✅ شارژ کیف پول شما تایید شد.\nمبلغ ' + Number(request.amount).toLocaleString('en-US') + ' تومان به موجودی شما اضافه شد.');
+    await grantBonusIfEligible(request.telegram_id);
   } else {
-    db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id = ?').run(request.amount, request.telegram_id);
+    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [request.amount, request.telegram_id]);
     bot.telegram.sendMessage(request.telegram_id, '✅ درخواست برداشت شما تایید شد.\nمبلغ ' + Number(request.amount).toLocaleString('en-US') + ' تومان به کارت شما واریز شد.');
   }
 
-  db.prepare('UPDATE wallet_requests SET status = ? WHERE id = ?').run('approved', requestId);
+  await pool.query("UPDATE wallet_requests SET status = 'approved' WHERE id = $1", [requestId]);
 
   ctx.reply('درخواست شماره ' + requestId + ' تایید شد ✅');
 });
 
-bot.action(/^admin_reject_/, (ctx) => {
+bot.action(/^admin_reject_/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
 
   const requestId = ctx.match[0].replace('admin_reject_', '');
-  const request = db.prepare('SELECT * FROM wallet_requests WHERE id = ?').get(requestId);
+  const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+  const request = reqRes.rows[0];
 
   if (!request || request.status !== 'pending') {
     ctx.reply('این درخواست قبلاً بررسی شده است.');
     return;
   }
 
-  db.prepare('UPDATE wallet_requests SET status = ? WHERE id = ?').run('rejected', requestId);
+  await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [requestId]);
 
   bot.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.');
 
   ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
 });
 
-// Launch Bot
-bot.launch();
-console.log('ربات با موفقیت روشن شد');
+// راه‌اندازی جداول دیتابیس و مقادیر پیش‌فرض، سپس روشن کردن ربات
+async function init() {
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS users (' +
+    'telegram_id TEXT PRIMARY KEY, ' +
+    'phone TEXT, ' +
+    'full_name TEXT, ' +
+    'card_number TEXT, ' +
+    'language TEXT, ' +
+    'balance INTEGER DEFAULT 0, ' +
+    'registered_at TEXT' +
+    ')'
+  );
+
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS cards (' +
+    'id SERIAL PRIMARY KEY, ' +
+    'telegram_id TEXT, ' +
+    'card_number TEXT, ' +
+    'created_at TEXT' +
+    ')'
+  );
+
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS wallet_requests (' +
+    'id SERIAL PRIMARY KEY, ' +
+    'telegram_id TEXT, ' +
+    'type TEXT, ' +
+    'amount INTEGER, ' +
+    'card_number TEXT, ' +
+    'receipt_file_id TEXT, ' +
+    'status TEXT, ' +
+    'created_at TEXT' +
+    ')'
+  );
+
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS required_channels (' +
+    'id SERIAL PRIMARY KEY, ' +
+    'chat_id TEXT, ' +
+    'invite_link TEXT, ' +
+    'title TEXT, ' +
+    'active INTEGER DEFAULT 1' +
+    ')'
+  );
+
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS settings (' +
+    'key TEXT PRIMARY KEY, ' +
+    'value TEXT' +
+    ')'
+  );
+
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS bonuses (' +
+    'id SERIAL PRIMARY KEY, ' +
+    'telegram_id TEXT, ' +
+    'status TEXT, ' +
+    'amount INTEGER, ' +
+    'created_at TEXT' +
+    ')'
+  );
+
+  const defaultReactionRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
+  if (defaultReactionRes.rows.length === 0) {
+    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['start_reaction', '🎉']);
+  }
+
+  const existingChannelRes = await pool.query('SELECT * FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
+  if (existingChannelRes.rows.length === 0) {
+    await pool.query(
+      'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
+      ['-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی']
+    );
+  }
+
+  bot.launch();
+  console.log('ربات با موفقیت به Supabase متصل و روشن شد');
+}
+
+init().catch(function (e) {
+  console.log('خطا در راه‌اندازی: ' + e.message);
+});
