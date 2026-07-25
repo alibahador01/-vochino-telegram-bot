@@ -20,13 +20,12 @@ const ADMIN_IDS = [8231962200];
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 
-// ===== تنظیمات بونوس و بازی (اینجا رو هر موقع خواستی تغییر بده) =====
-const BONUS_THRESHOLD = 500000;      // حداقل مجموع خرید برای فعال شدن بونوس
+// ===== تنظیمات بونوس و بازی =====
+const BONUS_THRESHOLD = 500000;      // حداقل مجموع خرید برای فعال شدن بونوس (۵۰۰ هزار تومان)
 const BONUS_AMOUNT = 100000;         // مبلغ جایزه در صورت برد (تومان)
-const BONUS_WIN_PROBABILITY = 0.05;  // شانس برد (0.05 یعنی ۵٪ ، تقریباً ۱ از ۲۰ نفر)
-// =======================================================================
+const BONUS_WIN_PROBABILITY = 0.05;  // شانس برد (۵٪ - مدیریت ریسک برای جلوگیری از سود بی‌رویه)
+// ===================================
 
-// لیست ایموجی‌های مجاز تلگرام برای ری‌اکشن روی پیام (Bot API فقط همین‌ها را قبول می‌کند)
 const ALLOWED_REACTIONS = [
   '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱',
   '🤬', '😢', '🎉', '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡',
@@ -51,7 +50,7 @@ const texts = {
     sharePhoneButton: '📱 ارسال شماره تلفن',
     requestName: 'لطفاً نام و نام خانوادگی خود را وارد کنید:',
     requestCard: 'لطفاً شماره کارت بانکی خود را وارد کنید (کارتی که برای واریز استفاده می‌کنید):',
-    rulesText: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.',
+    rulesText: 'قوانین و شرایط استفاده:\n\n۱. واریزی باید صرفاً از کارتی که به نام خودتان است انجام شود.\n۲. حداقل مبلغ برداشت ۱۰۰,۰۰۰ تومان می‌باشد.\n۳. مسئولیت حفظ اطلاعات حساب کاربری به عهده خود کاربر است.',
     confirmRulesButton: '✅ قوانین را می‌پذیرم',
     registrationSuccess: '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: ' + DAILY_LIMIT_TEXT + ' تومان',
     welcomeBack: 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋',
@@ -77,7 +76,7 @@ const texts = {
     depositCardsTrust: '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:',
     depositAskAmount: 'مبلغ واریزی خود را به تومان وارد کنید:',
     depositAskReceipt: 'رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎',
-    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی (معمولاً خیلی سریع)، موجودی شما به‌روزرسانی خواهد شد.',
+    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، موجودی شما به‌روزرسانی خواهد شد.',
 
     withdrawAskAmount: 'مبلغ برداشت خود را به تومان وارد کنید (حداقل ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان):',
     withdrawMinError: 'حداقل مبلغ برداشت ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان است. لطفاً دوباره وارد کنید:',
@@ -106,31 +105,34 @@ const texts = {
       '🔹 آیا واریزی از کارت دیگران قبوله؟\n' +
       'نه، فقط از کارتی که به نام خودتون ثبت شده.\n\n' +
       '🔹 بونوس بازی چطور فعال می‌شه؟\n' +
-      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس بازی برات فعال می‌شه.',
+      'با رسیدن مجموع شارژت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس بازی برات فعال می‌شه.',
 
     gameMenuTitle: '🎮 بازی و بونوس',
     gameNotEligible:
       '🔒 هنوز بونوس بازی برات فعال نشده.\n\n' +
-      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی می‌گیری که می‌تونی باهاش بازی کنی و ببری! 🎁',
+      'با رسیدن مجموع شارژت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی می‌گیری که می‌تونی باهاش بازی کنی و ببری! 🎁',
     gameEligibleIntro:
       '🎁 تبریک! یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی داری.\n' +
       'یکی از بازی‌های زیر رو انتخاب کن و شانستو امتحان کن. اگه ببری، مبلغ مستقیم میاد تو موجودیت و می‌تونی همون لحظه برداشت بزنی 💸',
-    gameAlreadyUsed: 'بونوس بازیت رو قبلاً استفاده کردی. با رسیدن به سقف خرید بعدی، دوباره یه بونوس جدید فعال می‌شه.',
+    gameAlreadyUsed: 'بونوس بازیت رو قبلاً استفاده کردی. با رسیدن به سقف شارژ بعدی، دوباره یه بونوس جدید فعال می‌شه.',
     gameDiceButton: '🎲 بازی تاس',
     gameBasketballButton: '🏀 بازی بسکتبال',
     gamePlaying: '🎲 در حال بازی... منتظر بمون تا نتیجه مشخص بشه...',
     gameWin: '🎉🎉 تبریک، بردی!!\nمبلغ ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومان به موجودیت اضافه شد. می‌تونی همین الان برداشت بزنی 💸',
-    gameLose: '😔 این بار نبردی، بونوست مصرف شد.\nنگران نباش، با خرید بعدیت دوباره شانس داری!'
+    gameLose: '😔 این بار نبردی، بونوست مصرف شد.\nنگران نباش، با شارژ بعدیت دوباره شانس داری!'
   }
 };
 
+// ===== منوی اصلی جدید و مرتب بر اساس خواسته شما =====
 const mainMenuButtons = [
-  { key: 'profile', text: '👤 پروفایل' },
   { key: 'buy', text: '🛒 خرید' },
   { key: 'sell', text: '💸 فروش' },
   { key: 'wallet', text: '👛 کیف پول' },
+  { key: 'profile', text: '👤 پروفایل' },
   { key: 'support', text: '📞 پشتیبانی' },
-  { key: 'game', text: '🎮 بازی‌های بونوس' }
+  { key: 'game', text: '🎮 بازی‌های بونوس' },
+  { key: 'rules', text: '📜 قوانین' },
+  { key: 'tutorial', text: '📖 آموزش' }
 ];
 
 function showMainMenu(ctx) {
@@ -143,7 +145,7 @@ function showMainMenu(ctx) {
     }
     rows.push(row);
   }
-  ctx.reply('منوی اصلی 🏠', { reply_markup: { inline_keyboard: rows } });
+  ctx.reply('منوی اصلی 🏠\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', { reply_markup: { inline_keyboard: rows } });
 }
 
 const sessions = {};
@@ -196,23 +198,19 @@ async function showJoinPrompt(ctx) {
   ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
 }
 
-// Set reaction command for admin
 bot.command('setreaction', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
     const currentRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
     const current = currentRes.rows[0] ? currentRes.rows[0].value : '🔥';
-    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n`/setreaction 🔥`', { parse_mode: 'Markdown' });
+    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current, { parse_mode: 'Markdown' });
     return;
   }
   const newEmoji = args[1];
 
   if (ALLOWED_REACTIONS.indexOf(newEmoji) === -1) {
-    ctx.reply(
-      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست (تلگرام فقط یک لیست ثابت را قبول می‌کند، متأسفانه ایموجی پول/دلار جزو این لیست نیست).\n' +
-      'چند نمونه‌ی مجاز که حس هیجان و خوشحالی می‌دن:\n🎉 🔥 🤩 💯 🏆 ❤ 👏'
-    );
+    ctx.reply('⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست.');
     return;
   }
 
@@ -222,7 +220,7 @@ bot.command('setreaction', async (ctx) => {
       is_big: true
     });
   } catch (e) {
-    ctx.reply('⚠️ خطای واقعی: ' + e.message);
+    ctx.reply('⚠️ خطا: ' + e.message);
     return;
   }
 
@@ -233,22 +231,18 @@ bot.command('setreaction', async (ctx) => {
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Fixed reaction trigger — با افکت بزرگ
 async function triggerStartReaction(ctx) {
   try {
     const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
     let emoji = settingRes.rows[0] ? settingRes.rows[0].value : '🎉';
-
-    if (ALLOWED_REACTIONS.indexOf(emoji) === -1) {
-      emoji = '🎉';
-    }
+    if (ALLOWED_REACTIONS.indexOf(emoji) === -1) emoji = '🎉';
 
     await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, {
       reaction: [{ type: 'emoji', emoji: emoji }],
       is_big: true
     });
   } catch (e) {
-    console.log('Reaction error details: ' + e.message);
+    console.log('Reaction error: ' + e.message);
   }
 }
 
@@ -264,17 +258,13 @@ bot.action('check_membership', async (ctx) => {
   ctx.deleteMessage().catch(function () {});
   const existingUser = await getUser(ctx.from.id);
   if (existingUser) {
-    const lang = existingUser.language || 'fa';
-    ctx.reply(texts[lang].welcomeBack);
+    ctx.reply(texts.fa.welcomeBack);
     showMainMenu(ctx);
   } else {
     ctx.reply(texts.fa.chooseLanguage, {
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
-            { text: '🇬🇧 English', callback_data: 'lang_en' }
-          ]
+          [{ text: '🇮🇷 فارسی', callback_data: 'lang_fa' }, { text: '🇬🇧 English', callback_data: 'lang_en' }]
         ]
       }
     });
@@ -292,8 +282,7 @@ bot.start(async (ctx) => {
 
   const existingUser = await getUser(ctx.from.id);
   if (existingUser) {
-    const lang = existingUser.language || 'fa';
-    ctx.reply(texts[lang].welcomeBack);
+    ctx.reply(texts.fa.welcomeBack);
     showMainMenu(ctx);
     return;
   }
@@ -301,10 +290,7 @@ bot.start(async (ctx) => {
   ctx.reply(texts.fa.chooseLanguage, {
     reply_markup: {
       inline_keyboard: [
-        [
-          { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
-          { text: '🇬🇧 English', callback_data: 'lang_en' }
-        ]
+        [{ text: '🇮🇷 فارسی', callback_data: 'lang_fa' }, { text: '🇬🇧 English', callback_data: 'lang_en' }]
       ]
     }
   });
@@ -348,7 +334,8 @@ async function showWalletMenu(ctx) {
         [{ text: t.walletIncrease, callback_data: 'wallet_deposit' }],
         [{ text: t.walletWithdraw, callback_data: 'wallet_withdraw' }],
         [{ text: t.walletAddCard, callback_data: 'wallet_addcard' }],
-        [{ text: '🧾 گزارش تراکنش‌ها', callback_data: 'menu_invoices' }]
+        [{ text: '🧾 گزارش تراکنش‌ها', callback_data: 'menu_invoices' }],
+        [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'menu_back' }]
       ]
     }
   });
@@ -357,11 +344,6 @@ async function showWalletMenu(ctx) {
 bot.action('menu_wallet', async (ctx) => {
   ctx.answerCbQuery();
   await showWalletMenu(ctx);
-});
-
-bot.action('menu_referral', (ctx) => {
-  ctx.answerCbQuery();
-  ctx.reply('به‌زودی 🙂');
 });
 
 bot.action('menu_profile', async (ctx) => {
@@ -424,6 +406,31 @@ bot.action('support_contact', (ctx) => {
   ctx.reply(texts.fa.supportContactText);
 });
 
+bot.action('menu_rules', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply(texts.fa.rulesText);
+});
+
+bot.action('menu_tutorial', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply('📖 آموزش استفاده از ربات:\n\n۱. از بخش کیف پول، حساب خود را شارژ کنید.\n۲. از بخش خرید، ووچر مورد نظر خود را خریداری کنید.\n۳. در صورت داشتن شرایط، از بازی‌های بونوس جایزه دریافت کنید.');
+});
+
+bot.action('menu_buy', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply('🛒 بخش خرید ووچر به‌زودی فعال می‌شود...');
+});
+
+bot.action('menu_sell', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply('💸 بخش فروش ووچر به‌زودی فعال می‌شود...');
+});
+
+bot.action('menu_back', (ctx) => {
+  ctx.answerCbQuery();
+  showMainMenu(ctx);
+});
+
 async function getUserTotalApprovedDeposits(telegramId) {
   const res = await pool.query(
     "SELECT COALESCE(SUM(amount), 0) AS total FROM wallet_requests WHERE telegram_id = $1 AND type = 'deposit' AND status = 'approved'",
@@ -448,7 +455,7 @@ async function grantBonusIfEligible(telegramId) {
     'SELECT * FROM bonuses WHERE telegram_id = $1',
     [String(telegramId)]
   );
-  if (existing.rows.length > 0) return; // فقط یک‌بار در کل عمر کاربر
+  if (existing.rows.length > 0) return;
 
   await pool.query(
     'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
@@ -489,7 +496,6 @@ async function playBonusGame(ctx, emoji) {
     return;
   }
 
-  // بلافاصله وضعیت بونوس رو قفل می‌کنیم تا کسی نتونه دوبار بازی کنه
   await pool.query("UPDATE bonuses SET status = 'in_progress' WHERE id = $1", [bonus.id]);
 
   await ctx.reply(t.gamePlaying);
@@ -521,14 +527,6 @@ bot.action('game_play_dice', async (ctx) => {
 bot.action('game_play_basketball', async (ctx) => {
   ctx.answerCbQuery();
   await playBonusGame(ctx, '🏀');
-});
-
-bot.action(/^menu_.+/, (ctx) => {
-  const actionKey = ctx.match[0];
-  const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game'];
-  if (known.indexOf(actionKey) !== -1) return;
-  ctx.answerCbQuery();
-  ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
 });
 
 bot.action('wallet_deposit', (ctx) => {
@@ -701,28 +699,18 @@ function isAdmin(telegramId) {
   return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
 }
 
-async function showAdminMenu(ctx) {
+bot.command('admin', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return;
   const pendingRes = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
   const pendingCount = pendingRes.rows[0].c;
-  const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
-  const currentReaction = settingRes.rows[0] ? settingRes.rows[0].value : '🔥';
 
-  ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
-    '🔹 درخواست‌های در انتظار: ' + pendingCount + '\n' +
-    '🔹 ایموجی اکشن استارت فعلی: ' + currentReaction + '\n\n' +
-    '💡 برای تغییر ایموجی استارت کافیست بفرستید:\n`/setreaction <ایموجی>`', {
-    parse_mode: 'Markdown',
+  ctx.reply('👑 پنل مدیریت پیشرفته\n\n🔹 درخواست‌های در انتظار: ' + pendingCount, {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📥 درخواست‌های در انتظار کیف پول', callback_data: 'admin_pending' }]
       ]
     }
   });
-}
-
-bot.command('admin', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  await showAdminMenu(ctx);
 });
 
 bot.action('admin_pending', async (ctx) => {
@@ -791,7 +779,6 @@ bot.action(/^admin_approve_/, async (ctx) => {
   }
 
   await pool.query("UPDATE wallet_requests SET status = 'approved' WHERE id = $1", [requestId]);
-
   ctx.reply('درخواست شماره ' + requestId + ' تایید شد ✅');
 });
 
@@ -809,87 +796,17 @@ bot.action(/^admin_reject_/, async (ctx) => {
   }
 
   await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [requestId]);
-
-  bot.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.');
-
+  bot.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.');
   ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
 });
 
-// راه‌اندازی جداول دیتابیس و مقادیر پیش‌فرض، سپس روشن کردن ربات
 async function init() {
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS users (' +
-    'telegram_id TEXT PRIMARY KEY, ' +
-    'phone TEXT, ' +
-    'full_name TEXT, ' +
-    'card_number TEXT, ' +
-    'language TEXT, ' +
-    'balance INTEGER DEFAULT 0, ' +
-    'registered_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS cards (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'card_number TEXT, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS wallet_requests (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'type TEXT, ' +
-    'amount INTEGER, ' +
-    'card_number TEXT, ' +
-    'receipt_file_id TEXT, ' +
-    'status TEXT, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS required_channels (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'chat_id TEXT, ' +
-    'invite_link TEXT, ' +
-    'title TEXT, ' +
-    'active INTEGER DEFAULT 1' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS settings (' +
-    'key TEXT PRIMARY KEY, ' +
-    'value TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS bonuses (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'status TEXT, ' +
-    'amount INTEGER, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  const defaultReactionRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
-  if (defaultReactionRes.rows.length === 0) {
-    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['start_reaction', '🎉']);
-  }
-
-  const existingChannelRes = await pool.query('SELECT * FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
-  if (existingChannelRes.rows.length === 0) {
-    await pool.query(
-      'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
-      ['-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی']
-    );
-  }
+  await pool.query('CREATE TABLE IF NOT EXISTS users (telegram_id TEXT PRIMARY KEY, phone TEXT, full_name TEXT, card_number TEXT, language TEXT, balance INTEGER DEFAULT 0, registered_at TEXT)');
+  await pool.query('CREATE TABLE IF NOT EXISTS cards (id SERIAL PRIMARY KEY, telegram_id TEXT, card_number TEXT, created_at TEXT)');
+  await pool.query('CREATE TABLE IF NOT EXISTS wallet_requests (id SERIAL PRIMARY KEY, telegram_id TEXT, type TEXT, amount INTEGER, card_number TEXT, receipt_file_id TEXT, status TEXT, created_at TEXT)');
+  await pool.query('CREATE TABLE IF NOT EXISTS required_channels (id SERIAL PRIMARY KEY, chat_id TEXT, invite_link TEXT, title TEXT, active INTEGER DEFAULT 1)');
+  await pool.query('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)');
+  await pool.query('CREATE TABLE IF NOT EXISTS bonuses (id SERIAL PRIMARY KEY, telegram_id TEXT, status TEXT, amount INTEGER, created_at TEXT)');
 
   bot.launch();
   console.log('ربات با موفقیت به Supabase متصل و روشن شد');
