@@ -1,12 +1,25 @@
 const { Telegraf, Markup } = require('telegraf');
 const { Pool } = require('pg');
 const express = require('express');
+const https = require('https'); // اضافه شده برای سیستم بیدار نگه داشتن
 
 // Express Server for Render Health Check
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
+
+// ===== سیستم ضد خواب ربات (Keep-Awake) =====
+// این کد هر 3 دقیقه یک‌بار به سرور سر می‌زنه تا رندر جرات نکنه ربات رو خاموش کنه! 😎
+setInterval(() => {
+  const url = 'https://vochino-telegram-bot.onrender.com'; 
+  https.get(url, (res) => {
+    console.log(`[Keep-Awake] Pinged! Status: ${res.statusCode} - ربات چهارچشمی بیداره 👁️`);
+  }).on('error', (err) => {
+    console.log(`[Keep-Awake] Error: ${err.message}`);
+  });
+}, 3 * 60 * 1000); // 3 دقیقه (3 * 60 ثانیه * 1000 میلی‌ثانیه)
+// ============================================
 
 // Initialize Bot & PostgreSQL (Supabase) Pool
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -99,7 +112,6 @@ const texts = {
     buyConfirmSummary: '📦 خلاصه‌ی سفارش:\n\nمحصول: {product}\nمبلغ: {amount} تومان\n\nبا تایید، این مبلغ از موجودی کیف پولت کسر می‌شه.',
     buyConfirmButton: '✅ تایید و خرید',
     buyCancelButton: '❌ انصراف',
-    // ✅ مرحله ۱ - اضافه شدن {trackingCode} به پیام موفقیت خرید
     buySuccess: '🎉 خرید شما با موفقیت انجام شد!\n\n🆔 کد پیگیری: {trackingCode}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان\n\nموجودی جدید: {balance} تومان',
     buyInsufficientBalance: '❌ موجودی کیف پولت کافی نیست.\nمبلغ سفارش: {amount} تومان\nموجودی فعلی: {balance} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.',
     buyChargeWalletButton: '💳 شارژ کیف پول',
@@ -207,7 +219,6 @@ async function showJoinPrompt(ctx) {
   ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
 }
 
-// Set reaction command for admin
 bot.command('setreaction', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
@@ -221,8 +232,8 @@ bot.command('setreaction', async (ctx) => {
 
   if (ALLOWED_REACTIONS.indexOf(newEmoji) === -1) {
     ctx.reply(
-      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست (تلگرام فقط یک لیست ثابت را قبول می‌کند، متأسفانه ایموجی پول/دلار جزو این لیست نیست).\n' +
-      'چند نمونه‌ی مجاز که حس هیجان و خوشحالی می‌دن:\n🎉 🔥 🤩 💯 🏆 ❤ 👏'
+      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست.\n' +
+      'چند نمونه‌ی مجاز:\n🎉 🔥 🤩 💯 🏆 ❤ 👏'
     );
     return;
   }
@@ -241,13 +252,12 @@ bot.command('setreaction', async (ctx) => {
   ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
-// Set USD -> Toman rate for voucher pricing
 bot.command('setrate', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
     const currentRate = await getUsdRate();
-    ctx.reply('❌ لطفاً نرخ جدید (تومان به ازای هر دلار) را بعد از دستور وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n/setrate 65000', { parse_mode: 'Markdown' });
+    ctx.reply('❌ لطفاً نرخ جدید را وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n/setrate 65000', { parse_mode: 'Markdown' });
     return;
   }
   const newRate = parseInt(args[1].replace(/[^0-9]/g, ''), 10);
@@ -262,10 +272,6 @@ bot.command('setrate', async (ctx) => {
   ctx.reply('✅ نرخ دلار با موفقیت به ' + newRate.toLocaleString('en-US') + ' تومان تغییر یافت!');
 });
 
-// افزودن یا ویرایش محصول از پنل ادمین
-// فرمت: /addproduct کلید|نام نمایشی|حداقل مبلغ|نوع(usd یا toman)
-// مثال: /addproduct tron|🪙 ترون (تتر)|100000|toman
-// مثال: /addproduct stars|⭐ استارز تلگرام|1|usd
 bot.command('addproduct', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const raw = ctx.message.text.replace(/^\/addproduct(@\w+)?\s*/, '');
@@ -274,11 +280,7 @@ bot.command('addproduct', async (ctx) => {
   if (parts.length !== 4) {
     ctx.reply(
       '❌ فرمت درست نیست.\n\n' +
-      'فرمت صحیح:\n/addproduct کلید|نام نمایشی|حداقل مبلغ|نوع\n\n' +
-      'نوع باید usd (بر اساس نرخ دلار) یا toman (مبلغ ثابت تومانی) باشه.\n\n' +
-      'مثال ووچر تومانی:\n/addproduct tron|🪙 ترون (تتر)|100000|toman\n\n' +
-      'مثال بر اساس دلار:\n/addproduct stars|⭐ استارز تلگرام|1|usd',
-      { parse_mode: 'Markdown' }
+      'فرمت صحیح:\n/addproduct کلید|نام نمایشی|حداقل مبلغ|نوع'
     );
     return;
   }
@@ -287,7 +289,7 @@ bot.command('addproduct', async (ctx) => {
   const minAmount = Number(minAmountRaw.replace(/[^0-9.]/g, ''));
 
   if (!key || !name || !minAmount || (priceType !== 'usd' && priceType !== 'toman')) {
-    ctx.reply('❌ یکی از مقادیر نامعتبره. مطمئن شو حداقل مبلغ عدده و نوع دقیقاً usd یا toman نوشته شده.', { parse_mode: 'Markdown' });
+    ctx.reply('❌ مقادیر نامعتبر است.');
     return;
   }
 
@@ -297,7 +299,7 @@ bot.command('addproduct', async (ctx) => {
     [key, name, minAmount, priceType, new Date().toISOString()]
   );
 
-  ctx.reply('✅ محصول «' + name + '» با موفقیت اضافه/ویرایش شد و الان تو منوی خرید فعاله.');
+  ctx.reply('✅ محصول «' + name + '» با موفقیت اضافه/ویرایش شد.');
 });
 
 bot.command('listproducts', async (ctx) => {
@@ -323,7 +325,7 @@ bot.command('removeproduct', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
-    ctx.reply('❌ کلید محصول رو بعد از دستور بنویس.\nمثال:\n/removeproduct tron', { parse_mode: 'Markdown' });
+    ctx.reply('❌ کلید محصول رو وارد کنید.');
     return;
   }
   const key = args[1].trim();
@@ -334,10 +336,9 @@ bot.command('removeproduct', async (ctx) => {
     return;
   }
 
-  ctx.reply('✅ محصول «' + res.rows[0].name + '» غیرفعال شد و دیگه تو منوی خرید نشون داده نمی‌شه.\n(اگه بعداً خواستی برش گردونی، کافیه دوباره با /addproduct همون کلید رو اضافه کنی.)');
+  ctx.reply('✅ محصول «' + res.rows[0].name + '» غیرفعال شد.');
 });
 
-// ✅ مرحله ۱ - دستور جدید ادمین برای جستجوی رکورد با کد پیگیری
 bot.command('find', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
@@ -384,12 +385,10 @@ bot.command('find', async (ctx) => {
   }
 });
 
-// Fixed reaction trigger — با افکت بزرگ
 async function triggerStartReaction(ctx) {
   try {
     const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
     let emoji = settingRes.rows[0] ? settingRes.rows[0].value : '🎉';
-
     if (ALLOWED_REACTIONS.indexOf(emoji) === -1) { emoji = '🎉'; }
     await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: emoji }], true);
   } catch (e) {
@@ -622,7 +621,7 @@ async function grantBonusIfEligible(telegramId) {
     'SELECT * FROM bonuses WHERE telegram_id = $1',
     [String(telegramId)]
   );
-  if (existing.rows.length > 0) return; // فقط یک‌بار در کل عمر کاربر
+  if (existing.rows.length > 0) return; 
 
   await pool.query(
     'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
@@ -676,9 +675,7 @@ async function playBonusGame(ctx, emoji) {
     return;
   }
 
-  // بلافاصله وضعیت بونوس رو قفل می‌کنیم تا کسی نتونه دوبار بازی کنه
   await pool.query("UPDATE bonuses SET status = 'in_progress' WHERE id = $1", [bonus.id]);
-
   await ctx.reply(t.gamePlaying);
   await ctx.sendDice({ emoji: emoji }).catch(function () {});
 
@@ -758,7 +755,6 @@ bot.action('buy_confirm', async (ctx) => {
 
   await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [amount, String(ctx.from.id)]);
 
-  // ✅ مرحله ۱ - ساخت کد پیگیری و ذخیره‌اش همراه سفارش
   const trackingCode = generateTrackingCode();
   await pool.query(
     'INSERT INTO orders (telegram_id, product_type, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6)',
@@ -780,7 +776,6 @@ bot.action('buy_confirm', async (ctx) => {
   await grantBonusIfEligible(ctx.from.id);
 });
 
-// هندلر عمومی برای هر محصولی که از پنل ادمین اضافه شده باشه — باید بعد از buy_cancel/buy_confirm ثبت بشه
 bot.action(/^buy_(.+)/, async (ctx) => {
   const key = ctx.match[1];
 
@@ -887,7 +882,6 @@ bot.action(/^withdraw_card_/, async (ctx) => {
   const session = sessions[ctx.from.id];
   const amount = session && session.data ? session.data.amount : null;
 
-  // ✅ مرحله ۱ - ساخت کد پیگیری و ذخیره‌اش همراه درخواست برداشت
   const trackingCode = generateTrackingCode();
   await pool.query(
     'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
@@ -1019,7 +1013,6 @@ bot.on('photo', async (ctx) => {
   const photos = ctx.message.photo;
   const fileId = photos[photos.length - 1].file_id;
 
-  // ✅ مرحله ۱ - ساخت کد پیگیری و ذخیره‌اش همراه درخواست شارژ
   const trackingCode = generateTrackingCode();
   await pool.query(
     'INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
@@ -1152,7 +1145,6 @@ bot.action(/^admin_reject_/, async (ctx) => {
   ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
 });
 
-// راه‌اندازی جداول دیتابیس و مقادیر پیش‌فرض، سپس روشن کردن ربات
 async function init() {
   await pool.query(
     'CREATE TABLE IF NOT EXISTS users (' +
@@ -1232,13 +1224,12 @@ async function init() {
     'key TEXT UNIQUE, ' +
     'name TEXT, ' +
     'min_amount NUMERIC, ' +
-    'price_type TEXT, ' + // 'usd' یا 'toman'
+    'price_type TEXT, ' + 
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
   );
 
-  // ✅ مرحله ۱ - اضافه شدن ستون کد پیگیری به جدول‌های موجود (بدون پاک شدن اطلاعات قبلی)
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
   await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
 
