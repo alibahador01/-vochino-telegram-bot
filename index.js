@@ -19,13 +19,13 @@ const pool = new Pool({
 const ADMIN_IDS = [8231962200];
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
-const HOT_VOUCHER_MIN = 50000;   // حداقل خرید هات ووچر (تومان)
-const DEFAULT_USD_RATE = 60000;  // نرخ پیش‌فرض دلار (تومان) — با دستور /setrate از تلگرام قابل تغییره
+const HOT_VOUCHER_MIN = 50000; // حداقل خرید هات ووچر (تومان)
+const DEFAULT_USD_RATE = 60000; // نرخ پیش‌فرض دلار (تومان) — با دستور /setrate از تلگرام قابل تغییره
 
 // ===== تنظیمات بونوس و بازی (اینجا رو هر موقع خواستی تغییر بده) =====
-const BONUS_THRESHOLD = 500000;      // حداقل مجموع خرید برای فعال شدن بونوس
-const BONUS_AMOUNT = 100000;         // مبلغ جایزه در صورت برد (تومان)
-const BONUS_WIN_PROBABILITY = 0.05;  // شانس برد (0.05 یعنی ۵٪ ، تقریباً ۱ از ۲۰ نفر)
+const BONUS_THRESHOLD = 500000; // حداقل مجموع خرید برای فعال شدن بونوس
+const BONUS_AMOUNT = 100000; // مبلغ جایزه در صورت برد (تومان)
+const BONUS_WIN_PROBABILITY = 0.05; // شانس برد (0.05 یعنی ۵٪ ، تقریباً ۱ از ۲۰ نفر)
 // =======================================================================
 
 // لیست ایموجی‌های مجاز تلگرام برای ری‌اکشن روی پیام (Bot API فقط همین‌ها را قبول می‌کند)
@@ -45,6 +45,12 @@ const DEPOSIT_CARDS = [
   { number: '5047061669481125', owner: 'علی بهادر' }
 ];
 
+// ✅ مرحله ۱ - تابع ساخت کد پیگیری (VOC-xxxxxx)
+function generateTrackingCode() {
+  const randomPart = Math.floor(100000 + Math.random() * 900000);
+  return 'VOC-' + randomPart;
+}
+
 const texts = {
   fa: {
     chooseLanguage: 'زبان خود را انتخاب کنید / Please choose your language:',
@@ -62,35 +68,29 @@ const texts = {
     joinChannelButton: '📢 عضویت در کانال',
     checkMembershipButton: '✅ عضو شدم',
     stillNotMember: 'هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید، سپس دوباره تلاش کنید.',
-
     walletTitle: '🎒 جیب',
     walletBalance: '💰 موجودی فعلی شما: ',
     walletIncrease: '➕ افزایش موجودی',
     walletWithdraw: '💳 برداشت موجودی',
     walletAddCard: '➕ افزودن کارت جدید',
     backButton: '🔙 بازگشت',
-
     depositMethodTitle: 'روش افزایش موجودی را انتخاب کنید:',
     depositCard2Card: '💳 کارت به کارت',
     depositTron: '🪙 ترون (تتر)',
     depositGateway: '🌐 درگاه پرداخت',
     comingSoon: 'به‌زودی 🙂',
-
     depositCardsTrust: '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:',
     depositAskAmount: 'مبلغ واریزی خود را به تومان وارد کنید:',
     depositAskReceipt: 'رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎',
     depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی (معمولاً خیلی سریع)، موجودی شما به‌روزرسانی خواهد شد.',
-
     withdrawAskAmount: 'مبلغ برداشت خود را به تومان وارد کنید (حداقل ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان):',
     withdrawMinError: 'حداقل مبلغ برداشت ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان است. لطفاً دوباره وارد کنید:',
     withdrawSelectCard: 'شماره کارت خود را انتخاب کنید:',
     withdrawSubmitted: 'درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.',
-
     addCardAsk: 'شماره کارت جدید را وارد کنید (۱۶ رقم):',
     addCardInvalid: 'شماره کارت وارد شده معتبر نیست. لطفاً دوباره تلاش کنید:',
     addCardSuccess: 'کارت جدید با موفقیت ثبت شد ✅',
     addCardButton: '➕ افزودن کارت جدید',
-
     buyMenuTitle: '✨ کدوم محصول رو می‌خوای بخری؟',
     buyNoProducts: 'فعلاً هیچ محصولی برای فروش تعریف نشده.',
     buyAskAmountUsd: '💵 قیمت هر دلار: {rate} تومان\n💰 حداقل خرید: {minUsd} دلار (حدود {minToman} تومان)\n\nمبلغ خرید خود را به تومان وارد کنید:\nمثال: 200000',
@@ -99,21 +99,19 @@ const texts = {
     buyConfirmSummary: '📦 خلاصه‌ی سفارش:\n\nمحصول: {product}\nمبلغ: {amount} تومان\n\nبا تایید، این مبلغ از موجودی کیف پولت کسر می‌شه.',
     buyConfirmButton: '✅ تایید و خرید',
     buyCancelButton: '❌ انصراف',
-    buySuccess: '🎉 خرید شما با موفقیت انجام شد!\nمحصول: {product}\nمبلغ: {amount} تومان\n\nموجودی جدید: {balance} تومان',
+    // ✅ مرحله ۱ - اضافه شدن {trackingCode} به پیام موفقیت خرید
+    buySuccess: '🎉 خرید شما با موفقیت انجام شد!\n\n🆔 کد پیگیری: {trackingCode}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان\n\nموجودی جدید: {balance} تومان',
     buyInsufficientBalance: '❌ موجودی کیف پولت کافی نیست.\nمبلغ سفارش: {amount} تومان\nموجودی فعلی: {balance} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.',
     buyChargeWalletButton: '💳 شارژ کیف پول',
     buyCancelled: 'سفارش لغو شد.',
-
     profileTitle: '👤 پروفایل شما',
     invoicesTitle: '🧾 فاکتورهای من',
     invoicesEmpty: 'هنوز هیچ فاکتوری برای شما ثبت نشده.',
-
     supportTitle: '📞 پشتیبانی\n\nقبل از تماس، یه نگاه به سوالات متداول بنداز، شاید جوابت همونجا باشه 👇',
     supportFaqButton: '❓ سوالات متداول',
     supportContactButton: '💬 ارتباط با پشتیبانی',
     supportContactText: 'برای ارتباط مستقیم با پشتیبانی، پیام خودتون رو همینجا بنویسید تا در اسرع وقت جواب بگیرید.',
-    faqText:
-      '❓ سوالات متداول\n\n' +
+    faqText: '❓ سوالات متداول\n\n' +
       '🔹 چقدر طول می‌کشه شارژم تایید بشه؟\n' +
       'معمولاً چند دقیقه، حداکثر تا چند ساعت.\n\n' +
       '🔹 حداقل مبلغ برداشت چقدره؟\n' +
@@ -122,13 +120,10 @@ const texts = {
       'نه، فقط از کارتی که به نام خودتون ثبت شده.\n\n' +
       '🔹 بونوس بازی چطور فعال می‌شه؟\n' +
       'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس بازی برات فعال می‌شه.',
-
     gameMenuTitle: '🎮 بازی و بونوس',
-    gameNotEligible:
-      '🔒 هنوز بونوس بازی برات فعال نشده.\n\n' +
+    gameNotEligible: '🔒 هنوز بونوس بازی برات فعال نشده.\n\n' +
       'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی می‌گیری که می‌تونی باهاش بازی کنی و ببری! 🎁',
-    gameEligibleIntro:
-      '🎁 تبریک! یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی داری.\n' +
+    gameEligibleIntro: '🎁 تبریک! یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی داری.\n' +
       'یکی از بازی‌های زیر رو انتخاب کن و شانستو امتحان کن. اگه ببری، مبلغ مستقیم میاد تو موجودیت و می‌تونی همون لحظه برداشت بزنی 💸',
     gameAlreadyUsed: 'بونوس بازیت رو قبلاً استفاده کردی. با رسیدن به سقف خرید بعدی، دوباره یه بونوس جدید فعال می‌شه.',
     gameDiceButton: '🎲 بازی تاس',
@@ -219,7 +214,7 @@ bot.command('setreaction', async (ctx) => {
   if (args.length < 2) {
     const currentRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
     const current = currentRes.rows[0] ? currentRes.rows[0].value : '🔥';
-    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n`/setreaction 🔥`', { parse_mode: 'Markdown' });
+    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n/setreaction 🔥', { parse_mode: 'Markdown' });
     return;
   }
   const newEmoji = args[1];
@@ -252,7 +247,7 @@ bot.command('setrate', async (ctx) => {
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
     const currentRate = await getUsdRate();
-    ctx.reply('❌ لطفاً نرخ جدید (تومان به ازای هر دلار) را بعد از دستور وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n`/setrate 65000`', { parse_mode: 'Markdown' });
+    ctx.reply('❌ لطفاً نرخ جدید (تومان به ازای هر دلار) را بعد از دستور وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n/setrate 65000', { parse_mode: 'Markdown' });
     return;
   }
   const newRate = parseInt(args[1].replace(/[^0-9]/g, ''), 10);
@@ -279,10 +274,10 @@ bot.command('addproduct', async (ctx) => {
   if (parts.length !== 4) {
     ctx.reply(
       '❌ فرمت درست نیست.\n\n' +
-      'فرمت صحیح:\n`/addproduct کلید|نام نمایشی|حداقل مبلغ|نوع`\n\n' +
-      'نوع باید `usd` (بر اساس نرخ دلار) یا `toman` (مبلغ ثابت تومانی) باشه.\n\n' +
-      'مثال ووچر تومانی:\n`/addproduct tron|🪙 ترون (تتر)|100000|toman`\n\n' +
-      'مثال بر اساس دلار:\n`/addproduct stars|⭐ استارز تلگرام|1|usd`',
+      'فرمت صحیح:\n/addproduct کلید|نام نمایشی|حداقل مبلغ|نوع\n\n' +
+      'نوع باید usd (بر اساس نرخ دلار) یا toman (مبلغ ثابت تومانی) باشه.\n\n' +
+      'مثال ووچر تومانی:\n/addproduct tron|🪙 ترون (تتر)|100000|toman\n\n' +
+      'مثال بر اساس دلار:\n/addproduct stars|⭐ استارز تلگرام|1|usd',
       { parse_mode: 'Markdown' }
     );
     return;
@@ -292,7 +287,7 @@ bot.command('addproduct', async (ctx) => {
   const minAmount = Number(minAmountRaw.replace(/[^0-9.]/g, ''));
 
   if (!key || !name || !minAmount || (priceType !== 'usd' && priceType !== 'toman')) {
-    ctx.reply('❌ یکی از مقادیر نامعتبره. مطمئن شو حداقل مبلغ عدده و نوع دقیقاً `usd` یا `toman` نوشته شده.', { parse_mode: 'Markdown' });
+    ctx.reply('❌ یکی از مقادیر نامعتبره. مطمئن شو حداقل مبلغ عدده و نوع دقیقاً usd یا toman نوشته شده.', { parse_mode: 'Markdown' });
     return;
   }
 
@@ -318,7 +313,7 @@ bot.command('listproducts', async (ctx) => {
   res.rows.forEach(function (p) {
     const statusLabel = p.active ? '✅ فعال' : '⛔️ غیرفعال';
     const priceLabel = p.price_type === 'usd' ? Number(p.min_amount) + ' دلار' : Number(p.min_amount).toLocaleString('en-US') + ' تومان';
-    message += 'کلید: `' + p.key + '`\nنام: ' + p.name + '\nحداقل خرید: ' + priceLabel + '\nوضعیت: ' + statusLabel + '\n\n';
+    message += 'کلید: ' + p.key + '\nنام: ' + p.name + '\nحداقل خرید: ' + priceLabel + '\nوضعیت: ' + statusLabel + '\n\n';
   });
 
   ctx.reply(message, { parse_mode: 'Markdown' });
@@ -328,7 +323,7 @@ bot.command('removeproduct', async (ctx) => {
   if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
   if (args.length < 2) {
-    ctx.reply('❌ کلید محصول رو بعد از دستور بنویس.\nمثال:\n`/removeproduct tron`', { parse_mode: 'Markdown' });
+    ctx.reply('❌ کلید محصول رو بعد از دستور بنویس.\nمثال:\n/removeproduct tron', { parse_mode: 'Markdown' });
     return;
   }
   const key = args[1].trim();
@@ -342,16 +337,60 @@ bot.command('removeproduct', async (ctx) => {
   ctx.reply('✅ محصول «' + res.rows[0].name + '» غیرفعال شد و دیگه تو منوی خرید نشون داده نمی‌شه.\n(اگه بعداً خواستی برش گردونی، کافیه دوباره با /addproduct همون کلید رو اضافه کنی.)');
 });
 
+// ✅ مرحله ۱ - دستور جدید ادمین برای جستجوی رکورد با کد پیگیری
+bot.command('find', async (ctx) => {
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    ctx.reply('❌ کد پیگیری رو بعد از دستور بنویس.\nمثال:\n/find VOC-847392');
+    return;
+  }
+  const code = args[1].trim().toUpperCase();
+
+  const orderRes = await pool.query('SELECT * FROM orders WHERE tracking_code = $1', [code]);
+  const walletRes = await pool.query('SELECT * FROM wallet_requests WHERE tracking_code = $1', [code]);
+
+  if (orderRes.rows.length === 0 && walletRes.rows.length === 0) {
+    ctx.reply('❌ هیچ رکوردی با این کد پیگیری پیدا نشد.');
+    return;
+  }
+
+  if (orderRes.rows.length > 0) {
+    const o = orderRes.rows[0];
+    const user = await getUser(o.telegram_id);
+    ctx.reply(
+      '📦 سفارش خرید\n\n🆔 کد پیگیری: ' + o.tracking_code +
+      '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') +
+      '\n📱 شماره: ' + (user ? user.phone : '-') +
+      '\n📦 محصول: ' + o.product_type +
+      '\n💰 مبلغ: ' + Number(o.amount).toLocaleString('en-US') + ' تومان' +
+      '\n📌 وضعیت: ' + o.status +
+      '\n📅 تاریخ: ' + o.created_at
+    );
+  }
+
+  if (walletRes.rows.length > 0) {
+    const w = walletRes.rows[0];
+    const user = await getUser(w.telegram_id);
+    const typeLabel = w.type === 'deposit' ? '➕ شارژ کیف پول' : '💳 برداشت موجودی';
+    ctx.reply(
+      typeLabel + '\n\n🆔 کد پیگیری: ' + w.tracking_code +
+      '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') +
+      '\n📱 شماره: ' + (user ? user.phone : '-') +
+      '\n💰 مبلغ: ' + Number(w.amount).toLocaleString('en-US') + ' تومان' +
+      '\n📌 وضعیت: ' + w.status +
+      '\n📅 تاریخ: ' + w.created_at
+    );
+  }
+});
+
 // Fixed reaction trigger — با افکت بزرگ
 async function triggerStartReaction(ctx) {
   try {
     const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
     let emoji = settingRes.rows[0] ? settingRes.rows[0].value : '🎉';
 
-    if (ALLOWED_REACTIONS.indexOf(emoji) === -1) {
-      emoji = '🎉';
-    }
-
+    if (ALLOWED_REACTIONS.indexOf(emoji) === -1) { emoji = '🎉'; }
     await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: emoji }], true);
   } catch (e) {
     console.log('REACTION ERROR: ' + e.message);
@@ -718,9 +757,12 @@ bot.action('buy_confirm', async (ctx) => {
   }
 
   await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [amount, String(ctx.from.id)]);
+
+  // ✅ مرحله ۱ - ساخت کد پیگیری و ذخیره‌اش همراه سفارش
+  const trackingCode = generateTrackingCode();
   await pool.query(
-    'INSERT INTO orders (telegram_id, product_type, amount, status, created_at) VALUES ($1, $2, $3, $4, $5)',
-    [String(ctx.from.id), session.data.productType, amount, 'completed', new Date().toISOString()]
+    'INSERT INTO orders (telegram_id, product_type, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6)',
+    [String(ctx.from.id), session.data.productType, amount, 'completed', new Date().toISOString(), trackingCode]
   );
 
   const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
@@ -731,7 +773,8 @@ bot.action('buy_confirm', async (ctx) => {
   ctx.reply(fillTemplate(t.buySuccess, {
     product: session.data.productLabel,
     amount: amount.toLocaleString('en-US'),
-    balance: Number(newBalance).toLocaleString('en-US')
+    balance: Number(newBalance).toLocaleString('en-US'),
+    trackingCode: trackingCode
   }));
 
   await grantBonusIfEligible(ctx.from.id);
@@ -844,13 +887,15 @@ bot.action(/^withdraw_card_/, async (ctx) => {
   const session = sessions[ctx.from.id];
   const amount = session && session.data ? session.data.amount : null;
 
+  // ✅ مرحله ۱ - ساخت کد پیگیری و ذخیره‌اش همراه درخواست برداشت
+  const trackingCode = generateTrackingCode();
   await pool.query(
-    'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-    [String(ctx.from.id), 'withdraw', amount, cardNumber, 'pending', new Date().toISOString()]
+    'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [String(ctx.from.id), 'withdraw', amount, cardNumber, 'pending', new Date().toISOString(), trackingCode]
   );
 
   delete sessions[ctx.from.id];
-  ctx.reply(texts.fa.withdrawSubmitted);
+  ctx.reply(texts.fa.withdrawSubmitted + '\n\n🆔 کد پیگیری: ' + trackingCode);
 });
 
 bot.action('wallet_addcard', (ctx) => {
@@ -881,7 +926,6 @@ bot.on('text', async (ctx, next) => {
 
     if (session.step === 'waiting_card') {
       session.data.cardNumber = ctx.message.text;
-
       await pool.query(
         'INSERT INTO users (telegram_id, phone, full_name, card_number, language, balance, registered_at) ' +
         'VALUES ($1, $2, $3, $4, $5, 0, $6) ' +
@@ -889,7 +933,6 @@ bot.on('text', async (ctx, next) => {
         'card_number = EXCLUDED.card_number, language = EXCLUDED.language',
         [String(ctx.from.id), session.data.phone, session.data.fullName, session.data.cardNumber, session.lang, new Date().toISOString()]
       );
-
       ctx.reply(t.registrationSuccess).then(function () {
         ctx.reply(t.rulesText, {
           reply_markup: {
@@ -918,10 +961,8 @@ bot.on('text', async (ctx, next) => {
       ctx.reply(fillTemplate(t.buyMinError, { min: minAmount.toLocaleString('en-US') }));
       return;
     }
-
     session.data.amount = amount;
     session.step = 'waiting_confirm';
-
     ctx.reply(fillTemplate(t.buyConfirmSummary, {
       product: session.data.productLabel,
       amount: amount.toLocaleString('en-US')
@@ -943,15 +984,12 @@ bot.on('text', async (ctx, next) => {
       ctx.reply(t.withdrawMinError);
       return;
     }
-
     session.data.amount = amount;
-
     const cards = await getUserCards(ctx.from.id);
     const buttons = cards.map(function (c) {
       return [{ text: c.card_number, callback_data: 'withdraw_card_' + c.card_number }];
     });
     buttons.push([{ text: t.addCardButton, callback_data: 'wallet_addcard' }]);
-
     ctx.reply(t.withdrawSelectCard, { reply_markup: { inline_keyboard: buttons } });
     return;
   }
@@ -963,12 +1001,10 @@ bot.on('text', async (ctx, next) => {
       ctx.reply(t.addCardInvalid);
       return;
     }
-
     await pool.query(
       'INSERT INTO cards (telegram_id, card_number, created_at) VALUES ($1, $2, $3)',
       [String(ctx.from.id), cardNumber, new Date().toISOString()]
     );
-
     delete sessions[ctx.from.id];
     ctx.reply(t.addCardSuccess);
     return;
@@ -983,13 +1019,15 @@ bot.on('photo', async (ctx) => {
   const photos = ctx.message.photo;
   const fileId = photos[photos.length - 1].file_id;
 
+  // ✅ مرحله ۱ - ساخت کد پیگیری و ذخیره‌اش همراه درخواست شارژ
+  const trackingCode = generateTrackingCode();
   await pool.query(
-    'INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-    [String(ctx.from.id), 'deposit', session.data.amount, fileId, 'pending', new Date().toISOString()]
+    'INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [String(ctx.from.id), 'deposit', session.data.amount, fileId, 'pending', new Date().toISOString(), trackingCode]
   );
 
   delete sessions[ctx.from.id];
-  ctx.reply(t.depositSubmitted);
+  ctx.reply(t.depositSubmitted + '\n\n🆔 کد پیگیری: ' + trackingCode);
 });
 
 function isAdmin(telegramId) {
@@ -1005,12 +1043,14 @@ async function showAdminMenu(ctx) {
   ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
     '🔹 درخواست‌های در انتظار: ' + pendingCount + '\n' +
     '🔹 ایموجی اکشن استارت فعلی: ' + currentReaction + '\n\n' +
-    '💡 تغییر ایموجی استارت:\n`/setreaction <ایموجی>`\n\n' +
-    '💵 تغییر نرخ دلار:\n`/setrate <عدد>`\n\n' +
+    '💡 تغییر ایموجی استارت:\n/setreaction <ایموجی>\n\n' +
+    '💵 تغییر نرخ دلار:\n/setrate <عدد>\n\n' +
     '📦 مدیریت محصولات خرید:\n' +
-    '`/addproduct کلید|نام|حداقل|usd یا toman`\n' +
-    '`/listproducts` — دیدن همه‌ی محصولات\n' +
-    '`/removeproduct کلید` — غیرفعال کردن یه محصول', {
+    '/addproduct کلید|نام|حداقل|usd یا toman\n' +
+    '/listproducts — دیدن همه‌ی محصولات\n' +
+    '/removeproduct کلید — غیرفعال کردن یه محصول\n\n' +
+    '🔎 جستجوی سفارش/شارژ/برداشت با کد پیگیری:\n' +
+    '/find VOC-847392', {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
@@ -1043,25 +1083,20 @@ bot.action('admin_pending', async (ctx) => {
     const typeLabel = req.type === 'deposit' ? '➕ افزایش موجودی' : '💳 برداشت موجودی';
 
     let message = typeLabel + '\n';
+    message += '🆔 کد پیگیری: ' + (req.tracking_code || '-') + '\n';
     message += 'کاربر: ' + userName + ' (' + req.telegram_id + ')\n';
     message += 'مبلغ: ' + Number(req.amount).toLocaleString('en-US') + ' تومان\n';
-
     if (req.type === 'withdraw') {
       message += 'شماره کارت مقصد: ' + req.card_number + '\n';
     }
-
     const buttons = [
       [
         { text: '✅ تایید', callback_data: 'admin_approve_' + req.id },
         { text: '❌ رد', callback_data: 'admin_reject_' + req.id }
       ]
     ];
-
     if (req.type === 'deposit' && req.receipt_file_id) {
-      await ctx.replyWithPhoto(req.receipt_file_id, {
-        caption: message,
-        reply_markup: { inline_keyboard: buttons }
-      });
+      await ctx.replyWithPhoto(req.receipt_file_id, { caption: message, reply_markup: { inline_keyboard: buttons } });
     } else {
       await ctx.reply(message, { reply_markup: { inline_keyboard: buttons } });
     }
@@ -1081,12 +1116,14 @@ bot.action(/^admin_approve_/, async (ctx) => {
     return;
   }
 
+  const codeText = request.tracking_code ? ('\n🆔 کد پیگیری: ' + request.tracking_code) : '';
+
   if (request.type === 'deposit') {
     await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [request.amount, request.telegram_id]);
-    bot.telegram.sendMessage(request.telegram_id, '✅ شارژ کیف پول شما تایید شد.\nمبلغ ' + Number(request.amount).toLocaleString('en-US') + ' تومان به موجودی شما اضافه شد.');
+    bot.telegram.sendMessage(request.telegram_id, '✅ شارژ کیف پول شما تایید شد.' + codeText + '\nمبلغ ' + Number(request.amount).toLocaleString('en-US') + ' تومان به موجودی شما اضافه شد.');
   } else {
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [request.amount, request.telegram_id]);
-    bot.telegram.sendMessage(request.telegram_id, '✅ درخواست برداشت شما تایید شد.\nمبلغ ' + Number(request.amount).toLocaleString('en-US') + ' تومان به کارت شما واریز شد.');
+    bot.telegram.sendMessage(request.telegram_id, '✅ درخواست برداشت شما تایید شد.' + codeText + '\nمبلغ ' + Number(request.amount).toLocaleString('en-US') + ' تومان به کارت شما واریز شد.');
   }
 
   await pool.query("UPDATE wallet_requests SET status = 'approved' WHERE id = $1", [requestId]);
@@ -1109,7 +1146,8 @@ bot.action(/^admin_reject_/, async (ctx) => {
 
   await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [requestId]);
 
-  bot.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.');
+  const codeText = request.tracking_code ? ('\n🆔 کد پیگیری: ' + request.tracking_code) : '';
+  bot.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.' + codeText + '\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.');
 
   ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
 });
@@ -1199,6 +1237,10 @@ async function init() {
     'created_at TEXT' +
     ')'
   );
+
+  // ✅ مرحله ۱ - اضافه شدن ستون کد پیگیری به جدول‌های موجود (بدون پاک شدن اطلاعات قبلی)
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+  await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
