@@ -1,7 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const { Pool } = require('pg');
 const express = require('express');
-const https = require('https'); // اضافه شده برای سیستم بیدار نگه داشتن
+const https = require('https'); 
 
 // Express Server for Render Health Check
 const app = express();
@@ -9,17 +9,48 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// ===== سیستم ضد خواب ربات (Keep-Awake) =====
-// این کد هر 3 دقیقه یک‌بار به سرور سر می‌زنه تا رندر جرات نکنه ربات رو خاموش کنه! 😎
+// ===== سیستم ضد خواب فوق پیشرفته (چهارلایه!) 👁️⚡ =====
+
+// لایه ۱: پینگ اصلی سرور (هر ۳ دقیقه)
 setInterval(() => {
   const url = 'https://vochino-telegram-bot.onrender.com'; 
   https.get(url, (res) => {
-    console.log(`[Keep-Awake] Pinged! Status: ${res.statusCode} - ربات چهارچشمی بیداره 👁️`);
+    console.log(`[Keep-Awake 1] Pinged! Status: ${res.statusCode} - ربات چهارچشمی بیداره 👁️`);
   }).on('error', (err) => {
-    console.log(`[Keep-Awake] Error: ${err.message}`);
+    console.log(`[Keep-Awake 1] Error: ${err.message}`);
   });
-}, 3 * 60 * 1000); // 3 دقیقه (3 * 60 ثانیه * 1000 میلی‌ثانیه)
-// ============================================
+}, 3 * 60 * 1000); 
+
+// لایه ۲: پینگ پشتیبان سرور (هر ۴ دقیقه) - برای محکم‌کاری!
+setInterval(() => {
+  const url = 'https://vochino-telegram-bot.onrender.com'; 
+  https.get(url, (res) => {
+    console.log(`[Keep-Awake 2] Backup Ping! Status: ${res.statusCode} - شیفت نگهبانی دوم ⚡`);
+  }).on('error', (err) => {
+    console.log(`[Keep-Awake 2] Error: ${err.message}`);
+  });
+}, 4 * 60 * 1000);
+
+// لایه ۳: بیدار نگه داشتن دیتابیس Supabase (هر ۵ دقیقه)
+setInterval(async () => {
+  try {
+    await pool.query('SELECT 1');
+    console.log(`[Keep-Awake DB] Supabase is awake! 🗄️`);
+  } catch (err) {
+    console.log(`[Keep-Awake DB] Error: ${err.message}`);
+  }
+}, 5 * 60 * 1000);
+
+// لایه ۴: پینگ نگهبان چهارم سرور (هر ۷ دقیقه) - آخرین خط دفاعی!
+setInterval(() => {
+  const url = 'https://vochino-telegram-bot.onrender.com'; 
+  https.get(url, (res) => {
+    console.log(`[Keep-Awake 3] Final Guard Ping! Status: ${res.statusCode} - شیفت نگهبانی سوم 🛡️`);
+  }).on('error', (err) => {
+    console.log(`[Keep-Awake 3] Error: ${err.message}`);
+  });
+}, 7 * 60 * 1000);
+// ============================================================
 
 // Initialize Bot & PostgreSQL (Supabase) Pool
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -32,16 +63,15 @@ const pool = new Pool({
 const ADMIN_IDS = [8231962200];
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
-const HOT_VOUCHER_MIN = 50000; // حداقل خرید هات ووچر (تومان)
-const DEFAULT_USD_RATE = 60000; // نرخ پیش‌فرض دلار (تومان) — با دستور /setrate از تلگرام قابل تغییره
+const HOT_VOUCHER_MIN = 50000; 
+const DEFAULT_USD_RATE = 60000; 
 
-// ===== تنظیمات بونوس و بازی (اینجا رو هر موقع خواستی تغییر بده) =====
-const BONUS_THRESHOLD = 500000; // حداقل مجموع خرید برای فعال شدن بونوس
-const BONUS_AMOUNT = 100000; // مبلغ جایزه در صورت برد (تومان)
-const BONUS_WIN_PROBABILITY = 0.05; // شانس برد (0.05 یعنی ۵٪ ، تقریباً ۱ از ۲۰ نفر)
-// =======================================================================
+// ===== تنظیمات بونوس و بازی =====
+const BONUS_THRESHOLD = 500000; 
+const BONUS_AMOUNT = 100000; 
+const BONUS_WIN_PROBABILITY = 0.05; 
+// ==================================
 
-// لیست ایموجی‌های مجاز تلگرام برای ری‌اکشن روی پیام (Bot API فقط همین‌ها را قبول می‌کند)
 const ALLOWED_REACTIONS = [
   '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱',
   '🤬', '😢', '🎉', '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡',
@@ -58,7 +88,6 @@ const DEPOSIT_CARDS = [
   { number: '5047061669481125', owner: 'علی بهادر' }
 ];
 
-// ✅ مرحله ۱ - تابع ساخت کد پیگیری (VOC-xxxxxx)
 function generateTrackingCode() {
   const randomPart = Math.floor(100000 + Math.random() * 900000);
   return 'VOC-' + randomPart;
@@ -876,9 +905,10 @@ bot.action('wallet_withdraw', (ctx) => {
   ctx.reply(texts.fa.withdrawAskAmount);
 });
 
-bot.action(/^withdraw_card_/, async (ctx) => {
+// ✅ فیکس: قبلاً regex بدون گروه ثبت (capture group) بود و کد کارت همیشه رشته خالی می‌شد
+bot.action(/^withdraw_card_(.+)$/, async (ctx) => {
   ctx.answerCbQuery();
-  const cardNumber = ctx.match[0].replace('withdraw_card_', '');
+  const cardNumber = ctx.match[1];
   const session = sessions[ctx.from.id];
   const amount = session && session.data ? session.data.amount : null;
 
@@ -1096,11 +1126,12 @@ bot.action('admin_pending', async (ctx) => {
   }
 });
 
-bot.action(/^admin_approve_/, async (ctx) => {
+// ✅ فیکس: قبلاً regex بدون گروه ثبت بود و requestId همیشه رشته خالی می‌شد -> خطای invalid input syntax for type integer
+bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
 
-  const requestId = ctx.match[0].replace('admin_approve_', '');
+  const requestId = ctx.match[1];
   const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
   const request = reqRes.rows[0];
 
@@ -1124,11 +1155,12 @@ bot.action(/^admin_approve_/, async (ctx) => {
   ctx.reply('درخواست شماره ' + requestId + ' تایید شد ✅');
 });
 
-bot.action(/^admin_reject_/, async (ctx) => {
+// ✅ فیکس: همون مشکل بالا، اینجا هم درست شد
+bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
 
-  const requestId = ctx.match[0].replace('admin_reject_', '');
+  const requestId = ctx.match[1];
   const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
   const request = reqRes.rows[0];
 
