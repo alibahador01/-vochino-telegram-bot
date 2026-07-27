@@ -9,46 +9,38 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// ===== سیستم ضد خواب فوق پیشرفته (چهارلایه!) 👁️⚡ =====
+// ===== سیستم ضد خواب ۴ لایه (بدون اجازه خواب!) 👁️⚡ =====
 
-// لایه ۱: پینگ اصلی سرور (هر ۳ دقیقه)
+// لایه ۱: پینگ سریع سرور وب (هر ۲ دقیقه)
 setInterval(() => {
   const url = 'https://vochino-telegram-bot.onrender.com'; 
   https.get(url, (res) => {
-    console.log(`[Keep-Awake 1] Pinged! Status: ${res.statusCode} - ربات چهارچشمی بیداره 👁️`);
-  }).on('error', (err) => {
-    console.log(`[Keep-Awake 1] Error: ${err.message}`);
-  });
-}, 3 * 60 * 1000); 
+    console.log(`[Layer 1 - Web] Status: ${res.statusCode}`);
+  }).on('error', (err) => {});
+}, 2 * 60 * 1000); 
 
-// لایه ۲: پینگ پشتیبان سرور (هر ۴ دقیقه) - برای محکم‌کاری!
+// لایه ۲: پینگ ثانویه سرور وب (هر ۵ دقیقه) برای اطمینان مضاعف
 setInterval(() => {
   const url = 'https://vochino-telegram-bot.onrender.com'; 
   https.get(url, (res) => {
-    console.log(`[Keep-Awake 2] Backup Ping! Status: ${res.statusCode} - شیفت نگهبانی دوم ⚡`);
-  }).on('error', (err) => {
-    console.log(`[Keep-Awake 2] Error: ${err.message}`);
-  });
-}, 4 * 60 * 1000);
+    console.log(`[Layer 2 - Web] Status: ${res.statusCode}`);
+  }).on('error', (err) => {});
+}, 5 * 60 * 1000);
 
-// لایه ۳: بیدار نگه داشتن دیتابیس Supabase (هر ۵ دقیقه)
+// لایه ۳: پینگ سریع دیتابیس (هر ۳ دقیقه)
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
-    console.log(`[Keep-Awake DB] Supabase is awake! 🗄️`);
-  } catch (err) {
-    console.log(`[Keep-Awake DB] Error: ${err.message}`);
-  }
-}, 5 * 60 * 1000);
+    console.log(`[Layer 3 - DB] Supabase pinged!`);
+  } catch (err) {}
+}, 3 * 60 * 1000);
 
-// لایه ۴: پینگ نگهبان چهارم سرور (هر ۷ دقیقه) - آخرین خط دفاعی!
-setInterval(() => {
-  const url = 'https://vochino-telegram-bot.onrender.com'; 
-  https.get(url, (res) => {
-    console.log(`[Keep-Awake 3] Final Guard Ping! Status: ${res.statusCode} - شیفت نگهبانی سوم 🛡️`);
-  }).on('error', (err) => {
-    console.log(`[Keep-Awake 3] Error: ${err.message}`);
-  });
+// لایه ۴: پینگ ثانویه دیتابیس (هر ۷ دقیقه)
+setInterval(async () => {
+  try {
+    await pool.query('SELECT 1');
+    console.log(`[Layer 4 - DB] Supabase backup pinged!`);
+  } catch (err) {}
 }, 7 * 60 * 1000);
 // ============================================================
 
@@ -561,13 +553,11 @@ bot.action('menu_profile', async (ctx) => {
   );
 });
 
-// ✅ جدید: دکمه‌ی عمومی بازگشت به منوی اصلی (قابل استفاده از هر صفحه‌ای)
 bot.action('back_main_menu', (ctx) => {
   ctx.answerCbQuery();
   showMainMenu(ctx);
 });
 
-// ✅ جدید: دکمه‌ی عمومی «بیخیال» - لغو هر جریان نیمه‌کاره (شارژ، برداشت، خرید) و بازگشت به منو
 bot.action('cancel_flow', (ctx) => {
   ctx.answerCbQuery();
   delete sessions[ctx.from.id];
@@ -933,7 +923,6 @@ bot.action('wallet_withdraw', (ctx) => {
   });
 });
 
-// ✅ فیکس: قبلاً regex بدون گروه ثبت (capture group) بود و کد کارت همیشه رشته خالی می‌شد
 bot.action(/^withdraw_card_(.+)$/, async (ctx) => {
   ctx.answerCbQuery();
   const cardNumber = ctx.match[1];
@@ -1185,7 +1174,6 @@ bot.action('admin_pending', async (ctx) => {
   }
 });
 
-// ✅ فیکس: قبلاً regex بدون گروه ثبت بود و requestId همیشه رشته خالی می‌شد -> خطای invalid input syntax for type integer
 bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
@@ -1214,7 +1202,6 @@ bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
   ctx.reply('درخواست شماره ' + requestId + ' تایید شد ✅');
 });
 
-// ✅ فیکس: همون مشکل بالا، اینجا هم درست شد
 bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
@@ -1236,7 +1223,6 @@ bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
   ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
 });
 
-// ✅ جدید: دکمه‌ی رد با توضیح - از ادمین متن دلیل رد رو می‌پرسه
 bot.action(/^admin_reject_reason_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
