@@ -3,51 +3,77 @@ const { Pool } = require('pg');
 const express = require('express');
 const https = require('https');
 
+// Express Server for Render Health Check
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is alive and connected to Supabase!'));
-app.listen(PORT, () => console.log(`Web server is running on port ${PORT}`));
+app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
+app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// ضد خواب
+// ===== سیستم ضد خواب ۴ لایه (بدون اجازه خواب!) 👁️⚡ =====
+
+// لایه ۱: پینگ سریع سرور وب (هر ۲ دقیقه)
 setInterval(() => {
-  https.get('https://vochino-telegram-bot.onrender.com', (res) => {
+  const url = 'https://vochino-telegram-bot.onrender.com';
+  https.get(url, (res) => {
     console.log(`[Layer 1 - Web] Status: ${res.statusCode}`);
-  }).on('error', () => {});
+  }).on('error', (err) => {});
 }, 2 * 60 * 1000);
 
+// لایه ۲: پینگ ثانویه سرور وب (هر ۵ دقیقه)
 setInterval(() => {
-  https.get('https://vochino-telegram-bot.onrender.com', (res) => {
+  const url = 'https://vochino-telegram-bot.onrender.com';
+  https.get(url, (res) => {
     console.log(`[Layer 2 - Web] Status: ${res.statusCode}`);
-  }).on('error', () => {});
+  }).on('error', (err) => {});
 }, 5 * 60 * 1000);
 
+// لایه ۳: پینگ سریع دیتابیس (هر ۳ دقیقه)
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
     console.log(`[Layer 3 - DB] Supabase pinged!`);
-  } catch (e) {}
+  } catch (err) {}
 }, 3 * 60 * 1000);
 
+// لایه ۴: پینگ ثانویه دیتابیس (هر ۷ دقیقه)
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
     console.log(`[Layer 4 - DB] Supabase backup pinged!`);
-  } catch (e) {}
+  } catch (err) {}
 }, 7 * 60 * 1000);
+// ============================================================
 
+// Initialize Bot & PostgreSQL (Supabase) Pool
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
 const ADMIN_IDS = [8231962200];
+const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 const HOT_VOUCHER_MIN = 50000;
 const DEFAULT_USD_RATE = 60000;
+
+// ===== تنظیمات بونوس و بازی =====
 const BONUS_THRESHOLD = 500000;
 const BONUS_AMOUNT = 100000;
 const BONUS_WIN_PROBABILITY = 0.05;
+// ==================================
+
+const ALLOWED_REACTIONS = [
+  '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱',
+  '🤬', '😢', '🎉', '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡',
+  '🥱', '🥴', '😍', '🐳', '❤‍🔥', '🌚', '🌭', '💯', '🤣', '⚡',
+  '🍌', '🏆', '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈',
+  '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈', '😇', '😨',
+  '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿',
+  '🆒', '💘', '🙉', '🦄', '😘', '💊', '🙊', '😎', '👾', '🤷‍♂',
+  '🤷', '🤷‍♀', '😡'
+];
 
 const DEPOSIT_CARDS = [
   { number: '6219861819068106', owner: 'علی بهادر' },
@@ -55,71 +81,105 @@ const DEPOSIT_CARDS = [
 ];
 
 function generateTrackingCode() {
-  return 'VOC-' + Math.floor(100000 + Math.random() * 900000);
+  const randomPart = Math.floor(100000 + Math.random() * 900000);
+  return 'VOC-' + randomPart;
 }
 
+// ===== تابع کمکی پاکسازی امن پیام =====
 async function safeDelete(ctx) {
-  try { await ctx.deleteMessage(); } catch (e) {}
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
+}
+
+// ===== تابع کمکی برای ذخیره آخرین پیام ربات =====
+async function sendAndTrack(ctx, text, extra = {}) {
+  const sent = await ctx.reply(text, extra);
+  if (sessions[ctx.from.id]) {
+    sessions[ctx.from.id].lastBotMsgId = sent.message_id;
+  }
+  return sent;
 }
 
 const texts = {
   fa: {
+    chooseLanguage: 'زبان خود را انتخاب کنید / Please choose your language:',
     welcome: 'به خانواده‌ی ما خوش اومدی! 🌟\nاینجا با خیال راحت خرید و فروش کن، ما همیشه پشتتیم.',
     requestPhone: 'برای تکمیل ثبت‌نام، لطفاً شماره تلفن خود را با دکمه‌ی زیر ارسال کنید 👇',
     sharePhoneButton: '📱 ارسال شماره تلفن',
     requestName: 'لطفاً نام و نام خانوادگی خود را وارد کنید:',
-    requestCard: 'لطفاً شماره کارت بانکی خود را وارد کنید:',
-    rulesText: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.',
+    requestCard: 'لطفاً شماره کارت بانکی خود را وارد کنید (کارتی که برای واریز استفاده می‌کنید):',
+    rulesText: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.',
     confirmRulesButton: '✅ قوانین را می‌پذیرم',
-    registrationSuccess: '🎉 ثبت‌نام شما با موفقیت انجام شد!',
-    welcomeBack: 'خوش برگشتی! 👋',
+    registrationSuccess: '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: ' + DAILY_LIMIT_TEXT + ' تومان',
+    welcomeBack: 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋',
+
     mustJoinTitle: 'برای استفاده از ربات، ابتدا باید عضو کانال زیر شوید:',
     joinChannelButton: '📢 عضویت در کانال',
     checkMembershipButton: '✅ عضو شدم',
-    stillNotMember: 'هنوز عضو کانال نشده‌اید.',
+    stillNotMember: 'هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید، سپس دوباره تلاش کنید.',
     walletTitle: '🎒 جیب',
     walletBalance: '💰 موجودی فعلی شما: ',
     walletIncrease: '➕ افزایش موجودی',
     walletWithdraw: '💳 برداشت موجودی',
     walletAddCard: '➕ افزودن کارت جدید',
+    backButton: '🔙 بازگشت',
     depositMethodTitle: 'روش افزایش موجودی را انتخاب کنید:',
     depositCard2Card: '💳 کارت به کارت',
     depositTron: '🪙 ترون (تتر)',
     depositGateway: '🌐 درگاه پرداخت',
     comingSoon: 'به‌زودی 🙂',
-    depositCardsTrust: '✅ پرداخت شما مستقیماً به حساب رسمی مجموعه واریز می‌شود.\n\nلطفاً مبلغ را به یکی از کارت‌های زیر واریز کنید:',
+    depositCardsTrust: '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:',
     depositAskAmount: 'مبلغ واریزی خود را به تومان وارد کنید:',
-    depositAskReceipt: 'رسید پرداخت خود را ارسال کنید 📎',
-    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅',
-    withdrawAskAmount: 'مبلغ برداشت را وارد کنید (حداقل ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان):',
-    withdrawMinError: 'حداقل مبلغ برداشت ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان است.',
+    depositAskReceipt: 'رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎',
+    depositSubmitted: 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی (معمولاً خیلی سریع)، موجودی شما به‌روزرسانی خواهد شد.',
+    withdrawAskAmount: 'مبلغ برداشت خود را به تومان وارد کنید (حداقل ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان):',
+    withdrawMinError: 'حداقل مبلغ برداشت ' + MIN_WITHDRAW.toLocaleString('en-US') + ' تومان است. لطفاً دوباره وارد کنید:',
     withdrawSelectCard: 'شماره کارت خود را انتخاب کنید:',
-    withdrawSubmitted: 'درخواست برداشت ثبت شد ✅',
+    withdrawSubmitted: 'درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.',
     addCardAsk: 'شماره کارت جدید را وارد کنید (۱۶ رقم):',
-    addCardInvalid: 'شماره کارت معتبر نیست.',
-    addCardSuccess: 'کارت جدید ثبت شد ✅',
+    addCardInvalid: 'شماره کارت وارد شده معتبر نیست. لطفاً دوباره تلاش کنید:',
+    addCardSuccess: 'کارت جدید با موفقیت ثبت شد ✅',
     addCardButton: '➕ افزودن کارت جدید',
     buyMenuTitle: '✨ کدوم محصول رو می‌خوای بخری؟',
-    buyNoProducts: 'فعلاً هیچ محصولی تعریف نشده.',
+    buyNoProducts: 'فعلاً هیچ محصولی برای فروش تعریف نشده.',
+    buyAskAmountUsd: '💵 قیمت هر دلار: {rate} تومان\n💰 حداقل خرید: {minUsd} دلار (حدود {minToman} تومان)\n\nمبلغ خرید خود را به تومان وارد کنید:\nمثال: 200000',
+    buyAskAmountToman: '💰 حداقل خرید: {min} تومان\n\nمبلغ خرید خود را به تومان وارد کنید:\nمثال: 200000',
+    buyMinError: 'مبلغ واردشده کمتر از حداقل خرید ({min} تومان) است. لطفاً دوباره وارد کنید:',
+    buyConfirmSummary: '📦 خلاصه‌ی سفارش:\n\nمحصول: {product}\nمبلغ: {amount} تومان\n\nبا تایید، این مبلغ از موجودی کیف پولت کسر می‌شه.',
     buyConfirmButton: '✅ تایید و خرید',
     buyCancelButton: '❌ انصراف',
-    buyCancelled: 'سفارش لغو شد.',
+    buySuccess: '🎉 خرید شما با موفقیت انجام شد!\n\n🆔 کد پیگیری: {trackingCode}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان\n\nموجودی جدید: {balance} تومان',
+    buyInsufficientBalance: '❌ موجودی کیف پولت کافی نیست.\nمبلغ سفارش: {amount} تومان\nموجودی فعلی: {balance} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.',
     buyChargeWalletButton: '💳 شارژ کیف پول',
+    buyCancelled: 'سفارش لغو شد.',
     profileTitle: '👤 پروفایل شما',
     invoicesTitle: '🧾 فاکتورهای من',
-    invoicesEmpty: 'هنوز فاکتوری ثبت نشده.',
-    supportTitle: '📞 پشتیبانی',
+    invoicesEmpty: 'هنوز هیچ فاکتوری برای شما ثبت نشده.',
+    supportTitle: '📞 پشتیبانی\n\nقبل از تماس، یه نگاه به سوالات متداول بنداز، شاید جوابت همونجا باشه 👇',
     supportFaqButton: '❓ سوالات متداول',
     supportContactButton: '💬 ارتباط با پشتیبانی',
-    supportContactText: 'پیام خود را بنویسید تا پاسخ داده شود.',
-    gameNotEligible: 'هنوز بونوس بازی فعال نشده.',
-    gameEligibleIntro: 'یک بونوس داری! بازی را انتخاب کن.',
-    gameAlreadyUsed: 'بونوس قبلاً استفاده شده.',
+    supportContactText: 'برای ارتباط مستقیم با پشتیبانی، پیام خودتون رو همینجا بنویسید تا در اسرع وقت جواب بگیرید.',
+    faqText: '❓ سوالات متداول\n\n' +
+      '🔹 چقدر طول می‌کشه شارژم تایید بشه؟\n' +
+      'معمولاً چند دقیقه، حداکثر تا چند ساعت.\n\n' +
+      '🔹 حداقل مبلغ برداشت چقدره؟\n' +
+      MIN_WITHDRAW.toLocaleString('en-US') + ' تومان.\n\n' +
+      '🔹 آیا واریزی از کارت دیگران قبوله؟\n' +
+      'نه، فقط از کارتی که به نام خودتون ثبت شده.\n\n' +
+      '🔹 بونوس بازی چطور فعال می‌شه؟\n' +
+      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس بازی برات فعال می‌شه.',
+    gameMenuTitle: '🎮 بازی و بونوس',
+    gameNotEligible: '🔒 هنوز بونوس بازی برات فعال نشده.\n\n' +
+      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی می‌گیری که می‌تونی باهاش بازی کنی و ببری! 🎁',
+    gameEligibleIntro: '🎁 تبریک! یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی داری.\n' +
+      'یکی از بازی‌های زیر رو انتخاب کن و شانستو امتحان کن. اگه ببری، مبلغ مستقیم میاد تو موجودیت و می‌تونی همون لحظه برداشت بزنی 💸',
+    gameAlreadyUsed: 'بونوس بازیت رو قبلاً استفاده کردی. با رسیدن به سقف خرید بعدی، دوباره یه بونوس جدید فعال می‌شه.',
     gameDiceButton: '🎲 بازی تاس',
     gameBasketballButton: '🏀 بازی بسکتبال',
-    gamePlaying: 'در حال بازی...',
-    gameWin: '🎉 بردی! مبلغ به موجودی اضافه شد.',
-    gameLose: 'این بار نبردی.'
+    gamePlaying: '🎲 در حال بازی... منتظر بمون تا نتیجه مشخص بشه...',
+    gameWin: '🎉🎉 تبریک، بردی!!\nمبلغ ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومان به موجودیت اضافه شد. می‌تونی همین الان برداشت بزنی 💸',
+    gameLose: '😔 این بار نبردی، بونوست مصرف شد.\nنگران نباش، با خرید بعدیت دوباره شانس داری!'
   }
 };
 
@@ -136,8 +196,11 @@ const mainMenuButtons = [
 function showMainMenu(ctx) {
   const rows = [];
   for (let i = 0; i < mainMenuButtons.length; i += 2) {
-    const row = [{ text: mainMenuButtons[i].text, callback_data: 'menu_' + mainMenuButtons[i].key }];
-    if (mainMenuButtons[i + 1]) row.push({ text: mainMenuButtons[i + 1].text, callback_data: 'menu_' + mainMenuButtons[i + 1].key });
+    const row = [];
+    row.push({ text: mainMenuButtons[i].text, callback_data: 'menu_' + mainMenuButtons[i].key });
+    if (mainMenuButtons[i + 1]) {
+      row.push({ text: mainMenuButtons[i + 1].text, callback_data: 'menu_' + mainMenuButtons[i + 1].key });
+    }
     rows.push(row);
   }
   ctx.reply('منوی اصلی 🏠', { reply_markup: { inline_keyboard: rows } });
@@ -154,173 +217,363 @@ async function getUserCards(telegramId) {
   const user = await getUser(telegramId);
   const extraRes = await pool.query('SELECT * FROM cards WHERE telegram_id = $1', [String(telegramId)]);
   const list = [];
-  if (user && user.card_number) list.push({ card_number: user.card_number });
-  extraRes.rows.forEach(c => list.push({ card_number: c.card_number }));
+  if (user && user.card_number) {
+    list.push({ card_number: user.card_number });
+  }
+  extraRes.rows.forEach(function (c) { list.push({ card_number: c.card_number }); });
   return list;
 }
 
 async function checkMembership(ctx) {
   const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
-  if (channelsRes.rows.length === 0) return true;
-  for (const channel of channelsRes.rows) {
+  const channels = channelsRes.rows;
+  if (channels.length === 0) return true;
+
+  for (const channel of channels) {
     try {
       const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
-      if (member.status === 'left' || member.status === 'kicked') return false;
-    } catch (e) { return false; }
+      if (member.status === 'left' || member.status === 'kicked') {
+        return false;
+      }
+    } catch (e) {
+      console.log('خطا در بررسی عضویت: ' + e.message);
+      return false;
+    }
   }
   return true;
 }
 
 async function showJoinPrompt(ctx) {
+  const t = texts.fa;
   const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
-  const buttons = channelsRes.rows.map(c => [{ text: texts.fa.joinChannelButton, url: c.invite_link }]);
-  buttons.push([{ text: texts.fa.checkMembershipButton, callback_data: 'check_membership' }]);
-  ctx.reply(texts.fa.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
-}
+  const channels = channelsRes.rows;
 
-function isAdmin(id) {
-  return ADMIN_IDS.includes(Number(id));
-}
-
-async function getUsdRate() {
-  const res = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
-  return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
-}
-
-function fillTemplate(str, data) {
-  let result = str;
-  for (const key in data) result = result.replace(new RegExp('{' + key + '}', 'g'), data[key]);
-  return result;
-}
-
-async function grantBonusIfEligible(telegramId) {
-  const totalRes = await pool.query('SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'completed']);
-  if (Number(totalRes.rows[0].total) >= BONUS_THRESHOLD) {
-    const exist = await pool.query('SELECT id FROM bonuses WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'available']);
-    if (exist.rows.length === 0) {
-      await pool.query('INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1,$2,$3,$4)', [String(telegramId), 'available', BONUS_AMOUNT, new Date().toISOString()]);
-    }
-  }
-}
-
-// ========== دستورات ادمین ==========
-bot.command('admin', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  const w = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
-  const s = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE status = 'pending'");
-  ctx.reply(`👑 پنل مدیریت\n\nکیف پول در انتظار: ${w.rows[0].c}\nفروش در انتظار: ${s.rows[0].c}`, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📥 درخواست‌های کیف پول', callback_data: 'admin_pending' }],
-        [{ text: '💰 درخواست‌های فروش', callback_data: 'admin_sell_pending' }]
-      ]
-    }
+  const buttons = channels.map(function (c) {
+    return [{ text: t.joinChannelButton, url: c.invite_link }];
   });
+  buttons.push([{ text: t.checkMembershipButton, callback_data: 'check_membership' }]);
+
+  ctx.reply(t.mustJoinTitle, { reply_markup: { inline_keyboard: buttons } });
+}
+
+bot.command('setreaction', async (ctx) => {
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    const currentRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
+    const current = currentRes.rows[0] ? currentRes.rows[0].value : '🔥';
+    ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n/setreaction 🔥', { parse_mode: 'Markdown' });
+    return;
+  }
+  const newEmoji = args[1];
+
+  if (ALLOWED_REACTIONS.indexOf(newEmoji) === -1) {
+    ctx.reply(
+      '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست.\n' +
+      'چند نمونه‌ی مجاز:\n🎉 🔥 🤩 💯 🏆 ❤ 👏'
+    );
+    return;
+  }
+
+  try {
+    await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: newEmoji }], true);
+  } catch (e) {
+    ctx.reply('⚠️ خطای واقعی: ' + e.message);
+    return;
+  }
+
+  await pool.query(
+    'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+    ['start_reaction', newEmoji]
+  );
+  ctx.reply('✅ اکشن استارت با موفقیت به (' + newEmoji + ') تغییر یافت!');
 });
 
 bot.command('setrate', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
   const args = ctx.message.text.split(' ');
-  if (args.length < 2) return ctx.reply('نرخ را وارد کنید');
-  const rate = parseInt(args[1].replace(/\D/g, ''));
-  if (!rate) return ctx.reply('عدد معتبر نیست');
-  await pool.query('INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = $2', ['usd_rate', String(rate)]);
-  ctx.reply('نرخ دلار به ' + rate.toLocaleString('en-US') + ' تغییر کرد');
+  if (args.length < 2) {
+    const currentRate = await getUsdRate();
+    ctx.reply('❌ لطفاً نرخ جدید را وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n/setrate 65000', { parse_mode: 'Markdown' });
+    return;
+  }
+  const newRate = parseInt(args[1].replace(/[^0-9]/g, ''), 10);
+  if (!newRate || newRate <= 0) {
+    ctx.reply('⚠️ عدد واردشده معتبر نیست.');
+    return;
+  }
+  await pool.query(
+    'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+    ['usd_rate', String(newRate)]
+  );
+  ctx.reply('✅ نرخ دلار با موفقیت به ' + newRate.toLocaleString('en-US') + ' تومان تغییر یافت!');
 });
 
 bot.command('addproduct', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  const parts = ctx.message.text.replace(/^\/addproduct\s*/, '').split('|').map(p => p.trim());
-  if (parts.length < 4) return ctx.reply('فرمت: /addproduct کلید|نام|حداقل|usd یا toman|کارمزد');
-  const [key, name, minRaw, type, feeRaw] = parts;
-  const minAmount = Number(minRaw.replace(/[^0-9.]/g, ''));
-  const fee = feeRaw ? Number(feeRaw.replace(/\D/g, '')) : 20000;
-  if (!key || !name || !minAmount) return ctx.reply('مقادیر نامعتبر');
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const raw = ctx.message.text.replace(/^\/addproduct(@\w+)?\s*/, '');
+  const parts = raw.split('|').map(function (p) { return p.trim(); });
+
+  if (parts.length !== 4) {
+    ctx.reply(
+      '❌ فرمت درست نیست.\n\n' +
+      'فرمت صحیح:\n/addproduct کلید|نام نمایشی|حداقل مبلغ|نوع'
+    );
+    return;
+  }
+
+  const [key, name, minAmountRaw, priceType] = parts;
+  const minAmount = Number(minAmountRaw.replace(/[^0-9.]/g, ''));
+
+  if (!key || !name || !minAmount || (priceType !== 'usd' && priceType !== 'toman')) {
+    ctx.reply('❌ مقادیر نامعتبر است.');
+    return;
+  }
+
   await pool.query(
-    `INSERT INTO products (key, name, min_amount, price_type, active, buy_active, sell_active, sell_fee, created_at)
-     VALUES ($1,$2,$3,$4,1,1,1,$5,$6)
-     ON CONFLICT (key) DO UPDATE SET name=$2, min_amount=$3, price_type=$4, sell_fee=$5, active=1`,
-    [key, name, minAmount, type, fee, new Date().toISOString()]
+    'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ($1, $2, $3, $4, 1, $5) ' +
+    'ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, min_amount = EXCLUDED.min_amount, price_type = EXCLUDED.price_type, active = 1',
+    [key, name, minAmount, priceType, new Date().toISOString()]
   );
-  ctx.reply(`محصول ${name} اضافه شد. کارمزد فروش: ${fee.toLocaleString('en-US')}`);
+
+  ctx.reply('✅ محصول «' + name + '» با موفقیت اضافه/ویرایش شد.');
 });
 
 bot.command('listproducts', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  const res = await pool.query('SELECT * FROM products ORDER BY id');
-  if (!res.rows.length) return ctx.reply('محصولی نیست');
-  let msg = '📦 محصولات:\n\n';
-  res.rows.forEach(p => {
-    msg += `${p.key} | ${p.name} | حداقل: ${p.min_amount} | کارمزد: ${p.sell_fee || 20000} | ${p.active ? 'فعال' : 'غیرفعال'}\n`;
-  });
-  ctx.reply(msg);
-});
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const res = await pool.query('SELECT * FROM products ORDER BY id ASC');
 
-// ========== شروع ==========
-bot.start(async (ctx) => {
-  const isMember = await checkMembership(ctx);
-  if (!isMember) return showJoinPrompt(ctx);
-
-  const user = await getUser(ctx.from.id);
-  if (user) {
-    ctx.reply(texts.fa.welcomeBack);
-    return showMainMenu(ctx);
+  if (res.rows.length === 0) {
+    ctx.reply('هنوز هیچ محصولی تعریف نشده.');
+    return;
   }
 
-  sessions[ctx.from.id] = { flow: 'registration', step: 'waiting_phone', data: {} };
-  ctx.reply(texts.fa.welcome);
-  ctx.reply(texts.fa.requestPhone, Markup.keyboard([Markup.button.contactRequest(texts.fa.sharePhoneButton)]).resize().oneTime());
+  let message = '📦 لیست محصولات:\n\n';
+  res.rows.forEach(function (p) {
+    const statusLabel = p.active ? '✅ فعال' : '⛔️ غیرفعال';
+    const priceLabel = p.price_type === 'usd' ? Number(p.min_amount) + ' دلار' : Number(p.min_amount).toLocaleString('en-US') + ' تومان';
+    message += 'کلید: ' + p.key + '\nنام: ' + p.name + '\nحداقل خرید: ' + priceLabel + '\nوضعیت: ' + statusLabel + '\n\n';
+  });
+
+  ctx.reply(message, { parse_mode: 'Markdown' });
 });
+
+bot.command('removeproduct', async (ctx) => {
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    ctx.reply('❌ کلید محصول رو وارد کنید.');
+    return;
+  }
+  const key = args[1].trim();
+  const res = await pool.query("UPDATE products SET active = 0 WHERE key = $1 RETURNING name", [key]);
+
+  if (res.rows.length === 0) {
+    ctx.reply('محصولی با این کلید پیدا نشد.');
+    return;
+  }
+
+  ctx.reply('✅ محصول «' + res.rows[0].name + '» غیرفعال شد.');
+});
+
+bot.command('find', async (ctx) => {
+  if (ADMIN_IDS.indexOf(Number(ctx.from.id)) === -1) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    ctx.reply('❌ کد پیگیری رو بعد از دستور بنویس.\nمثال:\n/find VOC-847392');
+    return;
+  }
+  const code = args[1].trim().toUpperCase();
+
+  const orderRes = await pool.query('SELECT * FROM orders WHERE tracking_code = $1', [code]);
+  const walletRes = await pool.query('SELECT * FROM wallet_requests WHERE tracking_code = $1', [code]);
+
+  if (orderRes.rows.length === 0 && walletRes.rows.length === 0) {
+    ctx.reply('❌ هیچ رکوردی با این کد پیگیری پیدا نشد.');
+    return;
+  }
+
+  if (orderRes.rows.length > 0) {
+    const o = orderRes.rows[0];
+    const user = await getUser(o.telegram_id);
+    ctx.reply(
+      '📦 سفارش خرید\n\n🆔 کد پیگیری: ' + o.tracking_code +
+      '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') +
+      '\n📱 شماره: ' + (user ? user.phone : '-') +
+      '\n📦 محصول: ' + o.product_type +
+      '\n💰 مبلغ: ' + Number(o.amount).toLocaleString('en-US') + ' تومان' +
+      '\n📌 وضعیت: ' + o.status +
+      '\n📅 تاریخ: ' + o.created_at
+    );
+  }
+
+  if (walletRes.rows.length > 0) {
+    const w = walletRes.rows[0];
+    const user = await getUser(w.telegram_id);
+    const typeLabel = w.type === 'deposit' ? '➕ شارژ کیف پول' : '💳 برداشت موجودی';
+    ctx.reply(
+      typeLabel + '\n\n🆔 کد پیگیری: ' + w.tracking_code +
+      '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') +
+      '\n📱 شماره: ' + (user ? user.phone : '-') +
+      '\n💰 مبلغ: ' + Number(w.amount).toLocaleString('en-US') + ' تومان' +
+      '\n📌 وضعیت: ' + w.status +
+      '\n📅 تاریخ: ' + w.created_at
+    );
+  }
+});
+
+async function triggerStartReaction(ctx) {
+  try {
+    const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
+    let emoji = settingRes.rows[0] ? settingRes.rows[0].value : '🎉';
+    if (ALLOWED_REACTIONS.indexOf(emoji) === -1) { emoji = '🎉'; }
+    await ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: emoji }], true);
+  } catch (e) {
+    console.log('REACTION ERROR: ' + e.message);
+  }
+}
 
 bot.action('check_membership', async (ctx) => {
   ctx.answerCbQuery();
-  if (!(await checkMembership(ctx))) return ctx.reply(texts.fa.stillNotMember);
+  const isMember = await checkMembership(ctx);
+
+  if (!isMember) {
+    ctx.reply(texts.fa.stillNotMember);
+    return;
+  }
+
   await safeDelete(ctx);
-  const user = await getUser(ctx.from.id);
-  if (user) {
-    ctx.reply(texts.fa.welcomeBack);
+  const existingUser = await getUser(ctx.from.id);
+  if (existingUser) {
+    const lang = existingUser.language || 'fa';
+    ctx.reply(texts[lang].welcomeBack);
     showMainMenu(ctx);
   } else {
-    sessions[ctx.from.id] = { flow: 'registration', step: 'waiting_phone', data: {} };
-    ctx.reply(texts.fa.requestPhone, Markup.keyboard([Markup.button.contactRequest(texts.fa.sharePhoneButton)]).resize().oneTime());
+    ctx.reply(texts.fa.chooseLanguage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
+            { text: '🇬🇧 English', callback_data: 'lang_en' }
+          ]
+        ]
+      }
+    });
   }
 });
 
-bot.on('contact', async (ctx) => {
-  const session = sessions[ctx.from.id];
-  if (!session || session.flow !== 'registration') return;
-  session.data.phone = ctx.message.contact.phone_number;
-  session.step = 'waiting_name';
-  ctx.reply(texts.fa.requestName, { reply_markup: { remove_keyboard: true } });
-});
+bot.start(async (ctx) => {
+  triggerStartReaction(ctx);
 
-// ========== منوها ==========
-bot.action('menu_wallet', async (ctx) => {
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const user = await getUser(ctx.from.id);
-  const balance = user ? user.balance : 0;
-  ctx.reply(texts.fa.walletTitle + '\n\n' + texts.fa.walletBalance + Number(balance).toLocaleString('en-US') + ' تومان', {
+  const isMember = await checkMembership(ctx);
+  if (!isMember) {
+    await showJoinPrompt(ctx);
+    return;
+  }
+
+  const existingUser = await getUser(ctx.from.id);
+  if (existingUser) {
+    const lang = existingUser.language || 'fa';
+    ctx.reply(texts[lang].welcomeBack);
+    showMainMenu(ctx);
+    return;
+  }
+
+  ctx.reply(texts.fa.chooseLanguage, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: texts.fa.walletIncrease, callback_data: 'wallet_deposit' }],
-        [{ text: texts.fa.walletWithdraw, callback_data: 'wallet_withdraw' }],
-        [{ text: texts.fa.walletAddCard, callback_data: 'wallet_addcard' }],
-        [{ text: '🧾 گزارش', callback_data: 'menu_invoices' }],
-        [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
+        [
+          { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
+          { text: '🇬🇧 English', callback_data: 'lang_en' }
+        ]
       ]
     }
   });
+});
+
+function handleLanguageChoice(ctx, lang) {
+  sessions[ctx.from.id] = { flow: 'registration', step: 'waiting_phone', lang: lang, data: {} };
+  const t = texts[lang] || texts.fa;
+
+  try {
+    ctx.editMessageText(t.welcome);
+  } catch (e) {
+    ctx.reply(t.welcome);
+  }
+
+  ctx.reply(
+    t.requestPhone,
+    Markup.keyboard([
+      Markup.button.contactRequest(t.sharePhoneButton)
+    ]).resize().oneTime()
+  );
+}
+
+bot.action('lang_fa', (ctx) => handleLanguageChoice(ctx, 'fa'));
+bot.action('lang_en', (ctx) => handleLanguageChoice(ctx, 'fa'));
+
+bot.on('contact', (ctx) => {
+  const session = sessions[ctx.from.id];
+  if (!session || session.flow !== 'registration') return;
+
+  session.data.phone = ctx.message.contact.phone_number;
+  session.step = 'waiting_name';
+
+  const t = texts[session.lang] || texts.fa;
+  ctx.reply(t.requestName, { reply_markup: { remove_keyboard: true } });
+});
+
+async function showWalletMenu(ctx) {
+  const t = texts.fa;
+  const user = await getUser(ctx.from.id);
+  const balance = user ? user.balance : 0;
+
+  ctx.reply(t.walletTitle + '\n\n' + t.walletBalance + Number(balance).toLocaleString('en-US') + ' تومان', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: t.walletIncrease, callback_data: 'wallet_deposit' }],
+        [{ text: t.walletWithdraw, callback_data: 'wallet_withdraw' }],
+        [{ text: t.walletAddCard, callback_data: 'wallet_addcard' }],
+        [{ text: '🧾 گزارش تراکنش‌ها', callback_data: 'menu_invoices' }]
+      ]
+    }
+  });
+}
+
+bot.action('menu_wallet', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  await showWalletMenu(ctx);
+});
+
+bot.action('menu_referral', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.reply('به‌زودی 🙂');
 });
 
 bot.action('menu_profile', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
+  const t = texts.fa;
   const user = await getUser(ctx.from.id);
-  if (!user) return ctx.reply('اطلاعاتی ثبت نشده');
-  ctx.reply(`${texts.fa.profileTitle}\n\n👤 ${user.full_name || '-'}\n📱 ${user.phone || '-'}\n💳 ${user.card_number || '-'}\n💰 ${Number(user.balance).toLocaleString('en-US')} تومان`, {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]] }
-  });
+  if (!user) {
+    ctx.reply('اطلاعاتی برای شما ثبت نشده.');
+    return;
+  }
+  ctx.reply(
+    t.profileTitle + '\n\n' +
+    '👤 نام: ' + (user.full_name || '-') + '\n' +
+    '📱 شماره تلفن: ' + (user.phone || '-') + '\n' +
+    '💳 شماره کارت: ' + (user.card_number || '-') + '\n' +
+    '💰 موجودی: ' + Number(user.balance).toLocaleString('en-US') + ' تومان',
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu' }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action('back_main_menu', async (ctx) => {
@@ -336,14 +589,53 @@ bot.action('cancel_flow', async (ctx) => {
   showMainMenu(ctx);
 });
 
+bot.action('menu_invoices', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  const t = texts.fa;
+  const user = await getUser(ctx.from.id);
+  if (!user) {
+    ctx.reply(t.invoicesEmpty);
+    return;
+  }
+
+  const ordersRes = await pool.query('SELECT * FROM orders WHERE telegram_id = $1 ORDER BY id DESC LIMIT 10', [String(ctx.from.id)]);
+  const walletRes = await pool.query('SELECT * FROM wallet_requests WHERE telegram_id = $1 ORDER BY id DESC LIMIT 10', [String(ctx.from.id)]);
+
+  if (ordersRes.rows.length === 0 && walletRes.rows.length === 0) {
+    ctx.reply(t.invoicesEmpty);
+    return;
+  }
+
+  let message = t.invoicesTitle + '\n\n';
+
+  ordersRes.rows.forEach(function (o) {
+    message += '📦 خرید | ' + o.product_type + ' | ' + Number(o.amount).toLocaleString('en-US') + ' تومان\n';
+    message += 'کد: ' + (o.tracking_code || '-') + ' | وضعیت: ' + o.status + '\n\n';
+  });
+
+  walletRes.rows.forEach(function (w) {
+    const typeLabel = w.type === 'deposit' ? '➕ شارژ' : '💳 برداشت';
+    message += typeLabel + ' | ' + Number(w.amount).toLocaleString('en-US') + ' تومان\n';
+    message += 'کد: ' + (w.tracking_code || '-') + ' | وضعیت: ' + w.status + '\n\n';
+  });
+
+  ctx.reply(message, {
+    reply_markup: {
+      inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]]
+    }
+  });
+});
+
 bot.action('menu_support', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  ctx.reply(texts.fa.supportTitle, {
+  const t = texts.fa;
+  ctx.reply(t.supportTitle, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: texts.fa.supportFaqButton, callback_data: 'support_faq' }],
-        [{ text: texts.fa.supportContactButton, callback_data: 'support_contact' }],
+        [{ text: t.supportFaqButton, callback_data: 'support_faq' }],
+        [{ text: t.supportContactButton, callback_data: 'support_contact' }],
         [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
       ]
     }
@@ -353,8 +645,10 @@ bot.action('menu_support', async (ctx) => {
 bot.action('support_faq', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  ctx.reply('سوالات متداول به‌زودی کامل می‌شود.', {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'menu_support' }]] }
+  ctx.reply(texts.fa.faqText, {
+    reply_markup: {
+      inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'menu_support' }]]
+    }
   });
 });
 
@@ -364,103 +658,125 @@ bot.action('support_contact', async (ctx) => {
   ctx.reply(texts.fa.supportContactText);
 });
 
-bot.action('menu_rules_education', async (ctx) => {
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  ctx.reply(texts.fa.rulesText);
-});
-
 bot.action('menu_game', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  const bonus = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1 AND status = $2', [String(ctx.from.id), 'available']);
-  if (bonus.rows.length === 0) return ctx.reply(texts.fa.gameNotEligible);
-  ctx.reply(texts.fa.gameEligibleIntro, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: texts.fa.gameDiceButton, callback_data: 'game_dice' }],
-        [{ text: texts.fa.gameBasketballButton, callback_data: 'game_basketball' }],
-        [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
-      ]
-    }
-  });
-});
+  const t = texts.fa;
+  const user = await getUser(ctx.from.id);
+  if (!user) {
+    ctx.reply('ابتدا ثبت‌نام کنید.');
+    return;
+  }
 
-bot.action(['game_dice', 'game_basketball'], async (ctx) => {
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const bonus = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1 AND status = $2 LIMIT 1', [String(ctx.from.id), 'available']);
-  if (!bonus.rows.length) return ctx.reply(texts.fa.gameAlreadyUsed);
-  ctx.reply(texts.fa.gamePlaying);
-  const win = Math.random() < BONUS_WIN_PROBABILITY;
-  if (win) {
-    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [BONUS_AMOUNT, String(ctx.from.id)]);
-    await pool.query("UPDATE bonuses SET status = 'used' WHERE id = $1", [bonus.rows[0].id]);
-    ctx.reply(texts.fa.gameWin);
+  const totalBuyRes = await pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = $2', [String(ctx.from.id), 'completed']);
+  const totalBuy = Number(totalBuyRes.rows[0].total);
+
+  const bonusRes = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1 AND status = $2', [String(ctx.from.id), 'available']);
+  const hasBonus = bonusRes.rows.length > 0;
+
+  if (totalBuy < BONUS_THRESHOLD && !hasBonus) {
+    ctx.reply(t.gameNotEligible);
+    return;
+  }
+
+  if (hasBonus) {
+    ctx.reply(t.gameEligibleIntro, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: t.gameDiceButton, callback_data: 'game_dice' }],
+          [{ text: t.gameBasketballButton, callback_data: 'game_basketball' }],
+          [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
+        ]
+      }
+    });
   } else {
-    await pool.query("UPDATE bonuses SET status = 'used' WHERE id = $1", [bonus.rows[0].id]);
-    ctx.reply(texts.fa.gameLose);
+    ctx.reply(t.gameAlreadyUsed);
   }
 });
 
-// ========== خرید ==========
+bot.action('game_dice', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  await playGame(ctx, 'dice');
+});
+
+bot.action('game_basketball', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  await playGame(ctx, 'basketball');
+});
+
+async function playGame(ctx, type) {
+  const t = texts.fa;
+  const bonusRes = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1 AND status = $2 LIMIT 1', [String(ctx.from.id), 'available']);
+  if (bonusRes.rows.length === 0) {
+    ctx.reply(t.gameAlreadyUsed);
+    return;
+  }
+
+  const bonus = bonusRes.rows[0];
+  ctx.reply(t.gamePlaying);
+
+  const win = Math.random() < BONUS_WIN_PROBABILITY;
+
+  if (win) {
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [BONUS_AMOUNT, String(ctx.from.id)]);
+    await pool.query("UPDATE bonuses SET status = 'used' WHERE id = $1", [bonus.id]);
+    ctx.reply(t.gameWin);
+  } else {
+    await pool.query("UPDATE bonuses SET status = 'used' WHERE id = $1", [bonus.id]);
+    ctx.reply(t.gameLose);
+  }
+}
+
+async function grantBonusIfEligible(telegramId) {
+  const totalBuyRes = await pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'completed']);
+  const totalBuy = Number(totalBuyRes.rows[0].total);
+
+  if (totalBuy >= BONUS_THRESHOLD) {
+    const existing = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'available']);
+    if (existing.rows.length === 0) {
+      await pool.query(
+        'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
+        [String(telegramId), 'available', BONUS_AMOUNT, new Date().toISOString()]
+      );
+    }
+  }
+}
+
+async function getUsdRate() {
+  const res = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
+  if (res.rows.length > 0) {
+    return Number(res.rows[0].value);
+  }
+  return DEFAULT_USD_RATE;
+}
+
+function fillTemplate(template, data) {
+  let result = template;
+  for (const key in data) {
+    result = result.replace(new RegExp('\\{' + key + '\\}', 'g'), data[key]);
+  }
+  return result;
+}
+
 bot.action('menu_buy', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  const products = await pool.query('SELECT * FROM products WHERE active = 1 AND buy_active = 1 ORDER BY id');
-  if (!products.rows.length) return ctx.reply(texts.fa.buyNoProducts);
-  const buttons = products.rows.map(p => [{ text: p.name, callback_data: 'buy_' + p.key }]);
+  const t = texts.fa;
+
+  const productsRes = await pool.query('SELECT * FROM products WHERE active = 1 ORDER BY id ASC');
+  if (productsRes.rows.length === 0) {
+    ctx.reply(t.buyNoProducts);
+    return;
+  }
+
+  const buttons = productsRes.rows.map(function (p) {
+    return [{ text: p.name, callback_data: 'buy_' + p.key }];
+  });
   buttons.push([{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]);
-  ctx.reply(texts.fa.buyMenuTitle, { reply_markup: { inline_keyboard: buttons } });
-});
 
-bot.action(/^buy_(.+)/, async (ctx) => {
-  ctx.answerCbQuery();
-  const key = ctx.match[1];
-  const product = (await pool.query('SELECT * FROM products WHERE key = $1 AND active = 1 AND buy_active = 1', [key])).rows[0];
-  if (!product) return ctx.reply(texts.fa.buyNoProducts);
-
-  let minToman = product.price_type === 'usd' ? Math.round(Number(product.min_amount) * await getUsdRate()) : Number(product.min_amount);
-  sessions[ctx.from.id] = {
-    flow: 'buy',
-    step: 'waiting_amount',
-    data: { productType: product.key, productLabel: product.name, minAmount: minToman }
-  };
-
-  const msg = product.price_type === 'usd'
-    ? `قیمت دلار: ${(await getUsdRate()).toLocaleString('en-US')}\nحداقل: ${minToman.toLocaleString('en-US')} تومان\n\nمبلغ را وارد کنید:`
-    : `حداقل: ${minToman.toLocaleString('en-US')} تومان\n\nمبلغ را وارد کنید:`;
-
-  try {
-    await ctx.editMessageText(msg, { reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] } });
-  } catch (e) {
-    await safeDelete(ctx);
-    const sent = await ctx.reply(msg, { reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] } });
-    sessions[ctx.from.id].lastBotMsgId = sent.message_id;
-  }
-});
-
-bot.action('buy_confirm', async (ctx) => {
-  ctx.answerCbQuery();
-  const session = sessions[ctx.from.id];
-  if (!session || session.flow !== 'buy') return;
-  await safeDelete(ctx);
-  const user = await getUser(ctx.from.id);
-  const amount = session.data.amount;
-  if (!user || user.balance < amount) {
-    delete sessions[ctx.from.id];
-    return ctx.reply('موجودی کافی نیست.', {
-      reply_markup: { inline_keyboard: [[{ text: texts.fa.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
-    });
-  }
-  await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [amount, String(ctx.from.id)]);
-  const code = generateTrackingCode();
-  await pool.query('INSERT INTO orders (telegram_id, product_type, amount, status, created_at, tracking_code) VALUES ($1,$2,$3,$4,$5,$6)',
-    [String(ctx.from.id), session.data.productType, amount, 'completed', new Date().toISOString(), code]);
-  const newBal = (await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)])).rows[0].balance;
-  delete sessions[ctx.from.id];
-  ctx.reply(`🎉 خرید موفق\nکد پیگیری: ${code}\nمحصول: ${session.data.productLabel}\nمبلغ: ${amount.toLocaleString('en-US')}\nموجودی جدید: ${Number(newBal).toLocaleString('en-US')}`);
-  await grantBonusIfEligible(ctx.from.id);
+  ctx.reply(t.buyMenuTitle, { reply_markup: { inline_keyboard: buttons } });
 });
 
 bot.action('buy_cancel', async (ctx) => {
@@ -470,59 +786,171 @@ bot.action('buy_cancel', async (ctx) => {
   ctx.reply(texts.fa.buyCancelled);
 });
 
-// ========== فروش ==========
-bot.action('menu_sell', async (ctx) => {
+bot.action('buy_confirm', async (ctx) => {
   ctx.answerCbQuery();
+  const t = texts.fa;
+  const session = sessions[ctx.from.id];
+  if (!session || session.flow !== 'buy' || session.step !== 'waiting_confirm') {
+    await safeDelete(ctx);
+    ctx.reply(t.buyCancelled);
+    return;
+  }
+
+  const user = await getUser(ctx.from.id);
+  const amount = session.data.amount;
+
   await safeDelete(ctx);
-  const products = await pool.query('SELECT * FROM products WHERE active = 1 AND sell_active = 1 ORDER BY id');
-  if (!products.rows.length) return ctx.reply('هیچ محصولی برای فروش فعال نیست.');
-  const buttons = products.rows.map(p => [{ text: p.name, callback_data: 'sell_product_' + p.key }]);
-  buttons.push([{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]);
-  ctx.reply('کدام محصول را می‌فروشید؟', { reply_markup: { inline_keyboard: buttons } });
+
+  if (!user || Number(user.balance) < amount) {
+    delete sessions[ctx.from.id];
+    ctx.reply(fillTemplate(t.buyInsufficientBalance, {
+      amount: amount.toLocaleString('en-US'),
+      balance: user ? Number(user.balance).toLocaleString('en-US') : '0'
+    }), {
+      reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
+    });
+    return;
+  }
+
+  await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [amount, String(ctx.from.id)]);
+
+  const trackingCode = generateTrackingCode();
+  await pool.query(
+    'INSERT INTO orders (telegram_id, product_type, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6)',
+    [String(ctx.from.id), session.data.productType, amount, 'completed', new Date().toISOString(), trackingCode]
+  );
+
+  const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
+  const newBalance = newBalanceRes.rows[0].balance;
+
+  delete sessions[ctx.from.id];
+
+  ctx.reply(fillTemplate(t.buySuccess, {
+    product: session.data.productLabel,
+    amount: amount.toLocaleString('en-US'),
+    balance: Number(newBalance).toLocaleString('en-US'),
+    trackingCode: trackingCode
+  }));
+
+  await grantBonusIfEligible(ctx.from.id);
 });
 
-bot.action(/^sell_product_(.+)/, async (ctx) => {
+bot.action(/^buy_(.+)/, async (ctx) => {
+  const key = ctx.match[1];
   ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const product = (await pool.query('SELECT * FROM products WHERE key = $1 AND sell_active = 1', [ctx.match[1]])).rows[0];
-  if (!product) return ctx.reply('محصول فعال نیست');
+  const t = texts.fa;
+
+  const productRes = await pool.query('SELECT * FROM products WHERE key = $1 AND active = 1', [key]);
+  const product = productRes.rows[0];
+  if (!product) {
+    await safeDelete(ctx);
+    ctx.reply(t.buyNoProducts);
+    return;
+  }
+
+  let minToman;
+  let messageText;
+
+  if (product.price_type === 'usd') {
+    const rate = await getUsdRate();
+    minToman = Math.round(Number(product.min_amount) * rate);
+    messageText = fillTemplate(t.buyAskAmountUsd, {
+      rate: rate.toLocaleString('en-US'),
+      minUsd: Number(product.min_amount).toLocaleString('en-US'),
+      minToman: minToman.toLocaleString('en-US')
+    });
+  } else {
+    minToman = Number(product.min_amount);
+    messageText = fillTemplate(t.buyAskAmountToman, { min: minToman.toLocaleString('en-US') });
+  }
+
   sessions[ctx.from.id] = {
-    flow: 'sell',
-    step: 'waiting_code',
-    data: { productKey: product.key, productName: product.name, fee: product.sell_fee || 20000 }
+    flow: 'buy',
+    step: 'waiting_amount',
+    lang: 'fa',
+    data: { productType: product.key, productLabel: product.name, minAmount: minToman }
   };
-  const sent = await ctx.reply(`محصول: ${product.name}\nکارمزد: ${Number(product.sell_fee || 20000).toLocaleString('en-US')} تومان\n\nکد را ارسال کنید:`, {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 انصراف', callback_data: 'cancel_flow' }]] }
-  });
-  sessions[ctx.from.id].lastBotMsgId = sent.message_id;
+
+  try {
+    await ctx.editMessageText(messageText, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
+    });
+  } catch (e) {
+    await safeDelete(ctx);
+    const sent = await ctx.reply(messageText, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
+    });
+    sessions[ctx.from.id].lastBotMsgId = sent.message_id;
+  }
 });
 
-// ========== کیف پول ==========
+bot.action('menu_rules_education', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  ctx.reply(texts.fa.rulesText + '\n\n📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
+});
+
+bot.action('menu_rules', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  ctx.reply(texts.fa.rulesText);
+});
+
+bot.action('menu_education', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  ctx.reply('📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
+});
+
+bot.action(/^menu_.+/, (ctx) => {
+  const actionKey = ctx.match[0];
+  const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game', 'menu_rules', 'menu_education', 'menu_rules_education', 'menu_buy'];
+  if (known.indexOf(actionKey) !== -1) return;
+  ctx.answerCbQuery();
+  ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
+});
+
 bot.action('wallet_deposit', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  ctx.reply(texts.fa.depositMethodTitle, {
+  const t = texts.fa;
+  ctx.reply(t.depositMethodTitle, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: texts.fa.depositCard2Card, callback_data: 'deposit_card2card' }],
-        [{ text: texts.fa.depositTron, callback_data: 'deposit_tron' }],
-        [{ text: texts.fa.depositGateway, callback_data: 'deposit_gateway' }]
+        [{ text: t.depositCard2Card, callback_data: 'deposit_card2card' }],
+        [{ text: t.depositTron, callback_data: 'deposit_tron' }],
+        [{ text: t.depositGateway, callback_data: 'deposit_gateway' }]
       ]
     }
   });
 });
 
-bot.action('deposit_tron', async (ctx) => { ctx.answerCbQuery(); await safeDelete(ctx); ctx.reply(texts.fa.comingSoon); });
-bot.action('deposit_gateway', async (ctx) => { ctx.answerCbQuery(); await safeDelete(ctx); ctx.reply(texts.fa.comingSoon); });
+bot.action('deposit_tron', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  ctx.reply(texts.fa.comingSoon);
+});
+
+bot.action('deposit_gateway', async (ctx) => {
+  ctx.answerCbQuery();
+  await safeDelete(ctx);
+  ctx.reply(texts.fa.comingSoon);
+});
 
 bot.action('deposit_card2card', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  let msg = texts.fa.depositCardsTrust + '\n\n';
-  DEPOSIT_CARDS.forEach(c => msg += `\`\( {c.number}\`\n \){c.owner}\n\n`);
-  await ctx.reply(msg, { parse_mode: 'Markdown' });
-  sessions[ctx.from.id] = { flow: 'deposit', step: 'waiting_amount', data: {} };
-  const sent = await ctx.reply(texts.fa.depositAskAmount, {
+  const t = texts.fa;
+
+  let cardsMessage = t.depositCardsTrust + '\n\n';
+  DEPOSIT_CARDS.forEach(function (c) {
+    cardsMessage += '`' + c.number + '`' + '\n' + c.owner + '\n\n';
+  });
+
+  await ctx.reply(cardsMessage, { parse_mode: 'Markdown' });
+
+  sessions[ctx.from.id] = { flow: 'deposit', step: 'waiting_amount', lang: 'fa', data: {} };
+  const sent = await ctx.reply(t.depositAskAmount, {
     reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
   });
   sessions[ctx.from.id].lastBotMsgId = sent.message_id;
@@ -531,7 +959,7 @@ bot.action('deposit_card2card', async (ctx) => {
 bot.action('wallet_withdraw', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', data: {} };
+  sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: 'fa', data: {} };
   const sent = await ctx.reply(texts.fa.withdrawAskAmount, {
     reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
   });
@@ -541,177 +969,107 @@ bot.action('wallet_withdraw', async (ctx) => {
 bot.action(/^withdraw_card_(.+)$/, async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
+  const cardNumber = ctx.match[1];
   const session = sessions[ctx.from.id];
-  const amount = session?.data?.amount;
-  const code = generateTrackingCode();
-  await pool.query('INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [String(ctx.from.id), 'withdraw', amount, ctx.match[1], 'pending', new Date().toISOString(), code]);
+  const amount = session && session.data ? session.data.amount : null;
+
+  const trackingCode = generateTrackingCode();
+  await pool.query(
+    'INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [String(ctx.from.id), 'withdraw', amount, cardNumber, 'pending', new Date().toISOString(), trackingCode]
+  );
+
   delete sessions[ctx.from.id];
-  ctx.reply(texts.fa.withdrawSubmitted + '\n\nکد پیگیری: ' + code);
+  ctx.reply(texts.fa.withdrawSubmitted + '\n\n🆔 کد پیگیری: ' + trackingCode);
 });
 
 bot.action('wallet_addcard', async (ctx) => {
   ctx.answerCbQuery();
   await safeDelete(ctx);
-  sessions[ctx.from.id] = { flow: 'addcard', step: 'waiting_card', data: {} };
+  sessions[ctx.from.id] = { flow: 'addcard', step: 'waiting_card', lang: 'fa', data: {} };
   const sent = await ctx.reply(texts.fa.addCardAsk);
   sessions[ctx.from.id].lastBotMsgId = sent.message_id;
 });
 
-// ========== ادمین ==========
-bot.action('admin_pending', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const list = await pool.query("SELECT * FROM wallet_requests WHERE status = 'pending' ORDER BY id");
-  if (!list.rows.length) return ctx.reply('درخواستی نیست');
-  for (const req of list.rows) {
-    const user = await getUser(req.telegram_id);
-    const typeLabel = req.type === 'deposit' ? '➕ شارژ' : '💳 برداشت';
-    let msg = `${typeLabel}\nکد: ${req.tracking_code || '-'}\nکاربر: \( {user ? user.full_name : 'نامشخص'} ( \){req.telegram_id})\nمبلغ: ${Number(req.amount).toLocaleString('en-US')}`;
-    if (req.type === 'withdraw') msg += `\nکارت: ${req.card_number}`;
-    const buttons = [
-      [{ text: '✅ تأیید', callback_data: 'admin_approve_' + req.id }, { text: '❌ رد', callback_data: 'admin_reject_' + req.id }],
-      [{ text: '✉️ رد با توضیح', callback_data: 'admin_reject_reason_' + req.id }]
-    ];
-    if (req.type === 'deposit' && req.receipt_file_id) {
-      await ctx.replyWithPhoto(req.receipt_file_id, { caption: msg, reply_markup: { inline_keyboard: buttons } });
-    } else {
-      await ctx.reply(msg, { reply_markup: { inline_keyboard: buttons } });
-    }
-  }
+bot.action('confirm_rules', async (ctx) => {
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
+  delete sessions[ctx.from.id];
+  showMainMenu(ctx);
 });
 
-bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const req = (await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [ctx.match[1]])).rows[0];
-  if (!req || req.status !== 'pending') return ctx.reply('قبلاً بررسی شده');
-  if (req.type === 'deposit') {
-    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [req.amount, req.telegram_id]);
-    bot.telegram.sendMessage(req.telegram_id, `✅ شارژ تایید شد\nمبلغ ${Number(req.amount).toLocaleString('en-US')} تومان اضافه شد`);
-  } else {
-    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [req.amount, req.telegram_id]);
-    bot.telegram.sendMessage(req.telegram_id, `✅ برداشت تایید شد\nمبلغ ${Number(req.amount).toLocaleString('en-US')} تومان واریز شد`);
-  }
-  await pool.query("UPDATE wallet_requests SET status = 'approved' WHERE id = $1", [req.id]);
-  ctx.reply('تایید شد ✅');
-});
-
-bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const req = (await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [ctx.match[1]])).rows[0];
-  if (!req || req.status !== 'pending') return ctx.reply('قبلاً بررسی شده');
-  await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [req.id]);
-  bot.telegram.sendMessage(req.telegram_id, '❌ درخواست رد شد');
-  ctx.reply('رد شد');
-});
-
-bot.action(/^admin_reject_reason_(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  sessions[ctx.from.id] = { flow: 'admin_reject_reason', step: 'waiting_reason', data: { requestId: ctx.match[1] } };
-  ctx.reply('دلیل رد را بنویس:');
-});
-
-bot.action('admin_sell_pending', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const list = await pool.query("SELECT * FROM sell_orders WHERE status = 'pending' ORDER BY id");
-  if (!list.rows.length) return ctx.reply('درخواست فروشی نیست');
-  for (const order of list.rows) {
-    const user = await getUser(order.telegram_id);
-    const msg = `💰 فروش\nکد پیگیری: ${order.tracking_code}\nکاربر: \( {user ? user.full_name : 'نامشخص'} ( \){order.telegram_id})\nمحصول: ${order.product_name}\nکد: ${order.voucher_code}\nکارمزد: ${Number(order.fee_amount).toLocaleString('en-US')}`;
-    await ctx.reply(msg, {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: '✅ تأیید و وارد کردن مبلغ', callback_data: 'sell_approve_' + order.id },
-          { text: '❌ رد', callback_data: 'sell_reject_' + order.id }
-        ]]
-      }
-    });
-  }
-});
-
-bot.action(/^sell_approve_(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  sessions[ctx.from.id] = { flow: 'admin_sell_amount', step: 'waiting_amount', data: { orderId: ctx.match[1] } };
-  ctx.reply('مبلغ واقعی شارژ شده را وارد کنید (فقط عدد):');
-});
-
-bot.action(/^sell_reject_(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  sessions[ctx.from.id] = { flow: 'admin_sell_reject', step: 'waiting_reason', data: { orderId: ctx.match[1] } };
-  ctx.reply('دلیل رد را بنویس:');
-});
-
-// ========== text handler ==========
 bot.on('text', async (ctx, next) => {
   const session = sessions[ctx.from.id];
   if (!session) return next();
 
+  const t = texts[session.lang] || texts.fa;
+
+  // پاک کردن پیام قبلی ربات اگر وجود داشته باشد
   if (session.lastBotMsgId) {
-    try { await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId); } catch (e) {}
+    try {
+      await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId);
+    } catch (e) {}
     session.lastBotMsgId = null;
   }
 
-  // ثبت‌نام
   if (session.flow === 'registration') {
     if (session.step === 'waiting_name') {
       session.data.fullName = ctx.message.text;
       session.step = 'waiting_card';
-      return ctx.reply(texts.fa.requestCard);
+      ctx.reply(t.requestCard);
+      return;
     }
+
     if (session.step === 'waiting_card') {
       session.data.cardNumber = ctx.message.text;
       await pool.query(
-        `INSERT INTO users (telegram_id, phone, full_name, card_number, language, balance, registered_at)
-         VALUES ($1,$2,$3,$4,'fa',0,$5)
-         ON CONFLICT (telegram_id) DO UPDATE SET phone=$2, full_name=$3, card_number=$4`,
-        [String(ctx.from.id), session.data.phone, session.data.fullName, session.data.cardNumber, new Date().toISOString()]
+        'INSERT INTO users (telegram_id, phone, full_name, card_number, language, balance, registered_at) ' +
+        'VALUES ($1, $2, $3, $4, $5, 0, $6) ' +
+        'ON CONFLICT (telegram_id) DO UPDATE SET phone = EXCLUDED.phone, full_name = EXCLUDED.full_name, ' +
+        'card_number = EXCLUDED.card_number, language = EXCLUDED.language',
+        [String(ctx.from.id), session.data.phone, session.data.fullName, session.data.cardNumber, session.lang, new Date().toISOString()]
       );
-      delete sessions[ctx.from.id];
-      ctx.reply(texts.fa.registrationSuccess);
-      ctx.reply(texts.fa.rulesText, {
-        reply_markup: { inline_keyboard: [[{ text: texts.fa.confirmRulesButton, callback_data: 'confirm_rules' }]] }
+      ctx.reply(t.registrationSuccess).then(function () {
+        ctx.reply(t.rulesText, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: t.confirmRulesButton, callback_data: 'confirm_rules' }]
+            ]
+          }
+        });
       });
       return;
     }
   }
 
-  // شارژ
   if (session.flow === 'deposit' && session.step === 'waiting_amount') {
     session.data.amount = ctx.message.text;
     session.step = 'waiting_receipt';
-    const sent = await ctx.reply(texts.fa.depositAskReceipt);
+    const sent = await ctx.reply(t.depositAskReceipt);
     session.lastBotMsgId = sent.message_id;
     return;
   }
 
-  // خرید
   if (session.flow === 'buy' && session.step === 'waiting_amount') {
-    const amount = parseInt(ctx.message.text.replace(/\D/g, ''));
-    if (!amount || amount < session.data.minAmount) {
-      const sent = await ctx.reply('مبلغ کمتر از حداقل است. دوباره وارد کنید:');
+    const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+    const minAmount = session.data.minAmount;
+
+    if (!amount || amount < minAmount) {
+      const sent = await ctx.reply(fillTemplate(t.buyMinError, { min: minAmount.toLocaleString('en-US') }));
       session.lastBotMsgId = sent.message_id;
       return;
     }
     session.data.amount = amount;
     session.step = 'waiting_confirm';
-    const sent = await ctx.reply(`خلاصه سفارش:\nمحصول: ${session.data.productLabel}\nمبلغ: ${amount.toLocaleString('en-US')} تومان\n\nتایید می‌کنید؟`, {
+    const sent = await ctx.reply(fillTemplate(t.buyConfirmSummary, {
+      product: session.data.productLabel,
+      amount: amount.toLocaleString('en-US')
+    }), {
       reply_markup: {
         inline_keyboard: [
-          [{ text: texts.fa.buyConfirmButton, callback_data: 'buy_confirm' }],
-          [{ text: texts.fa.buyCancelButton, callback_data: 'buy_cancel' }]
+          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm' }],
+          [{ text: t.buyCancelButton, callback_data: 'buy_cancel' }]
         ]
       }
     });
@@ -719,113 +1077,67 @@ bot.on('text', async (ctx, next) => {
     return;
   }
 
-  // برداشت
   if (session.flow === 'withdraw' && session.step === 'waiting_amount') {
-    const amount = parseInt(ctx.message.text.replace(/\D/g, ''));
+    const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+
     if (!amount || amount < MIN_WITHDRAW) {
-      const sent = await ctx.reply(texts.fa.withdrawMinError);
+      const sent = await ctx.reply(t.withdrawMinError);
       session.lastBotMsgId = sent.message_id;
       return;
     }
     session.data.amount = amount;
     const cards = await getUserCards(ctx.from.id);
-    const buttons = cards.map(c => [{ text: c.card_number, callback_data: 'withdraw_card_' + c.card_number }]);
-    buttons.push([{ text: texts.fa.addCardButton, callback_data: 'wallet_addcard' }]);
-    const sent = await ctx.reply(texts.fa.withdrawSelectCard, { reply_markup: { inline_keyboard: buttons } });
+    const buttons = cards.map(function (c) {
+      return [{ text: c.card_number, callback_data: 'withdraw_card_' + c.card_number }];
+    });
+    buttons.push([{ text: t.addCardButton, callback_data: 'wallet_addcard' }]);
+    const sent = await ctx.reply(t.withdrawSelectCard, { reply_markup: { inline_keyboard: buttons } });
     session.lastBotMsgId = sent.message_id;
     return;
   }
 
-  // افزودن کارت
-  if (session.flow === 'addcard' && session.step === 'waiting_card') {
-    const card = ctx.message.text.replace(/\D/g, '');
-    if (card.length !== 16) {
-      const sent = await ctx.reply(texts.fa.addCardInvalid);
-      session.lastBotMsgId = sent.message_id;
-      return;
-    }
-    await pool.query('INSERT INTO cards (telegram_id, card_number, created_at) VALUES ($1,$2,$3)', [String(ctx.from.id), card, new Date().toISOString()]);
-    delete sessions[ctx.from.id];
-    return ctx.reply(texts.fa.addCardSuccess);
-  }
-
-  // فروش - کد
-  if (session.flow === 'sell' && session.step === 'waiting_code') {
-    const code = ctx.message.text.trim();
-    if (code.length < 5) {
-      const sent = await ctx.reply('کد خیلی کوتاه است.');
-      session.lastBotMsgId = sent.message_id;
-      return;
-    }
-    const tracking = generateTrackingCode();
-    await pool.query(
-      `INSERT INTO sell_orders (telegram_id, product_key, product_name, voucher_code, fee_amount, status, tracking_code, created_at)
-       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)`,
-      [String(ctx.from.id), session.data.productKey, session.data.productName, code, session.data.fee, tracking, new Date().toISOString()]
-    );
-    delete sessions[ctx.from.id];
-    ctx.reply(`✅ درخواست فروش ثبت شد\nکد پیگیری: ${tracking}\nمحصول: ${session.data.productName}`);
-    for (const adminId of ADMIN_IDS) {
-      try {
-        await bot.telegram.sendMessage(adminId, `🔔 فروش جدید\nکاربر: ${ctx.from.id}\nمحصول: ${session.data.productName}\nکد: ${code}\nپیگیری: ${tracking}`);
-      } catch (e) {}
-    }
-    return;
-  }
-
-  // ادمین - مبلغ فروش
-  if (session.flow === 'admin_sell_amount' && session.step === 'waiting_amount') {
-    if (!isAdmin(ctx.from.id)) return;
-    const amount = parseInt(ctx.message.text.replace(/\D/g, ''));
-    if (!amount) return ctx.reply('مبلغ معتبر نیست');
-    const order = (await pool.query('SELECT * FROM sell_orders WHERE id = $1', [session.data.orderId])).rows[0];
-    if (!order || order.status !== 'pending') {
-      delete sessions[ctx.from.id];
-      return ctx.reply('قبلاً بررسی شده');
-    }
-    const fee = Number(order.fee_amount) || 20000;
-    const finalAmount = amount - fee;
-    if (finalAmount <= 0) return ctx.reply('مبلغ کمتر از کارمزد است');
-    await pool.query('UPDATE sell_orders SET admin_amount=$1, final_amount=$2, status=$3, processed_at=$4 WHERE id=$5',
-      [amount, finalAmount, 'approved', new Date().toISOString(), order.id]);
-    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [finalAmount, order.telegram_id]);
-    await bot.telegram.sendMessage(order.telegram_id,
-      `✅ فروش تأیید شد\nکد پیگیری: ${order.tracking_code}\nمحصول: ${order.product_name}\nمبلغ شارژ: ${amount.toLocaleString('en-US')}\nکارمزد: ${fee.toLocaleString('en-US')}\nواریز به جیب: ${finalAmount.toLocaleString('en-US')} تومان`);
-    delete sessions[ctx.from.id];
-    ctx.reply(`تأیید شد. مبلغ نهایی کاربر: ${finalAmount.toLocaleString('en-US')}`);
-    return;
-  }
-
-  // ادمین - رد فروش
-  if (session.flow === 'admin_sell_reject' && session.step === 'waiting_reason') {
-    if (!isAdmin(ctx.from.id)) return;
-    const reason = ctx.message.text;
-    const order = (await pool.query('SELECT * FROM sell_orders WHERE id = $1', [session.data.orderId])).rows[0];
-    if (!order || order.status !== 'pending') {
-      delete sessions[ctx.from.id];
-      return ctx.reply('قبلاً بررسی شده');
-    }
-    await pool.query('UPDATE sell_orders SET status=$1, admin_note=$2, processed_at=$3 WHERE id=$4',
-      ['rejected', reason, new Date().toISOString(), order.id]);
-    await bot.telegram.sendMessage(order.telegram_id, `❌ فروش رد شد\nکد: ${order.tracking_code}\nدلیل: ${reason}`);
-    delete sessions[ctx.from.id];
-    ctx.reply('رد شد');
-    return;
-  }
-
-  // ادمین - رد با دلیل کیف پول
   if (session.flow === 'admin_reject_reason' && session.step === 'waiting_reason') {
     if (!isAdmin(ctx.from.id)) return;
-    const reason = ctx.message.text;
-    const req = (await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [session.data.requestId])).rows[0];
-    if (!req || req.status !== 'pending') {
+
+    const reasonText = ctx.message.text;
+    const requestId = session.data.requestId;
+
+    const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending') {
       delete sessions[ctx.from.id];
-      return ctx.reply('قبلاً بررسی شده');
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
     }
-    await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [req.id]);
-    bot.telegram.sendMessage(req.telegram_id, '❌ درخواست رد شد\nدلیل: ' + reason);
+
+    await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [requestId]);
+
+    const codeText = request.tracking_code ? ('\n🆔 کد پیگیری: ' + request.tracking_code) : '';
+    bot.telegram.sendMessage(
+      request.telegram_id,
+      '❌ درخواست شما رد شد.' + codeText + '\n📝 دلیل:\n' + reasonText
+    );
+
     delete sessions[ctx.from.id];
-    ctx.reply('رد شد');
+    ctx.reply('درخواست شماره ' + requestId + ' با توضیح رد شد ✅');
+    return;
+  }
+
+  if (session.flow === 'addcard' && session.step === 'waiting_card') {
+    const cardNumber = ctx.message.text.replace(/[^0-9]/g, '');
+
+    if (cardNumber.length !== 16) {
+      const sent = await ctx.reply(t.addCardInvalid);
+      session.lastBotMsgId = sent.message_id;
+      return;
+    }
+    await pool.query(
+      'INSERT INTO cards (telegram_id, card_number, created_at) VALUES ($1, $2, $3)',
+      [String(ctx.from.id), cardNumber, new Date().toISOString()]
+    );
+    delete sessions[ctx.from.id];
+    ctx.reply(t.addCardSuccess);
     return;
   }
 });
@@ -833,106 +1145,17 @@ bot.on('text', async (ctx, next) => {
 bot.on('photo', async (ctx) => {
   const session = sessions[ctx.from.id];
   if (!session || session.flow !== 'deposit' || session.step !== 'waiting_receipt') return;
+
+  // پاک کردن پیام قبلی درخواست فیش
   if (session.lastBotMsgId) {
-    try { await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId); } catch (e) {}
-  }
-  const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  const code = generateTrackingCode();
-  await pool.query(
-    'INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [String(ctx.from.id), 'deposit', session.data.amount, fileId, 'pending', new Date().toISOString(), code]
-  );
-  delete sessions[ctx.from.id];
-  ctx.reply(texts.fa.depositSubmitted + '\n\nکد پیگیری: ' + code);
-});
-
-bot.action('confirm_rules', async (ctx) => {
-  try { await ctx.deleteMessage(); } catch (e) {}
-  delete sessions[ctx.from.id];
-  showMainMenu(ctx);
-});
-
-bot.action('menu_invoices', async (ctx) => {
-  ctx.answerCbQuery();
-  await safeDelete(ctx);
-  const orders = await pool.query('SELECT * FROM orders WHERE telegram_id = $1 ORDER BY id DESC LIMIT 5', [String(ctx.from.id)]);
-  const wallets = await pool.query('SELECT * FROM wallet_requests WHERE telegram_id = $1 ORDER BY id DESC LIMIT 5', [String(ctx.from.id)]);
-  const sells = await pool.query('SELECT * FROM sell_orders WHERE telegram_id = $1 ORDER BY id DESC LIMIT 5', [String(ctx.from.id)]);
-  if (!orders.rows.length && !wallets.rows.length && !sells.rows.length) return ctx.reply(texts.fa.invoicesEmpty);
-  let msg = texts.fa.invoicesTitle + '\n\n';
-  orders.rows.forEach(o => msg += `📦 خرید | ${o.product_type} | ${Number(o.amount).toLocaleString('en-US')} | ${o.status}\n`);
-  wallets.rows.forEach(w => msg += `${w.type === 'deposit' ? '➕ شارژ' : '💳 برداشت'} | ${Number(w.amount).toLocaleString('en-US')} | ${w.status}\n`);
-  sells.rows.forEach(s => msg += `💰 فروش | ${s.product_name} | ${s.status}\n`);
-  ctx.reply(msg, { reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]] } });
-});
-
-// ========== راه‌اندازی ==========
-async function init() {
-  await pool.query(`CREATE TABLE IF NOT EXISTS users (
-    telegram_id TEXT PRIMARY KEY, phone TEXT, full_name TEXT, card_number TEXT,
-    language TEXT, balance INTEGER DEFAULT 0, registered_at TEXT
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS cards (
-    id SERIAL PRIMARY KEY, telegram_id TEXT, card_number TEXT, created_at TEXT
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS wallet_requests (
-    id SERIAL PRIMARY KEY, telegram_id TEXT, type TEXT, amount INTEGER,
-    card_number TEXT, receipt_file_id TEXT, status TEXT, created_at TEXT, tracking_code TEXT
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS required_channels (
-    id SERIAL PRIMARY KEY, chat_id TEXT, invite_link TEXT, title TEXT, active INTEGER DEFAULT 1
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS bonuses (
-    id SERIAL PRIMARY KEY, telegram_id TEXT, status TEXT, amount INTEGER, created_at TEXT
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS orders (
-    id SERIAL PRIMARY KEY, telegram_id TEXT, product_type TEXT, amount INTEGER,
-    status TEXT, created_at TEXT, tracking_code TEXT
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS products (
-    id SERIAL PRIMARY KEY, key TEXT UNIQUE, name TEXT, min_amount NUMERIC,
-    price_type TEXT, active INTEGER DEFAULT 1, buy_active INTEGER DEFAULT 1,
-    sell_active INTEGER DEFAULT 0, sell_fee INTEGER DEFAULT 20000, created_at TEXT
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS sell_orders (
-    id SERIAL PRIMARY KEY, telegram_id TEXT, product_key TEXT, product_name TEXT,
-    voucher_code TEXT, admin_amount INTEGER, fee_amount INTEGER, final_amount INTEGER,
-    status TEXT DEFAULT 'pending', tracking_code TEXT, admin_note TEXT,
-    created_at TEXT, processed_at TEXT
-  )`);
-
-  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS buy_active INTEGER DEFAULT 1`);
-  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS sell_active INTEGER DEFAULT 0`);
-  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS sell_fee INTEGER DEFAULT 20000`);
-  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT`);
-  await pool.query(`ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT`);
-
-  const count = await pool.query('SELECT COUNT(*) AS c FROM products');
-  if (Number(count.rows[0].c) === 0) {
-    await pool.query(
-      `INSERT INTO products (key, name, min_amount, price_type, active, buy_active, sell_active, sell_fee, created_at)
-       VALUES ('voucher', '🎟 یوووچر', 1, 'usd', 1, 1, 1, 20000, $1),
-              ('hotvoucher', '🎟 هات ووچر', $2, 'toman', 1, 1, 1, 20000, $1)`,
-      [new Date().toISOString(), HOT_VOUCHER_MIN]
-    );
+    try {
+      await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId);
+    } catch (e) {}
   }
 
-  const rate = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
-  if (!rate.rows.length) {
-    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['usd_rate', String(DEFAULT_USD_RATE)]);
-  }
+  const t = texts.fa;
+  const photos = ctx.message.photo;
+  const fileId = photos[photos.length - 1].file_id;
 
-  const ch = await pool.query('SELECT id FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
-  if (!ch.rows.length) {
-    await pool.query(
-      'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
-      ['-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی']
-    );
-  }
-
-  bot.launch();
-  console.log('ربات با موفقیت روشن شد');
-}
-
-init().catch(e => console.log('INIT ERROR:', e.message));
+  const trackingCode = generateTrackingCode();
+  await pool.query
