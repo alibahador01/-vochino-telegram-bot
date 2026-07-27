@@ -478,7 +478,12 @@ bot.start(async (ctx) => {
 function handleLanguageChoice(ctx, lang) {
   sessions[ctx.from.id] = { flow: 'registration', step: 'waiting_phone', lang: lang, data: {} };
   const t = texts[lang] || texts.fa;
-  ctx.editMessageText(t.welcome);
+  
+  try {
+    ctx.editMessageText(t.welcome);
+  } catch (e) {
+    ctx.reply(t.welcome);
+  }
 
   ctx.reply(
     t.requestPhone,
@@ -521,6 +526,7 @@ async function showWalletMenu(ctx) {
 
 bot.action('menu_wallet', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   await showWalletMenu(ctx);
 });
 
@@ -531,6 +537,7 @@ bot.action('menu_referral', (ctx) => {
 
 bot.action('menu_profile', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
   const user = await getUser(ctx.from.id);
   if (!user) {
@@ -546,27 +553,31 @@ bot.action('menu_profile', async (ctx) => {
     {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu', style: 'danger' }]
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu' }]
         ]
       }
     }
   );
 });
 
-bot.action('back_main_menu', (ctx) => {
+bot.action('back_main_menu', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   showMainMenu(ctx);
 });
 
-bot.action('cancel_flow', (ctx) => {
+bot.action('cancel_flow', async (ctx) => {
   ctx.answerCbQuery();
   delete sessions[ctx.from.id];
-  ctx.reply('لغو شد. برگشتی به منوی اصلی 🔙');
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
   showMainMenu(ctx);
 });
 
 bot.action('menu_invoices', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
   const walletRes = await pool.query(
     'SELECT id, type, amount, status, created_at FROM wallet_requests WHERE telegram_id = $1',
@@ -614,26 +625,29 @@ bot.action('menu_invoices', async (ctx) => {
   ctx.reply(message);
 });
 
-bot.action('menu_support', (ctx) => {
+bot.action('menu_support', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
   ctx.reply(t.supportTitle, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: t.supportFaqButton, callback_data: 'support_faq', style: 'primary' }],
-        [{ text: t.supportContactButton, callback_data: 'support_contact', style: 'primary' }]
+        [{ text: t.supportFaqButton, callback_data: 'support_faq' }],
+        [{ text: t.supportContactButton, callback_data: 'support_contact' }]
       ]
     }
   });
 });
 
-bot.action('support_faq', (ctx) => {
+bot.action('support_faq', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   ctx.reply(texts.fa.faqText);
 });
 
-bot.action('support_contact', (ctx) => {
+bot.action('support_contact', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   ctx.reply(texts.fa.supportContactText);
 });
 
@@ -684,6 +698,7 @@ function fillTemplate(template, values) {
 
 bot.action('menu_game', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
   const bonus = await getActiveBonus(ctx.from.id);
 
@@ -702,7 +717,7 @@ bot.action('menu_game', async (ctx) => {
       inline_keyboard: [
         [{ text: t.gameDiceButton, callback_data: 'game_play_dice' }],
         [{ text: t.gameBasketballButton, callback_data: 'game_play_basketball' }],
-        [{ text: '🔙 بیخیال', callback_data: 'back_main_menu', style: 'danger' }]
+        [{ text: '🔙 بیخیال', callback_data: 'back_main_menu' }]
       ]
     }
   });
@@ -712,10 +727,12 @@ async function playBonusGame(ctx, emoji) {
   const t = texts.fa;
   const bonus = await getActiveBonus(ctx.from.id);
   if (!bonus) {
+    try { await ctx.deleteMessage(); } catch (e) {}
     ctx.reply(t.gameAlreadyUsed);
     return;
   }
 
+  try { await ctx.deleteMessage(); } catch (e) {}
   await pool.query("UPDATE bonuses SET status = 'in_progress' WHERE id = $1", [bonus.id]);
   await ctx.reply(t.gamePlaying);
   await ctx.sendDice({ emoji: emoji }).catch(function () {});
@@ -750,6 +767,7 @@ bot.action('game_play_basketball', async (ctx) => {
 
 bot.action('menu_buy', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
   const productsRes = await pool.query('SELECT * FROM products WHERE active = 1 ORDER BY id ASC');
 
@@ -765,9 +783,10 @@ bot.action('menu_buy', async (ctx) => {
   ctx.reply(t.buyMenuTitle, { reply_markup: { inline_keyboard: buttons } });
 });
 
-bot.action('buy_cancel', (ctx) => {
+bot.action('buy_cancel', async (ctx) => {
   ctx.answerCbQuery();
   delete sessions[ctx.from.id];
+  try { await ctx.deleteMessage(); } catch (e) {}
   ctx.reply(texts.fa.buyCancelled);
 });
 
@@ -776,12 +795,15 @@ bot.action('buy_confirm', async (ctx) => {
   const t = texts.fa;
   const session = sessions[ctx.from.id];
   if (!session || session.flow !== 'buy' || session.step !== 'waiting_confirm') {
+    try { await ctx.deleteMessage(); } catch (e) {}
     ctx.reply(t.buyCancelled);
     return;
   }
 
   const user = await getUser(ctx.from.id);
   const amount = session.data.amount;
+
+  try { await ctx.deleteMessage(); } catch (e) {}
 
   if (!user || Number(user.balance) < amount) {
     delete sessions[ctx.from.id];
@@ -819,13 +841,13 @@ bot.action('buy_confirm', async (ctx) => {
 
 bot.action(/^buy_(.+)/, async (ctx) => {
   const key = ctx.match[1];
-
   ctx.answerCbQuery();
   const t = texts.fa;
 
   const productRes = await pool.query('SELECT * FROM products WHERE key = $1 AND active = 1', [key]);
   const product = productRes.rows[0];
   if (!product) {
+    try { await ctx.deleteMessage(); } catch (e) {}
     ctx.reply(t.buyNoProducts);
     return;
   }
@@ -853,23 +875,33 @@ bot.action(/^buy_(.+)/, async (ctx) => {
     data: { productType: product.key, productLabel: product.name, minAmount: minToman }
   };
 
-  ctx.reply(messageText, {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] }
-  });
+  try {
+    await ctx.editMessageText(messageText, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
+    });
+  } catch (e) {
+    try { await ctx.deleteMessage(); } catch (err) {}
+    ctx.reply(messageText, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
+    });
+  }
 });
 
-bot.action('menu_rules_education', (ctx) => {
+bot.action('menu_rules_education', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   ctx.reply(texts.fa.rulesText + '\n\n📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
 });
 
-bot.action('menu_rules', (ctx) => {
+bot.action('menu_rules', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   ctx.reply(texts.fa.rulesText);
 });
 
-bot.action('menu_education', (ctx) => {
+bot.action('menu_education', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   ctx.reply('📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
 });
 
@@ -881,8 +913,9 @@ bot.action(/^menu_.+/, (ctx) => {
   ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
 });
 
-bot.action('wallet_deposit', (ctx) => {
+bot.action('wallet_deposit', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
   ctx.reply(t.depositMethodTitle, {
     reply_markup: {
@@ -895,11 +928,12 @@ bot.action('wallet_deposit', (ctx) => {
   });
 });
 
-bot.action('deposit_tron', (ctx) => { ctx.answerCbQuery(); ctx.reply(texts.fa.comingSoon); });
-bot.action('deposit_gateway', (ctx) => { ctx.answerCbQuery(); ctx.reply(texts.fa.comingSoon); });
+bot.action('deposit_tron', async (ctx) => { ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {} ctx.reply(texts.fa.comingSoon); });
+bot.action('deposit_gateway', async (ctx) => { ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {} ctx.reply(texts.fa.comingSoon); });
 
-bot.action('deposit_card2card', (ctx) => {
+bot.action('deposit_card2card', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const t = texts.fa;
 
   let cardsMessage = t.depositCardsTrust + '\n\n';
@@ -910,21 +944,23 @@ bot.action('deposit_card2card', (ctx) => {
   ctx.reply(cardsMessage, { parse_mode: 'Markdown' }).then(function () {
     sessions[ctx.from.id] = { flow: 'deposit', step: 'waiting_amount', lang: 'fa', data: {} };
     ctx.reply(t.depositAskAmount, {
-      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] }
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
     });
   });
 });
 
-bot.action('wallet_withdraw', (ctx) => {
+bot.action('wallet_withdraw', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: 'fa', data: {} };
   ctx.reply(texts.fa.withdrawAskAmount, {
-    reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] }
+    reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] }
   });
 });
 
 bot.action(/^withdraw_card_(.+)$/, async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   const cardNumber = ctx.match[1];
   const session = sessions[ctx.from.id];
   const amount = session && session.data ? session.data.amount : null;
@@ -939,14 +975,17 @@ bot.action(/^withdraw_card_(.+)$/, async (ctx) => {
   ctx.reply(texts.fa.withdrawSubmitted + '\n\n🆔 کد پیگیری: ' + trackingCode);
 });
 
-bot.action('wallet_addcard', (ctx) => {
+bot.action('wallet_addcard', async (ctx) => {
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
   sessions[ctx.from.id] = { flow: 'addcard', step: 'waiting_card', lang: 'fa', data: {} };
   ctx.reply(texts.fa.addCardAsk);
 });
 
-bot.action('confirm_rules', (ctx) => {
-  ctx.deleteMessage().catch(function () {});
+bot.action('confirm_rules', async (ctx) => {
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
   delete sessions[ctx.from.id];
   showMainMenu(ctx);
 });
@@ -1010,8 +1049,8 @@ bot.on('text', async (ctx, next) => {
     }), {
       reply_markup: {
         inline_keyboard: [
-          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm', style: 'success' }],
-          [{ text: t.buyCancelButton, callback_data: 'buy_cancel', style: 'danger' }]
+          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm' }],
+          [{ text: t.buyCancelButton, callback_data: 'buy_cancel' }]
         ]
       }
     });
@@ -1136,6 +1175,7 @@ bot.command('admin', async (ctx) => {
 bot.action('admin_pending', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
 
   const pendingRes = await pool.query("SELECT * FROM wallet_requests WHERE status = 'pending' ORDER BY id ASC");
   const pendingRequests = pendingRes.rows;
@@ -1159,11 +1199,11 @@ bot.action('admin_pending', async (ctx) => {
     }
     const buttons = [
       [
-        { text: '✅ تایید', callback_data: 'admin_approve_' + req.id, style: 'success' },
-        { text: '❌ رد', callback_data: 'admin_reject_' + req.id, style: 'danger' }
+        { text: '✅ تایید', callback_data: 'admin_approve_' + req.id },
+        { text: '❌ رد', callback_data: 'admin_reject_' + req.id }
       ],
       [
-        { text: '✉️ رد با توضیح', callback_data: 'admin_reject_reason_' + req.id, style: 'primary' }
+        { text: '✉️ رد با توضیح', callback_data: 'admin_reject_reason_' + req.id }
       ]
     ];
     if (req.type === 'deposit' && req.receipt_file_id) {
@@ -1177,6 +1217,7 @@ bot.action('admin_pending', async (ctx) => {
 bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
 
   const requestId = ctx.match[1];
   const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
@@ -1205,6 +1246,7 @@ bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
 bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
 
   const requestId = ctx.match[1];
   const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
@@ -1226,6 +1268,7 @@ bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
 bot.action(/^admin_reject_reason_(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
 
   const requestId = ctx.match[1];
   const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
