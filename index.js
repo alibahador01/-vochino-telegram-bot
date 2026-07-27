@@ -550,8 +550,29 @@ bot.action('menu_profile', async (ctx) => {
     '👤 نام: ' + (user.full_name || '-') + '\n' +
     '📱 شماره تلفن: ' + (user.phone || '-') + '\n' +
     '💳 شماره کارت: ' + (user.card_number || '-') + '\n' +
-    '💰 موجودی: ' + Number(user.balance).toLocaleString('en-US') + ' تومان'
+    '💰 موجودی: ' + Number(user.balance).toLocaleString('en-US') + ' تومان',
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu', style: 'danger' }]
+        ]
+      }
+    }
   );
+});
+
+// ✅ جدید: دکمه‌ی عمومی بازگشت به منوی اصلی (قابل استفاده از هر صفحه‌ای)
+bot.action('back_main_menu', (ctx) => {
+  ctx.answerCbQuery();
+  showMainMenu(ctx);
+});
+
+// ✅ جدید: دکمه‌ی عمومی «بیخیال» - لغو هر جریان نیمه‌کاره (شارژ، برداشت، خرید) و بازگشت به منو
+bot.action('cancel_flow', (ctx) => {
+  ctx.answerCbQuery();
+  delete sessions[ctx.from.id];
+  ctx.reply('لغو شد. برگشتی به منوی اصلی 🔙');
+  showMainMenu(ctx);
 });
 
 bot.action('menu_invoices', async (ctx) => {
@@ -609,8 +630,8 @@ bot.action('menu_support', (ctx) => {
   ctx.reply(t.supportTitle, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: t.supportFaqButton, callback_data: 'support_faq' }],
-        [{ text: t.supportContactButton, callback_data: 'support_contact' }]
+        [{ text: t.supportFaqButton, callback_data: 'support_faq', style: 'primary' }],
+        [{ text: t.supportContactButton, callback_data: 'support_contact', style: 'primary' }]
       ]
     }
   });
@@ -690,7 +711,8 @@ bot.action('menu_game', async (ctx) => {
     reply_markup: {
       inline_keyboard: [
         [{ text: t.gameDiceButton, callback_data: 'game_play_dice' }],
-        [{ text: t.gameBasketballButton, callback_data: 'game_play_basketball' }]
+        [{ text: t.gameBasketballButton, callback_data: 'game_play_basketball' }],
+        [{ text: '🔙 بیخیال', callback_data: 'back_main_menu', style: 'danger' }]
       ]
     }
   });
@@ -841,7 +863,9 @@ bot.action(/^buy_(.+)/, async (ctx) => {
     data: { productType: product.key, productLabel: product.name, minAmount: minToman }
   };
 
-  ctx.reply(messageText);
+  ctx.reply(messageText, {
+    reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] }
+  });
 });
 
 bot.action('menu_rules_education', (ctx) => {
@@ -895,14 +919,18 @@ bot.action('deposit_card2card', (ctx) => {
 
   ctx.reply(cardsMessage, { parse_mode: 'Markdown' }).then(function () {
     sessions[ctx.from.id] = { flow: 'deposit', step: 'waiting_amount', lang: 'fa', data: {} };
-    ctx.reply(t.depositAskAmount);
+    ctx.reply(t.depositAskAmount, {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] }
+    });
   });
 });
 
 bot.action('wallet_withdraw', (ctx) => {
   ctx.answerCbQuery();
   sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: 'fa', data: {} };
-  ctx.reply(texts.fa.withdrawAskAmount);
+  ctx.reply(texts.fa.withdrawAskAmount, {
+    reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] }
+  });
 });
 
 // ✅ فیکس: قبلاً regex بدون گروه ثبت (capture group) بود و کد کارت همیشه رشته خالی می‌شد
@@ -993,8 +1021,8 @@ bot.on('text', async (ctx, next) => {
     }), {
       reply_markup: {
         inline_keyboard: [
-          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm' }],
-          [{ text: t.buyCancelButton, callback_data: 'buy_cancel' }]
+          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm', style: 'success' }],
+          [{ text: t.buyCancelButton, callback_data: 'buy_cancel', style: 'danger' }]
         ]
       }
     });
@@ -1142,11 +1170,11 @@ bot.action('admin_pending', async (ctx) => {
     }
     const buttons = [
       [
-        { text: '✅ تایید', callback_data: 'admin_approve_' + req.id },
-        { text: '❌ رد', callback_data: 'admin_reject_' + req.id }
+        { text: '✅ تایید', callback_data: 'admin_approve_' + req.id, style: 'success' },
+        { text: '❌ رد', callback_data: 'admin_reject_' + req.id, style: 'danger' }
       ],
       [
-        { text: '✉️ رد با توضیح', callback_data: 'admin_reject_reason_' + req.id }
+        { text: '✉️ رد با توضیح', callback_data: 'admin_reject_reason_' + req.id, style: 'primary' }
       ]
     ];
     if (req.type === 'deposit' && req.receipt_file_id) {
