@@ -1671,6 +1671,24 @@ bot.action(/^admin_reject_reason_(\d+)$/, async (ctx) => {
   ctx.reply('✍️ لطفاً دلیل رد این درخواست رو بنویس (همین متن مستقیم برای کاربر ارسال می‌شه):');
 });
 
+// ✅ جدید: لایه‌ی محافظتی دوم - جلوگیری از کرش کل برنامه به خاطر خطاهای خارج از هندلرهای تلگرام
+process.on('unhandledRejection', (err) => {
+  console.log('UNHANDLED REJECTION: ' + (err && err.message ? err.message : err));
+});
+process.on('uncaughtException', (err) => {
+  console.log('UNCAUGHT EXCEPTION: ' + err.message);
+  console.log(err.stack);
+});
+
+// ✅ جدید: محافظ کلی خطا - بدون این، هر خطای کوچیک تو یه هندلر می‌تونست کل ربات رو کرش کنه
+bot.catch((err, ctx) => {
+  console.log('BOT ERROR: ' + err.message);
+  console.log(err.stack);
+  try {
+    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن. اگه ادامه داشت به پشتیبانی خبر بده.');
+  } catch (e) {}
+});
+
 async function init() {
   await pool.query(
     'CREATE TABLE IF NOT EXISTS users (' +
