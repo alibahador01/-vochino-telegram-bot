@@ -89,7 +89,7 @@ const texts = {
     rulesText: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.',
     confirmRulesButton: '✅ قوانین را می‌پذیرم',
     registrationSuccess: '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: ' + DAILY_LIMIT_TEXT + ' تومان',
-    welcomeBack: 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋',
+    we
 
     mustJoinTitle: 'برای استفاده از ربات، ابتدا باید عضو کانال زیر شوید:',
     joinChannelButton: '📢 عضویت در کانال',
@@ -187,7 +187,9 @@ function showMainMenu(ctx) {
     }
     rows.push(row);
   }
-  ctx.reply('منوی اصلی 🏠', { reply_markup: { inline_keyboard: rows } });
+  ctx.reply('✨ صرافی ووچینو | خرید سریع، امن و مطمئن ووچر
+
+🪄 از منوی زیر گزینه مورد نظر خود را انتخاب کنید. ', { reply_markup: { inline_keyboard: rows } });
 }
 
 const sessions = {};
