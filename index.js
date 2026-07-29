@@ -4,6 +4,10 @@ const config = require('./config.json');
 const db = require('./database.js');
 const { isAdmin } = require('./handlers/helpers.js');
 
+// Import handlers
+const walletHandler = require('./handlers/wallet.js');
+const adminHandler = require('./handlers/admin.js');
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Anti-Sleep Express Server
@@ -19,7 +23,6 @@ bot.start(async (ctx) => {
   const userId = ctx.from.id;
   const username = ctx.from.username || '';
   
-  // Save user to database if not exists
   const existing = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(String(userId));
   if (!existing) {
     db.prepare('INSERT INTO users (telegram_id, username) VALUES (?, ?)').run(String(userId), username);
@@ -44,6 +47,21 @@ bot.start(async (ctx) => {
   });
 });
 
+// Connect Wallet Handler
+walletHandler(bot);
+
+// Connect Admin Handler
+adminHandler(bot);
+
+// General text router for menu buttons
+bot.hears('🎒 جیب', async (ctx) => {
+  // اگر توی فایل wallet تنظیم شده باشه، این هندلر تریگر میشه
+});
+
+bot.hears('👑 پنل ادمین', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.reply('شما دسترسی ادمین ندارید.');
+});
+
 // Launch Bot
 bot.launch().then(() => {
   console.log('Vochino Bot started successfully!');
@@ -54,4 +72,3 @@ bot.launch().then(() => {
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
