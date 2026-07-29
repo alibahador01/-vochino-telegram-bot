@@ -1,6 +1,5 @@
-const { Telegraf, Scenes, session } = require('telegraf');
+const { Telegraf, session } = require('telegraf');
 const express = require('express');
-const config = require('./config.json');
 const db = require('./database.js');
 const { isAdmin } = require('./handlers/helpers.js');
 
@@ -47,20 +46,9 @@ bot.start(async (ctx) => {
   });
 });
 
-// Connect Wallet Handler
+// Connect Handlers
 walletHandler(bot);
-
-// Connect Admin Handler
 adminHandler(bot);
-
-// General text router for menu buttons
-bot.hears('🎒 جیب', async (ctx) => {
-  // اگر توی فایل wallet تنظیم شده باشه، این هندلر تریگر میشه
-});
-
-bot.hears('👑 پنل ادمین', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.reply('شما دسترسی ادمین ندارید.');
-});
 
 // Launch Bot
 bot.launch().then(() => {
