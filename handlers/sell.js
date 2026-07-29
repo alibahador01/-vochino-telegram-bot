@@ -1,14 +1,14 @@
 const db = require('../database');
 
+// یک حافظه موقت امن برای نگهداری وضعیت کاربران
+const userStates = {};
+
 module.exports = (bot) => {
-    // وقتی کاربر دکمه فروش رو میزنه
+    // دکمه فروش
     bot.action('sell_voucher', async (ctx) => {
         try {
             await ctx.answerCbQuery();
-            
-            // ثبت وضعیت در جدول کاربران که الان منتظر کد هستیم
-            const updateState = db.prepare('UPDATE users SET state = ? WHERE telegram_id = ?');
-            updateState.run('waiting_for_voucher', ctx.from.id.toString());
+            userStates[ctx.from.id.toString()] = 'waiting_for_voucher';
 
             await ctx.reply(
                 '🪙 فروش 🔤 یووچر\n\n' +
@@ -30,12 +30,11 @@ module.exports = (bot) => {
         }
     });
 
-    // دکمه بیخیال یا بازگشت
+    // دکمه بازگشت
     bot.action('back_to_home', async (ctx) => {
         try {
             await ctx.answerCbQuery();
-            const clearState = db.prepare('UPDATE users SET state = ? WHERE telegram_id = ?');
-            clearState.run('idle', ctx.from.id.toString());
+            delete userStates[ctx.from.id.toString()];
 
             const mainMenu = {
                 reply_markup: {
@@ -64,32 +63,27 @@ module.exports = (bot) => {
         }
     });
 
-    // دریافت متن یا همون کد ووچر از کاربر
+    // دریافت متن (کد ووچر)
     bot.on('text', async (ctx, next) => {
-        try {
-            const userQuery = db.prepare('SELECT state FROM users WHERE telegram_id = ?');
-            const user = userQuery.get(ctx.from.id.toString());
+        const userId = ctx.from.id.toString();
+        
+        if (userStates[userId] === 'waiting_for_voucher') {
+            const voucherCode = ctx.message.text.trim();
+            delete userStates[userId]; // پاک کردن وضعیت پس از دریافت
 
-            if (user && user.state === 'waiting_for_voucher') {
-                const voucherCode = ctx.message.text.trim();
-
-                // ریست کردن وضعیت کاربر به حالت عادی
-                const clearState = db.prepare('UPDATE users SET state = ? WHERE telegram_id = ?');
-                clearState.run('idle', ctx.from.id.toString());
-
-                // ذخیره سفارش در دیتابیس
+            try {
                 const stmt = db.prepare(`
                     INSERT INTO orders (telegram_id, order_type, amount, submitted_code, status) 
                     VALUES (?, 'sell', 173031, ?, 'pending')
                 `);
-                stmt.run(ctx.from.id.toString(), voucherCode);
+                stmt.run(userId, voucherCode);
 
                 await ctx.reply('✅ کد ووچر شما با موفقیت ثبت شد و به زودی توسط ادمین بررسی خواهد شد.');
-                return;
+            } catch (error) {
+                console.error('Error saving voucher:', error);
+                await ctx.reply('⚠️ ثبت کد با خطا مواجه شد. ممکن است این کد تکراری باشد.');
             }
-        } catch (error) {
-            console.error('Error saving voucher:', error);
-            await ctx.reply('⚠️ ثبت کد با خطا مواجه شد. شاید این کد قبلاً ثبت شده باشد.');
+            return;
         }
         return next();
     });
