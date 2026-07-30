@@ -130,22 +130,24 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
+    const now = new Date().toISOString();
     await pool.query(
       'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5)',
-      ['voucher', '🎟 یوووچر', 1, 'usd', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman']
+      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $10)',
+      ['voucher', '🎟 یوووچر', 1, 'usd', now, 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman', now]
     );
   }
 
   const sellProductsCountRes = await pool.query('SELECT COUNT(*) AS c FROM sell_products');
   if (Number(sellProductsCountRes.rows[0].c) === 0) {
+    const now = new Date().toISOString();
     await pool.query(
       'INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5), ($10, $11, $12, $13, 1, $5)',
+      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $10), ($11, $12, $13, $14, 1, $15)',
       [
-        'uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', new Date().toISOString(),
-        'premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', new Date().toISOString(),
-        'psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', new Date().toISOString()
+        'uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', now,
+        'premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', now,
+        'psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', now
       ]
     );
   }
