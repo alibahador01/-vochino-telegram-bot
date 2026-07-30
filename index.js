@@ -1,25 +1,11 @@
 const { Telegraf, Markup } = require('telegraf');
-const { pool, getUser, getUserCards, initDb } = require('./db');
-
-// فراخوانی ایمن فایل‌های ادمین و فروش از مسیر اصلی پروژه
-let registerAdminCommands, registerSellHandlers;
-
-try {
-  registerAdminCommands = require('./admin').registerAdminCommands;
-} catch (e) {
-  console.log('⚠️ فایل admin.js پیدا نشد یا ارور دارد:', e.message);
-}
-
-try {
-  registerSellHandlers = require('./sell').registerSellHandlers;
-} catch (e) {
-  console.log('⚠️ فایل sell.js پیدا نشد یا ارور دارد:', e.message);
-}
+const { pool, getUser, initDb } = require('./db');
+const { registerAdminCommands } = require('./admin');
+const { registerSellHandlers } = require('./sell');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const sessions = {};
 
-// متون و پیام‌های اصلی ربات
 const TEXTS = {
   welcomeBack: '👋 خوش برگشتی! خوشحالیم دوباره می‌بینیمت.',
   joinTitle: 'برای استفاده از ربات، ابتدا باید عضو کانال زیر شوید:',
@@ -27,14 +13,10 @@ const TEXTS = {
   membershipButton: '✅ عضو شدم',
   notMember: 'شما هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید، سپس دوباره تلاش کنید.',
   walletTitle: '👛 کیف پول شما',
-  walletBalance: '💰 موجودی فعلی شما: ',
-  walletIncrease: '➕ افزایش موجودی',
-  walletWithdraw: '💳 برداشت موجودی',
-  walletAddCard: '➕ افزودن کارت جدید',
-  backButton: '🔙 بازگشت'
+  walletBalance: '💰 موجودی فعلی شما: '
 };
 
-// کیبورد منوی اصلی
+// منوی اصلی متناسب با تمامی امکانات
 function getMainKeyboard() {
   return Markup.keyboard([
     ['🎟 خرید ووچر', '🎟 فروش به ما'],
@@ -43,21 +25,17 @@ function getMainKeyboard() {
   ]).resize();
 }
 
-// بررسی عضویت اجباری در کانال
+// قفل کانال اجباری
 async function checkMembership(ctx) {
   try {
     const res = await pool.query('SELECT * FROM required_channels WHERE active = 1');
-    const channels = res.rows;
-
-    for (const channel of channels) {
+    for (const channel of res.rows) {
       try {
         const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
         if (['left', 'kicked'].includes(member.status)) {
           return { isMember: false, channel };
         }
-      } catch (e) {
-        console.error('Error checking channel membership:', e);
-      }
+      } catch (e) {}
     }
     return { isMember: true };
   } catch (e) {
@@ -67,19 +45,15 @@ async function checkMembership(ctx) {
 
 async function startBot() {
   try {
-    console.log('⚡ در حال اتصال و آماده‌سازی پایگاه داده...');
+    console.log('⚡ در حال اتصال به دیتابیس...');
     await initDb();
-    console.log('✅ پایگاه داده آماده شد.');
+    console.log('✅ دیتابیس متصل شد.');
 
-    // ثبت ماژول‌ها در صورت وجود
-    if (typeof registerAdminCommands === 'function') {
-      registerAdminCommands(bot, sessions);
-    }
-    if (typeof registerSellHandlers === 'function') {
-      registerSellHandlers(bot, sessions);
-    }
+    // ثبت ماژول‌های ادمین و فروش
+    registerAdminCommands(bot, sessions);
+    registerSellHandlers(bot, sessions);
 
-    // دستور /start
+    // /start
     bot.start(async (ctx) => {
       const check = await checkMembership(ctx);
       if (!check.isMember) {
@@ -107,7 +81,7 @@ async function startBot() {
       ctx.reply(TEXTS.welcomeBack, getMainKeyboard());
     });
 
-    // بررسی مجدد عضویت کانال
+    // بررسی عضویت
     bot.action('check_membership', async (ctx) => {
       ctx.answerCbQuery();
       const check = await checkMembership(ctx);
@@ -119,39 +93,49 @@ async function startBot() {
       }
     });
 
-    // بخش کیف پول
+    // خرید ووچر
+    bot.hears('🎟 خرید ووچر', async (ctx) => {
+      ctx.reply('✨ بخش خرید ووچر به زودی با قابلیت اتصال مستقیم به API فعال خواهد شد.');
+    });
+
+    // کیف پول
     bot.hears(['👛 کیف پول', '/wallet'], async (ctx) => {
       const user = await getUser(ctx.from.id);
       const balance = user ? Number(user.balance).toLocaleString('fa-IR') : '۰';
-
-      const walletMsg = TEXTS.walletTitle + '\n\n' + TEXTS.walletBalance + balance + ' تومان';
-      
-      ctx.reply(walletMsg, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: TEXTS.walletIncrease, callback_data: 'wallet_deposit' }],
-            [{ text: TEXTS.walletWithdraw, callback_data: 'wallet_withdraw' }]
-          ]
-        }
-      });
+      ctx.reply(TEXTS.walletTitle + '\n\n' + TEXTS.walletBalance + balance + ' تومان');
     });
 
-    // دکمه بازگشت به منوی اصلی
+    // تراکنش‌ها
+    bot.hears('📊 تراکنش‌ها', async (ctx) => {
+      ctx.reply('📑 لیست تراکنش‌های اخیر شما به زودی بارگذاری خواهد شد.');
+    });
+
+    // پشتیبانی
+    bot.hears('📞 پشتیبانی', async (ctx) => {
+      ctx.reply(' جهت ارتباط با پشتیبانی به آیدی زیر پیام دهید:\n🆔 @Support');
+    });
+
+    // راهنما
+    bot.hears('❓ راهنما', async (ctx) => {
+      ctx.reply('❓ راهنمای استفاده از ربات:\n۱. جهت فروش ووچر روی دکمه "فروش به ما" بزنید.\n۲. کد ووچر را وارد کنید.\n۳. پس از تایید مالی، کیف پول شما شارژ خواهد شد.');
+    });
+
+    // دکمه بازگشت
     bot.hears('🔙 بازگشت', (ctx) => {
       delete sessions[ctx.from.id];
       ctx.reply('به منوی اصلی بازگشتید.', getMainKeyboard());
     });
 
-    // مدیریت خطاها جهت جلوگیری از کرش سرور
+    // مدیریت خطاها
     bot.catch((err, ctx) => {
       console.error(`❌ خطا در عملکرد ${ctx.updateType}:`, err);
     });
 
     console.log('🚀 در حال روشن کردن ربات...');
     await bot.launch();
-    console.log('🤖 ربات با موفقیت آنلاین شد!');
+    console.log('🤖 ربات آنلاین شد!');
   } catch (error) {
-    console.error('❌ خطا در راه اندازی ربات:', error);
+    console.error('❌ خطا در راه اندازی:', error);
   }
 }
 
