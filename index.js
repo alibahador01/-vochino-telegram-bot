@@ -1,7 +1,9 @@
 const { Telegraf, Markup } = require('telegraf');
 const { pool, getUser, initDb } = require('./db');
-const { registerAdminCommands } = require('./admin');
-const { registerSellHandlers } = require('./sell');
+
+// فراخوانی دقیق فایل‌ها از داخل پوشه handlers
+const { registerAdminCommands } = require('./handlers/admin');
+const { registerSellHandlers } = require('./handlers/sell');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const sessions = {};
@@ -16,7 +18,7 @@ const TEXTS = {
   walletBalance: '💰 موجودی فعلی شما: '
 };
 
-// منوی اصلی متناسب با تمامی امکانات
+// منوی اصلی
 function getMainKeyboard() {
   return Markup.keyboard([
     ['🎟 خرید ووچر', '🎟 فروش به ما'],
@@ -25,7 +27,7 @@ function getMainKeyboard() {
   ]).resize();
 }
 
-// قفل کانال اجباری
+// بررسی قفل کانال اجباری
 async function checkMembership(ctx) {
   try {
     const res = await pool.query('SELECT * FROM required_channels WHERE active = 1');
@@ -53,7 +55,7 @@ async function startBot() {
     registerAdminCommands(bot, sessions);
     registerSellHandlers(bot, sessions);
 
-    // /start
+    // دستور /start
     bot.start(async (ctx) => {
       const check = await checkMembership(ctx);
       if (!check.isMember) {
@@ -81,7 +83,7 @@ async function startBot() {
       ctx.reply(TEXTS.welcomeBack, getMainKeyboard());
     });
 
-    // بررسی عضویت
+    // بررسی مجدد عضویت
     bot.action('check_membership', async (ctx) => {
       ctx.answerCbQuery();
       const check = await checkMembership(ctx);
