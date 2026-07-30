@@ -1,4 +1,4 @@
-const { pool } = require('./db');
+const { pool } = require('../db'); // اصلاح آدرس دیتابیس
 
 function registerAdminCommands(bot, sessions) {
   
