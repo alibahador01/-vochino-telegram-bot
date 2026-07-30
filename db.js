@@ -16,6 +16,7 @@ async function getUserCards(telegramId) {
 }
 
 async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
+  // جدول کاربران
   await pool.query(
     'CREATE TABLE IF NOT EXISTS users (' +
     'telegram_id TEXT PRIMARY KEY, ' +
@@ -28,6 +29,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول کارت‌های بانکی
   await pool.query(
     'CREATE TABLE IF NOT EXISTS cards (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -37,6 +39,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول درخواست‌های کیف پول
   await pool.query(
     'CREATE TABLE IF NOT EXISTS wallet_requests (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -51,6 +54,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول کانال‌های اجباری
   await pool.query(
     'CREATE TABLE IF NOT EXISTS required_channels (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -61,6 +65,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول تنظیمات
   await pool.query(
     'CREATE TABLE IF NOT EXISTS settings (' +
     'key TEXT PRIMARY KEY, ' +
@@ -68,16 +73,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS bonuses (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'status TEXT, ' +
-    'amount INTEGER, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
+  // جدول سفارشات خرید
   await pool.query(
     'CREATE TABLE IF NOT EXISTS orders (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -90,6 +86,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول محصولات خرید
   await pool.query(
     'CREATE TABLE IF NOT EXISTS products (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -102,6 +99,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول محصولات فروش
   await pool.query(
     'CREATE TABLE IF NOT EXISTS sell_products (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -115,6 +113,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // جدول سفارشات فروش به ما
   await pool.query(
     'CREATE TABLE IF NOT EXISTS sell_orders (' +
     'id SERIAL PRIMARY KEY, ' +
@@ -128,6 +127,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     ')'
   );
 
+  // ثبت داده‌های اولیه محصولات خرید
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
     const now = new Date().toISOString();
@@ -138,6 +138,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     );
   }
 
+  // ثبت داده‌های اولیه محصولات فروش
   const sellProductsCountRes = await pool.query('SELECT COUNT(*) AS c FROM sell_products');
   if (Number(sellProductsCountRes.rows[0].c) === 0) {
     const now = new Date().toISOString();
@@ -152,11 +153,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     );
   }
 
-  const defaultReactionRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
-  if (defaultReactionRes.rows.length === 0) {
-    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['start_reaction', '🎉']);
-  }
-
+  // تنظیمات اولیه
   const usdRateRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
   if (usdRateRes.rows.length === 0) {
     await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['usd_rate', String(DEFAULT_USD_RATE)]);
