@@ -46,7 +46,8 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     'card_number TEXT, ' +
     'receipt_file_id TEXT, ' +
     'status TEXT, ' +
-    'created_at TEXT' +
+    'created_at TEXT, ' +
+    'tracking_code TEXT' +
     ')'
   );
 
@@ -84,7 +85,8 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     'product_type TEXT, ' +
     'amount INTEGER, ' +
     'status TEXT, ' +
-    'created_at TEXT' +
+    'created_at TEXT, ' +
+    'tracking_code TEXT' +
     ')'
   );
 
@@ -107,6 +109,7 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     'name TEXT, ' +
     'unit_price NUMERIC, ' +
     'sample_code TEXT, ' +
+    'api_provider TEXT DEFAULT \'manual\', ' +
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
@@ -118,15 +121,12 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
     'telegram_id TEXT, ' +
     'product_type TEXT, ' +
     'voucher_code TEXT, ' +
-    'amount INTEGER, ' +
+    'amount INTEGER DEFAULT 0, ' +
     'status TEXT, ' +
     'created_at TEXT, ' +
     'tracking_code TEXT' +
     ')'
   );
-
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-  await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
@@ -144,8 +144,8 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
       '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5), ($10, $11, $12, $13, 1, $5)',
       [
         'uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', new Date().toISOString(),
-        'premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog',
-        'psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L'
+        'premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', new Date().toISOString(),
+        'psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', new Date().toISOString()
       ]
     );
   }
@@ -158,14 +158,6 @@ async function initDb(HOT_VOUCHER_MIN = 100000, DEFAULT_USD_RATE = 60000) {
   const usdRateRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
   if (usdRateRes.rows.length === 0) {
     await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['usd_rate', String(DEFAULT_USD_RATE)]);
-  }
-
-  const existingChannelRes = await pool.query('SELECT * FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
-  if (existingChannelRes.rows.length === 0) {
-    await pool.query(
-      'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
-      ['-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی']
-    );
   }
 }
 
