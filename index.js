@@ -1,7 +1,20 @@
 const { Telegraf, Markup } = require('telegraf');
 const { pool, getUser, getUserCards, initDb } = require('./db');
-const { registerAdminCommands } = require('./handlers/admin');
-const { registerSellHandlers } = require('./handlers/sell');
+
+// فراخوانی ایمن فایل‌های ادمین و فروش از مسیر اصلی پروژه
+let registerAdminCommands, registerSellHandlers;
+
+try {
+  registerAdminCommands = require('./admin').registerAdminCommands;
+} catch (e) {
+  console.log('⚠️ فایل admin.js پیدا نشد یا ارور دارد:', e.message);
+}
+
+try {
+  registerSellHandlers = require('./sell').registerSellHandlers;
+} catch (e) {
+  console.log('⚠️ فایل sell.js پیدا نشد یا ارور دارد:', e.message);
+}
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const sessions = {};
@@ -18,16 +31,7 @@ const TEXTS = {
   walletIncrease: '➕ افزایش موجودی',
   walletWithdraw: '💳 برداشت موجودی',
   walletAddCard: '➕ افزودن کارت جدید',
-  backButton: '🔙 بازگشت',
-  depositMethodTitle: 'روش افزایش موجودی را انتخاب کنید:',
-  depositCard2Card: '💳 کارت به کارت',
-  depositTron: '🪙 ترون (تتر)',
-  depositGateway: '🌐 درگاه پرداخت',
-  comingSoon: '😃 به زودی!',
-  depositCardsTrust: 'واریز به حساب رسمی مجموعه انجام می‌شود.',
-  depositAskAmount: 'لطفاً مبلغ واریزی خود را به تومان وارد کنید:',
-  depositAskReceipt: 'لطفاً تصویر رسید (فیش) پرداخت خود را بفرستید:',
-  depositSubmitted: '✅ درخواست شارژ شما ثبت شد و پس از بررسی اعمال خواهد شد.'
+  backButton: '🔙 بازگشت'
 };
 
 // کیبورد منوی اصلی
@@ -67,9 +71,13 @@ async function startBot() {
     await initDb();
     console.log('✅ پایگاه داده آماده شد.');
 
-    // ثبت ماژول‌های اختصاصی
-    registerAdminCommands(bot, sessions);
-    registerSellHandlers(bot, sessions);
+    // ثبت ماژول‌ها در صورت وجود
+    if (typeof registerAdminCommands === 'function') {
+      registerAdminCommands(bot, sessions);
+    }
+    if (typeof registerSellHandlers === 'function') {
+      registerSellHandlers(bot, sessions);
+    }
 
     // دستور /start
     bot.start(async (ctx) => {
@@ -134,7 +142,7 @@ async function startBot() {
       ctx.reply('به منوی اصلی بازگشتید.', getMainKeyboard());
     });
 
-    // مدیریت خطاها جهت جلوگیری از کرش ربات
+    // مدیریت خطاها جهت جلوگیری از کرش سرور
     bot.catch((err, ctx) => {
       console.error(`❌ خطا در عملکرد ${ctx.updateType}:`, err);
     });
