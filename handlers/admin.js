@@ -1,6 +1,7 @@
 const { pool, getUser } = require('../db');
 
-const ADMIN_IDS = [123456789]; // ⚠️ آی‌دی عددی تلگرام خودت رو بگذار
+// ⚠️ آی‌دی عددی تلگرام خودت را اینجا وارد کن
+const ADMIN_IDS = [123456789]; 
 const DEFAULT_USD_RATE = 60000;
 
 function isAdmin(telegramId) {
@@ -8,27 +9,32 @@ function isAdmin(telegramId) {
 }
 
 async function showAdminMenu(ctx) {
-  const pendingRes = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
-  const pendingCount = pendingRes.rows[0].c;
-  const pendingSellRes = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE status = 'pending_review'");
-  const pendingSellCount = pendingSellRes.rows[0].c;
-  
-  ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
-    '🔹 درخواست‌های کیف پول (شارژ/برداشت): ' + pendingCount + '\n' +
-    '🔹 درخواست‌های فروش در انتظار: ' + pendingSellCount + '\n\n' +
-    '📦 مدیریت محصولات فروش:\n' +
-    '/addsellproduct کلید|نام|قیمت واحد|نمونه کد\n' +
-    '/listsellproducts — دیدن محصولات فروش\n' +
-    '/removesellproduct کلید — غیرفعال کردن ووچر فروش\n\n' +
-    '🔎 جستجو با کد پیگیری:\n/find VOC-847392', {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📥 درخواست‌های کیف پول', callback_data: 'admin_pending' }],
-        [{ text: '🎟 درخواست‌های فروش در انتظار (' + pendingSellCount + ')', callback_data: 'admin_sell_pending' }]
-      ]
-    }
-  });
+  try {
+    const pendingRes = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
+    const pendingCount = pendingRes.rows[0] ? pendingRes.rows[0].c : 0;
+    
+    const pendingSellRes = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE status = 'pending_review'");
+    const pendingSellCount = pendingSellRes.rows[0] ? pendingSellRes.rows[0].c : 0;
+
+    ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
+      '🔹 درخواست‌های کیف پول (شارژ/برداشت): ' + pendingCount + '\n' +
+      '🔹 درخواست‌های فروش در انتظار: ' + pendingSellCount + '\n\n' +
+      '📦 مدیریت محصولات فروش:\n' +
+      '/addsellproduct کلید|نام|قیمت واحد|نمونه کد\n' +
+      '/listsellproducts — دیدن محصولات فروش\n' +
+      '/removesellproduct کلید — غیرفعال کردن ووچر فروش\n\n' +
+      '🔎 جستجو با کد پیگیری:\n/find VOC-847392', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📥 درخواست‌های کیف پول', callback_data: 'admin_pending' }],
+          [{ text: '🎟 درخواست‌های فروش در انتظار (' + pendingSellCount + ')', callback_data: 'admin_sell_pending' }]
+        ]
+      }
+    });
+  } catch (e) {
+    console.log('Error in showAdminMenu: ' + e.message);
+  }
 }
 
 function registerAdminCommands(bot, sessions) {
@@ -37,7 +43,7 @@ function registerAdminCommands(bot, sessions) {
     await showAdminMenu(ctx);
   });
 
-  // مشاهده درخواست‌های فروش
+  // لیست درخواست‌های فروش
   bot.action('admin_sell_pending', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -74,7 +80,7 @@ function registerAdminCommands(bot, sessions) {
     }
   });
 
-  // کلیک ادمین روی تایید ووچر فروش
+  // کلیک روی تایید و واریز
   bot.action(/^admin_sell_approve_(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -89,7 +95,7 @@ function registerAdminCommands(bot, sessions) {
     ctx.reply('💰 لطفاً مبلغ نهایی واریزی به کیف پول کاربر را به تومان وارد کنید:\n(مثلاً: 245000)');
   });
 
-  // کلیک ادمین روی رد با دلیل
+  // کلیک روی رد با توضیح
   bot.action(/^admin_sell_reject_reason_(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -129,12 +135,11 @@ function registerAdminCommands(bot, sessions) {
     ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
   });
 
-  // گرفتن ورودهای متنی ادمین (مبلغ تایید یا دلیل رد)
+  // مدیریت ورودی‌های متنی ادمین
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session) return next();
 
-    // هندل واریز مبلغ نهایی و شارژ کیف پول کاربر
     if (session.flow === 'admin_sell_approve_flow' && session.step === 'waiting_amount') {
       const amount = parseInt(ctx.message.text.trim(), 10);
       if (isNaN(amount) || amount <= 0) {
@@ -149,15 +154,11 @@ function registerAdminCommands(bot, sessions) {
         return ctx.reply('این درخواست قبلاً بررسی شده یا نامعتبر است.');
       }
 
-      // ۱. به‌روزرسانی سفارش فروش
       await pool.query("UPDATE sell_orders SET status = 'approved', amount = $1 WHERE id = $2", [amount, session.requestId]);
-
-      // ۲. شارژ خودکار کیف پول کاربر
       await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, request.telegram_id]);
 
       delete sessions[ctx.from.id];
 
-      // ۳. اطلاع رسانی به کاربر
       try {
         await bot.telegram.sendMessage(
           request.telegram_id,
@@ -168,10 +169,9 @@ function registerAdminCommands(bot, sessions) {
         );
       } catch (e) {}
 
-      return ctx.reply('✅ مبلغ ' + amount.toLocaleString('fa-IR') + ' تومان با موفقیت به کیف پول کاربر اضافه شد و سفارش تایید گردید.');
+      return ctx.reply('✅ مبلغ ' + amount.toLocaleString('fa-IR') + ' تومان با موفقیت به کیف پول کاربر اضافه شد.');
     }
 
-    // هندل دلیل رد
     if (session.flow === 'admin_sell_reject_flow' && session.step === 'waiting_reason') {
       const reason = ctx.message.text.trim();
       const reqRes = await pool.query('SELECT * FROM sell_orders WHERE id = $1', [session.requestId]);
@@ -188,7 +188,7 @@ function registerAdminCommands(bot, sessions) {
       try {
         await bot.telegram.sendMessage(
           request.telegram_id,
-          '❌ درخواست فروش شما با کد پیگیری ' + request.tracking_code + ' رد شد.\n\n دلیل رد: ' + reason
+          '❌ درخواست فروش شما با کد پیگیری ' + request.tracking_code + ' رد شد.\n\nدلیل رد: ' + reason
         );
       } catch (e) {}
 
