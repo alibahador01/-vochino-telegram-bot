@@ -1,4 +1,4 @@
-const { pool } = require('./db');
+const { pool } = require('../db'); // اصلاح آدرس دیتابیس
 
 const ADMIN_ID = process.env.ADMIN_ID;
 
