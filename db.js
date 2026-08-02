@@ -227,7 +227,12 @@ async function initDb() {
   if (existingChannelRes.rows.length === 0) {
     await pool.query(
       'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
-      ['-1003953090902', 'https://t.me/+G9og5Y6KfxEyNTRk', 'کانال اصلی']
+      ['-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی']
+    );
+  } else {
+    await pool.query(
+      'UPDATE required_channels SET invite_link = $1 WHERE chat_id = $2',
+      ['https://t.me/+DpU8DAaQei00YTFk', '-1003953090902']
     );
   }
 }
