@@ -29,8 +29,8 @@ const mainMenuButtons = [
   { key: 'sell', text: '✨ فروش' },
   { key: 'wallet', text: '🎒 جیب' },
   { key: 'profile', text: '🧢 پروفایل' },
-  { key: 'game', text: '🎮 بازی بونوس' },
   { key: 'rules_education', text: '📚 قوانین و آموزش' },
+  { key: 'game', text: '🎮 بازی بونوس' },
   { key: 'support', text: '📥 پشتیبانی' }
 ];
 
