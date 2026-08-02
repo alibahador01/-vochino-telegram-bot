@@ -25,12 +25,12 @@ const DEPOSIT_CARDS = [
 ];
 
 const mainMenuButtons = [
-  { key: 'buy', text: '✨ خرید' },
-  { key: 'sell', text: '✨ فروش' },
+  { key: 'buy', text: '✨ خرید ✨' },
+  { key: 'sell', text: '✨ فروش ✨' },
   { key: 'wallet', text: '🎒 جیب' },
   { key: 'profile', text: '🧢 پروفایل' },
-  { key: 'rules_education', text: '📚 قوانین و آموزش' },
-  { key: 'game', text: '🎮 بازی بونوس' },
+  { key: 'game', text: '🎮 بازی و بونوس' },
+  { key: 'rules_education', text: '📚 آموزش و قوانین' },
   { key: 'support', text: '📥 پشتیبانی' }
 ];
 
