@@ -58,8 +58,6 @@ module.exports = function registerRegistrationHandlers(bot) {
 
     const existingUser = await getUser(ctx.from.id);
     if (existingUser) {
-      const lang = existingUser.language || 'fa';
-      ctx.reply(texts[lang].welcomeBack);
       showMainMenu(ctx);
       return;
     }
@@ -88,8 +86,6 @@ module.exports = function registerRegistrationHandlers(bot) {
     ctx.deleteMessage().catch(function () {});
     const existingUser = await getUser(ctx.from.id);
     if (existingUser) {
-      const lang = existingUser.language || 'fa';
-      ctx.reply(texts[lang].welcomeBack);
       showMainMenu(ctx);
     } else {
       ctx.reply(texts.fa.chooseLanguage, {
