@@ -80,3 +80,24 @@ init().catch(function (e) {
   console.log('INIT ERROR: ' + e.message);
   console.log('INIT ERROR STACK: ' + e.stack);
 });
+const https = require('https');
+
+// لینک سایت رندر خودتان
+const RENDER_URL = 'https://vochino-telegram-bot.onrender.com'; 
+
+function sendPing(intervalName) {
+    https.get(RENDER_URL, (res) => {
+        console.log(`[${intervalName}] Self-ping sent: Status Code ${res.statusCode}`);
+    }).on('error', (err) => {
+        console.error(`[${intervalName}] Self-ping error:`, err.message);
+    });
+}
+
+// لایه اول: هر ۲۰ ثانیه
+setInterval(() => sendPing('20s'), 20000);
+
+// لایه دوم: هر ۴۰ ثانیه
+setInterval(() => sendPing('40s'), 40000);
+
+// لایه سوم: هر ۵۷ ثانیه
+setInterval(() => sendPing('57s'), 57000);
