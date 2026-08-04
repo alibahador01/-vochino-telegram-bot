@@ -189,6 +189,7 @@ async function initDb() {
   );
 
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_code TEXT');
   await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
