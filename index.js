@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// ===== سیستم ضد خواب ۴ لایه (بدون اجازه خواب!) 👁️⚡ =====
+// ===== سیستم ضد خواب ۴ لایه قبلی شما (دست‌نخورده) 👁️⚡ =====
 
 setInterval(() => {
   const url = 'https://vochino-telegram-bot.onrender.com';
@@ -41,9 +41,23 @@ setInterval(async () => {
 }, 7 * 60 * 1000);
 // ============================================================
 
+// ===== لایه‌های فوق‌العاده سریع جدید (۲۰، ۴۰ و ۵۷ ثانیه) =====
+const RENDER_URL = 'https://vochino-telegram-bot.onrender.com';
+
+function sendFastPing(intervalName) {
+    https.get(RENDER_URL, (res) => {
+        console.log(`[Fast ${intervalName}] Status: ${res.statusCode}`);
+    }).on('error', (err) => {});
+}
+
+setInterval(() => sendFastPing('20s'), 20000);
+setInterval(() => sendFastPing('40s'), 40000);
+setInterval(() => sendFastPing('57s'), 57000);
+// ============================================================
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// وصل کردن همه‌ی هندلرها به ربات (هر فایل، بخش خودش رو ثبت می‌کنه)
+// وصل کردن همه‌ی هندلرها به ربات
 require('./handlers/registration')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
@@ -52,7 +66,7 @@ require('./handlers/game')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/misc')(bot);
 
-// ✅ لایه‌ی محافظتی: جلوگیری از کرش کل برنامه به خاطر خطاهای خارج از هندلرهای تلگرام
+// ✅ لایه‌ی محافظتی: جلوگیری از کرش کل برنامه
 process.on('unhandledRejection', (err) => {
   console.log('UNHANDLED REJECTION: ' + (err && err.message ? err.message : err));
 });
@@ -61,12 +75,11 @@ process.on('uncaughtException', (err) => {
   console.log(err.stack);
 });
 
-// ✅ محافظ کلی خطا - بدون این، هر خطای کوچیک تو یه هندلر می‌تونست کل ربات رو کرش کنه
 bot.catch((err, ctx) => {
   console.log('BOT ERROR: ' + err.message);
   console.log(err.stack);
   try {
-    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن. اگه ادامه داشت به پشتیبانی خبر بده.');
+    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن.');
   } catch (e) {}
 });
 
@@ -80,24 +93,3 @@ init().catch(function (e) {
   console.log('INIT ERROR: ' + e.message);
   console.log('INIT ERROR STACK: ' + e.stack);
 });
-const https = require('https');
-
-// لینک سایت رندر خودتان
-const RENDER_URL = 'https://vochino-telegram-bot.onrender.com'; 
-
-function sendPing(intervalName) {
-    https.get(RENDER_URL, (res) => {
-        console.log(`[${intervalName}] Self-ping sent: Status Code ${res.statusCode}`);
-    }).on('error', (err) => {
-        console.error(`[${intervalName}] Self-ping error:`, err.message);
-    });
-}
-
-// لایه اول: هر ۲۰ ثانیه
-setInterval(() => sendPing('20s'), 20000);
-
-// لایه دوم: هر ۴۰ ثانیه
-setInterval(() => sendPing('40s'), 40000);
-
-// لایه سوم: هر ۵۷ ثانیه
-setInterval(() => sendPing('57s'), 57000);
