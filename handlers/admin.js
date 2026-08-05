@@ -1,7 +1,7 @@
 const texts = require('../texts');
 const { sessions, fillTemplate } = require('../utils');
 const { pool, getUser, getUsdRate } = require('../db');
-const { ADMIN_IDS, ALLOWED_REACTIONS } = require('../constants');
+const { ADMIN_IDS, ALLOWED_REACTIONS, HOT_VOUCHER_MIN } = require('../constants');
 
 function isAdmin(telegramId) {
   return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
@@ -31,7 +31,7 @@ async function findSellProduct(arg) {
 
 async function productKeysList() {
   const res = await pool.query('SELECT key, name FROM products ORDER BY id ASC');
-  if (res.rows.length === 0) return '(جدول محصولات کاملاً خالی است — با /addproduct اضافه کن)';
+  if (res.rows.length === 0) return '(جدول محصولات کاملاً خالی است)';
   return res.rows.map(function (p) { return p.key + ' (' + p.name + ')'; }).join('، ');
 }
 
@@ -58,6 +58,7 @@ async function showAdminMenu(ctx) {
     '💡 تغییر ایموجی استارت:\n/setreaction <ایموجی>\n\n' +
     '💵 تغییر نرخ دلار:\n/setrate <عدد>\n\n' +
     '📦 مدیریت محصولات خرید:\n' +
+    '/resetproducts — صفر کردن جدول و ساخت دو محصول تمیز\n' +
     '/addproduct کلید|نام|حداقل|usd یا toman\n' +
     '/listproducts — دیدن همه‌ی محصولات خرید\n' +
     '/removeproduct کلید یا نام — غیرفعال کردن محصول\n' +
@@ -68,7 +69,7 @@ async function showAdminMenu(ctx) {
     '/removesellproduct کلید یا نام — غیرفعال کردن محصول فروش\n\n' +
     '🔎 جستجوی سفارش/شارژ/برداشت/فروش با کد پیگیری:\n' +
     '/find VOC-847392\n\n' +
-    'ℹ️ نکته: در همه‌ی دستورات بالا می‌تونی به جای کلید انگلیسی، اسم فارسی محصول رو هم بنویسی.', {
+    'ℹ️ نکته: در همه‌ی دستورات می‌تونی به جای کلید انگلیسی، اسم فارسی محصول رو هم بنویسی.', {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📥 درخواست‌های در انتظار کیف پول', callback_data: 'admin_pending' }],
@@ -83,6 +84,17 @@ module.exports = function registerAdminHandlers(bot) {
   bot.command('admin', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     await showAdminMenu(ctx);
+  });
+
+  bot.command('resetproducts', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    await pool.query('DELETE FROM products');
+    await pool.query(
+      'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ' +
+      "($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5)",
+      ['voucher', '🎟 یوووچر', 1, 'usd', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman']
+    );
+    ctx.reply('✅ جدول محصولات کاملاً صفر شد!\n\nدو محصول تمیز و فعال ساخته شد:\n🎟 یوووچر (حداقل ۱ دلار)\n🎟 هات ووچر (حداقل ' + HOT_VOUCHER_MIN.toLocaleString('en-US') + ' تومان)\n\nالان با /listproducts چک کن و بعد بخش خرید رو تست کن.');
   });
 
   bot.command('setreaction', async (ctx) => {
@@ -434,7 +446,7 @@ module.exports = function registerAdminHandlers(bot) {
     }
   });
 
-  bot.action(/^admin_sell_approve_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_sell_approve_([0-9]+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -458,7 +470,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply(texts.fa.sellAskFinalAmount);
   });
 
-  bot.action(/^admin_sell_reject_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_sell_reject_([0-9]+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -480,7 +492,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('درخواست فروش شماره ' + requestId + ' رد شد ❌');
   });
 
-  bot.action(/^admin_sell_reject_reason_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_sell_reject_reason_([0-9]+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -504,7 +516,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('✍️ لطفاً دلیل رد این درخواست فروش رو بنویس (همین متن مستقیم برای کاربر ارسال می‌شه):');
   });
 
-  bot.action(/^admin_approve_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_approve_([0-9]+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -532,7 +544,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('درخواست شماره ' + requestId + ' تایید شد ✅');
   });
 
-  bot.action(/^admin_reject_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_reject_([0-9]+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -552,7 +564,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('درخواست شماره ' + requestId + ' رد شد ❌');
   });
 
-  bot.action(/^admin_reject_reason_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_reject_reason_([0-9]+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
