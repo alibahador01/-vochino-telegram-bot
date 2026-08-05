@@ -7,6 +7,40 @@ function isAdmin(telegramId) {
   return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
 }
 
+async function findProduct(arg) {
+  if (!arg) return null;
+  let res = await pool.query('SELECT * FROM products WHERE key = $1', [arg]);
+  if (res.rows.length > 0) return res.rows[0];
+  res = await pool.query('SELECT * FROM products WHERE name = $1', [arg]);
+  if (res.rows.length > 0) return res.rows[0];
+  res = await pool.query('SELECT * FROM products WHERE name LIKE $1', ['%' + arg + '%']);
+  if (res.rows.length > 0) return res.rows[0];
+  return null;
+}
+
+async function findSellProduct(arg) {
+  if (!arg) return null;
+  let res = await pool.query('SELECT * FROM sell_products WHERE key = $1', [arg]);
+  if (res.rows.length > 0) return res.rows[0];
+  res = await pool.query('SELECT * FROM sell_products WHERE name = $1', [arg]);
+  if (res.rows.length > 0) return res.rows[0];
+  res = await pool.query('SELECT * FROM sell_products WHERE name LIKE $1', ['%' + arg + '%']);
+  if (res.rows.length > 0) return res.rows[0];
+  return null;
+}
+
+async function productKeysList() {
+  const res = await pool.query('SELECT key, name FROM products ORDER BY id ASC');
+  if (res.rows.length === 0) return '(جدول محصولات کاملاً خالی است — با /addproduct اضافه کن)';
+  return res.rows.map(function (p) { return p.key + ' (' + p.name + ')'; }).join('، ');
+}
+
+async function sellProductKeysList() {
+  const res = await pool.query('SELECT key, name FROM sell_products ORDER BY id ASC');
+  if (res.rows.length === 0) return '(جدول محصولات فروش کاملاً خالی است)';
+  return res.rows.map(function (p) { return p.key + ' (' + p.name + ')'; }).join('، ');
+}
+
 async function showAdminMenu(ctx) {
   const pendingRes = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
   const pendingCount = pendingRes.rows[0].c;
@@ -14,40 +48,31 @@ async function showAdminMenu(ctx) {
   const pendingSellRes = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE status = 'pending_review'");
   const pendingSellCount = pendingSellRes.rows[0].c;
 
-  const pendingBuyRes = await pool.query("SELECT COUNT(*) AS c FROM orders WHERE status = 'pending_delivery'");
-  const pendingBuyCount = pendingBuyRes.rows[0].c;
-
   const settingRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
   const currentReaction = settingRes.rows[0] ? settingRes.rows[0].value : '🔥';
 
   ctx.reply('👑 پنل مدیریت پیشرفته\n\n' +
     '🔹 درخواست‌های در انتظار کیف پول: ' + pendingCount + '\n' +
     '🔹 درخواست‌های فروش در انتظار: ' + pendingSellCount + '\n' +
-    '🔹 سفارشات خرید در انتظار تحویل: ' + pendingBuyCount + '\n' +
     '🔹 ایموجی اکشن استارت فعلی: ' + currentReaction + '\n\n' +
     '💡 تغییر ایموجی استارت:\n/setreaction <ایموجی>\n\n' +
     '💵 تغییر نرخ دلار:\n/setrate <عدد>\n\n' +
     '📦 مدیریت محصولات خرید:\n' +
-    '/addproduct کلید|نام|حداقل|حداکثر|usd یا toman|نوع تحویل\n' +
+    '/addproduct کلید|نام|حداقل|usd یا toman\n' +
     '/listproducts — دیدن همه‌ی محصولات خرید\n' +
-    '/removeproduct کلید — غیرفعال کردن یه محصول خرید\n' +
-    '/hideproduct کلید — مخفی کردن محصول از کاربر\n' +
-    '/showproduct کلید — نمایش محصول به کاربر\n' +
-    '/setcommission کلید|نوع|مقدار — تنظیم کارمزد\n' +
-    '/setdelivery کلید|نوع — تنظیم نوع تحویل\n' +
-    '/togglemanual کلید — سوییچ تحویل دستی/اتوماتیک\n\n' +
+    '/removeproduct کلید یا نام — غیرفعال کردن محصول\n' +
+    '/activateproduct کلید یا نام — فعال کردن محصول\n\n' +
     '🎟 مدیریت محصولات فروش:\n' +
     '/addsellproduct کلید|نام|قیمت واحد|نمونه کد\n' +
     '/listsellproducts — دیدن همه‌ی محصولات فروش\n' +
-    '/removesellproduct کلید — غیرفعال کردن یه محصول فروش\n\n' +
+    '/removesellproduct کلید یا نام — غیرفعال کردن محصول فروش\n\n' +
     '🔎 جستجوی سفارش/شارژ/برداشت/فروش با کد پیگیری:\n' +
-    '/find VOC-847392', {
-    parse_mode: 'Markdown',
+    '/find VOC-847392\n\n' +
+    'ℹ️ نکته: در همه‌ی دستورات بالا می‌تونی به جای کلید انگلیسی، اسم فارسی محصول رو هم بنویسی.', {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📥 درخواست‌های در انتظار کیف پول', callback_data: 'admin_pending' }],
-        [{ text: '🎟 درخواست‌های فروش در انتظار', callback_data: 'admin_sell_pending' }],
-        [{ text: '📦 سفارشات خرید در انتظار تحویل', callback_data: 'admin_buy_pending' }]
+        [{ text: '🎟 درخواست‌های فروش در انتظار', callback_data: 'admin_sell_pending' }]
       ]
     }
   });
@@ -66,14 +91,14 @@ module.exports = function registerAdminHandlers(bot) {
     if (args.length < 2) {
       const currentRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
       const current = currentRes.rows[0] ? currentRes.rows[0].value : '🔥';
-      ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n/setreaction 🔥', { parse_mode: 'Markdown' });
+      ctx.reply('❌ لطفاً ایموجی مورد نظر را بعد از دستور وارد کنید.\nایموجی فعلی ربات: ' + current + '\n\nمثال:\n/setreaction 🔥');
       return;
     }
     const newEmoji = args[1];
     if (ALLOWED_REACTIONS.indexOf(newEmoji) === -1) {
       ctx.reply(
         '⚠️ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست.\n' +
-        'چند نمونه‌ی مجاز:\n🎉 🔥 🤩 💯 🏆 ❤ 👏'
+        'چند نمونه‌ی مجاز:\n🎉 🔥 🤩 💯  ❤ 👏'
       );
       return;
     }
@@ -95,7 +120,7 @@ module.exports = function registerAdminHandlers(bot) {
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
       const currentRate = await getUsdRate();
-      ctx.reply('❌ لطفاً نرخ جدید را وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n/setrate 65000', { parse_mode: 'Markdown' });
+      ctx.reply('❌ لطفاً نرخ جدید را وارد کنید.\nنرخ فعلی: ' + currentRate.toLocaleString('en-US') + ' تومان\n\nمثال:\n/setrate 65000');
       return;
     }
     const newRate = parseInt(args[1].replace(/[^0-9]/g, ''), 10);
@@ -115,14 +140,11 @@ module.exports = function registerAdminHandlers(bot) {
     const raw = ctx.message.text.replace(/^\/addproduct(@\w+)?\s*/, '');
     const parts = raw.split('|').map(function (p) { return p.trim(); });
 
-    if (parts.length < 5) {
+    if (parts.length !== 4) {
       ctx.reply(
         '❌ فرمت درست نیست.\n\n' +
-        'فرمت صحیح:\n/addproduct کلید|نام نمایشی|حداقل مبلغ|حداکثر مبلغ|نوع قیمت|نوع تحویل\n\n' +
-        'نوع قیمت: usd یا toman\n' +
-        'نوع تحویل: code یا wallet یا telegram_id\n\n' +
-        'مثال:\n/addproduct voucher|🎟 یوووچر|1|0|usd|code\n' +
-        '(حداکثر 0 = بدون محدودیت)'
+        'فرمت صحیح:\n/addproduct کلید|نام نمایشی|حداقل مبلغ|نوع\n\n' +
+        'مثال:\n/addproduct voucher|🎟 یوووچر|1|usd'
       );
       return;
     }
@@ -130,27 +152,20 @@ module.exports = function registerAdminHandlers(bot) {
     const key = parts[0];
     const name = parts[1];
     const minAmount = Number(parts[2].replace(/[^0-9.]/g, ''));
-    const maxAmount = Number(parts[3].replace(/[^0-9.]/g, '')) || 0;
-    const priceType = parts[4];
-    const deliveryType = parts[5] || 'code';
+    const priceType = parts[3];
 
     if (!key || !name || !minAmount || (priceType !== 'usd' && priceType !== 'toman')) {
       ctx.reply('❌ مقادیر نامعتبر است.');
       return;
     }
 
-    if (['code', 'wallet', 'telegram_id'].indexOf(deliveryType) === -1) {
-      ctx.reply('❌ نوع تحویل باید یکی از این‌ها باشد: code, wallet, telegram_id');
-      return;
-    }
-
     await pool.query(
-      'INSERT INTO products (key, name, min_amount, max_amount, price_type, delivery_type, hidden, api_source, commission_type, commission_value, manual_delivery, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, 0, \'manual\', \'none\', 0, 1, 1, $7) ' +
-      'ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, min_amount = EXCLUDED.min_amount, max_amount = EXCLUDED.max_amount, price_type = EXCLUDED.price_type, delivery_type = EXCLUDED.delivery_type, active = 1',
-      [key, name, minAmount, maxAmount, priceType, deliveryType, new Date().toISOString()]
+      'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ($1, $2, $3, $4, 1, $5) ' +
+      'ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, min_amount = EXCLUDED.min_amount, price_type = EXCLUDED.price_type, active = 1',
+      [key, name, minAmount, priceType, new Date().toISOString()]
     );
 
-    ctx.reply('✅ محصول «' + name + '» با موفقیت اضافه/ویرایش شد.');
+    ctx.reply('✅ محصول «' + name + '» با موفقیت اضافه/ویرایش و فعال شد.');
   });
 
   bot.command('listproducts', async (ctx) => {
@@ -165,170 +180,45 @@ module.exports = function registerAdminHandlers(bot) {
     let message = '📦 لیست محصولات خرید:\n\n';
     res.rows.forEach(function (p) {
       const statusLabel = p.active ? '✅ فعال' : '⛔️ غیرفعال';
-      const hiddenLabel = p.hidden ? '👁 مخفی' : '👀 قابل نمایش';
       const priceLabel = p.price_type === 'usd' ? Number(p.min_amount) + ' دلار' : Number(p.min_amount).toLocaleString('en-US') + ' تومان';
-      const maxLabel = Number(p.max_amount) > 0 ? Number(p.max_amount).toLocaleString('en-US') + ' تومان' : 'بدون محدودیت';
-      const commissionLabel = p.commission_type === 'percentage' ? p.commission_value + '%' : (p.commission_type === 'fixed' ? Number(p.commission_value).toLocaleString('en-US') + ' تومان' : 'بدون کارمزد');
-      const deliveryLabel = p.manual_delivery ? 'دستی' : 'اتوماتیک (API)';
-
-      message += 'کلید: ' + p.key + '\n' +
-        'نام: ' + p.name + '\n' +
-        'حداقل خرید: ' + priceLabel + '\n' +
-        'حداکثر خرید: ' + maxLabel + '\n' +
-        'نوع تحویل: ' + p.delivery_type + '\n' +
-        'کارمزد: ' + commissionLabel + '\n' +
-        'تحویل: ' + deliveryLabel + '\n' +
-        'وضعیت: ' + statusLabel + ' | ' + hiddenLabel + '\n\n';
+      message += 'کلید: ' + p.key + '\nنام: ' + p.name + '\nحداقل خرید: ' + priceLabel + '\nوضعیت: ' + statusLabel + '\n\n';
     });
 
-    ctx.reply(message, { parse_mode: 'Markdown' });
+    ctx.reply(message);
   });
 
   bot.command('removeproduct', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
-      ctx.reply('❌ کلید محصول رو وارد کنید.');
+      ctx.reply('❌ کلید یا نام محصول رو وارد کن.\nمحصولات موجود: ' + (await productKeysList()));
       return;
     }
-    const key = args[1].trim();
-    const res = await pool.query("UPDATE products SET active = 0 WHERE key = $1 RETURNING name", [key]);
-    if (res.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
+    const arg = ctx.message.text.replace(/^\/removeproduct(@\w+)?\s*/, '').trim();
+    const product = await findProduct(arg);
+    if (!product) {
+      ctx.reply('❌ محصولی با این کلید/نام پیدا نشد.\nمحصولات موجود: ' + (await productKeysList()));
       return;
     }
-    ctx.reply('✅ محصول «' + res.rows[0].name + '» غیرفعال شد.');
+    await pool.query('UPDATE products SET active = 0 WHERE key = $1', [product.key]);
+    ctx.reply('✅ محصول «' + product.name + '» (کلید: ' + product.key + ') غیرفعال شد.');
   });
 
-  bot.command('hideproduct', async (ctx) => {
+  bot.command('activateproduct', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
-      ctx.reply('❌ کلید محصول رو وارد کنید.');
+      ctx.reply('❌ کلید یا نام محصول رو وارد کن.\nمحصولات موجود: ' + (await productKeysList()));
       return;
     }
-    const key = args[1].trim();
-    const res = await pool.query("UPDATE products SET hidden = 1 WHERE key = $1 RETURNING name", [key]);
-    if (res.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
+    const arg = ctx.message.text.replace(/^\/activateproduct(@\w+)?\s*/, '').trim();
+    const product = await findProduct(arg);
+    if (!product) {
+      ctx.reply('❌ محصولی با این کلید/نام پیدا نشد.\nمحصولات موجود: ' + (await productKeysList()));
       return;
     }
-    ctx.reply('✅ محصول «' + res.rows[0].name + '» از دید کاربران مخفی شد. (در دیتابیس باقی می‌مونه)');
-  });
-
-  bot.command('showproduct', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const args = ctx.message.text.split(' ');
-    if (args.length < 2) {
-      ctx.reply('❌ کلید محصول رو وارد کنید.');
-      return;
-    }
-    const key = args[1].trim();
-    const res = await pool.query("UPDATE products SET hidden = 0 WHERE key = $1 RETURNING name", [key]);
-    if (res.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
-      return;
-    }
-    ctx.reply('✅ محصول «' + res.rows[0].name + '» دوباره به کاربران نمایش داده می‌شه.');
-  });
-
-  bot.command('setcommission', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const raw = ctx.message.text.replace(/^\/setcommission(@\w+)?\s*/, '');
-    const parts = raw.split('|').map(function (p) { return p.trim(); });
-
-    if (parts.length !== 3) {
-      ctx.reply(
-        '❌ فرمت درست نیست.\n\n' +
-        'فرمت صحیح:\n/setcommission کلید|نوع|مقدار\n\n' +
-        'نوع: percentage یا fixed یا none\n\n' +
-        'مثال درصدی:\n/setcommission voucher|percentage|5\n\n' +
-        'مثال ثابت:\n/setcommission voucher|fixed|10000\n\n' +
-        'حذف کارمزد:\n/setcommission voucher|none|0'
-      );
-      return;
-    }
-
-    const key = parts[0];
-    const type = parts[1];
-    const value = Number(parts[2].replace(/[^0-9.]/g, '')) || 0;
-
-    if (['percentage', 'fixed', 'none'].indexOf(type) === -1) {
-      ctx.reply('❌ نوع کارمزد باید یکی از این‌ها باشد: percentage, fixed, none');
-      return;
-    }
-
-    const res = await pool.query(
-      "UPDATE products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name",
-      [type, value, key]
-    );
-
-    if (res.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
-      return;
-    }
-
-    let valueText = '';
-    if (type === 'percentage') valueText = value + '%';
-    else if (type === 'fixed') valueText = value.toLocaleString('en-US') + ' تومان';
-    else valueText = 'حذف شد';
-
-    ctx.reply('✅ کارمزد محصول «' + res.rows[0].name + '» تنظیم شد: ' + valueText);
-  });
-
-  bot.command('setdelivery', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const args = ctx.message.text.split(' ');
-    if (args.length < 3) {
-      ctx.reply(
-        '❌ فرمت درست نیست.\n\n' +
-        'فرمت صحیح:\n/setdelivery کلید نوع\n\n' +
-        'انواع:\n' +
-        'code — کد/متن (ووچر، کانفیگ)\n' +
-        'wallet — آدرس کیف پول (ترون، تون‌کوین)\n' +
-        'telegram_id — آیدی تلگرام (استارز، گیفت‌کارت)'
-      );
-      return;
-    }
-
-    const key = args[1].trim();
-    const type = args[2].trim();
-
-    if (['code', 'wallet', 'telegram_id'].indexOf(type) === -1) {
-      ctx.reply('❌ نوع تحویل نامعتبر است. باید یکی از این‌ها باشد: code, wallet, telegram_id');
-      return;
-    }
-
-    const res = await pool.query("UPDATE products SET delivery_type = $1 WHERE key = $2 RETURNING name", [type, key]);
-    if (res.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
-      return;
-    }
-    ctx.reply('✅ نوع تحویل محصول «' + res.rows[0].name + '» به «' + type + '» تغییر یافت.');
-  });
-
-  bot.command('togglemanual', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const args = ctx.message.text.split(' ');
-    if (args.length < 2) {
-      ctx.reply('❌ کلید محصول رو وارد کنید.');
-      return;
-    }
-    const key = args[1].trim();
-
-    const productRes = await pool.query('SELECT manual_delivery, name FROM products WHERE key = $1', [key]);
-    if (productRes.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
-      return;
-    }
-
-    const product = productRes.rows[0];
-    const newValue = product.manual_delivery === 1 ? 0 : 1;
-
-    await pool.query("UPDATE products SET manual_delivery = $1 WHERE key = $2", [newValue, key]);
-
-    const statusText = newValue === 1 ? 'دستی (ادمین تحویل می‌ده)' : 'اتوماتیک (API - به‌زودی)';
-    ctx.reply('✅ تحویل محصول «' + product.name + '» تغییر یافت به: ' + statusText);
+    await pool.query('UPDATE products SET active = 1 WHERE key = $1', [product.key]);
+    ctx.reply('✅ محصول «' + product.name + '» (کلید: ' + product.key + ') فعال شد و الان برای کاربرها نمایش داده می‌شه.');
   });
 
   bot.command('addsellproduct', async (ctx) => {
@@ -379,23 +269,24 @@ module.exports = function registerAdminHandlers(bot) {
       message += 'کلید: ' + p.key + '\nنام: ' + p.name + '\nقیمت واحد: ' + Number(p.unit_price).toLocaleString('en-US') + ' تومان\nنمونه کد: ' + p.sample_code + '\nوضعیت: ' + statusLabel + '\n\n';
     });
 
-    ctx.reply(message, { parse_mode: 'Markdown' });
+    ctx.reply(message);
   });
 
   bot.command('removesellproduct', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
-      ctx.reply('❌ کلید محصول رو وارد کنید.');
+      ctx.reply('❌ کلید یا نام محصول رو وارد کن.\nمحصولات موجود: ' + (await sellProductKeysList()));
       return;
     }
-    const key = args[1].trim();
-    const res = await pool.query("UPDATE sell_products SET active = 0 WHERE key = $1 RETURNING name", [key]);
-    if (res.rows.length === 0) {
-      ctx.reply('محصولی با این کلید پیدا نشد.');
+    const arg = ctx.message.text.replace(/^\/removesellproduct(@\w+)?\s*/, '').trim();
+    const product = await findSellProduct(arg);
+    if (!product) {
+      ctx.reply('❌ محصولی با این کلید/نام پیدا نشد.\nمحصولات موجود: ' + (await sellProductKeysList()));
       return;
     }
-    ctx.reply('✅ محصول فروش «' + res.rows[0].name + '» غیرفعال شد.');
+    await pool.query('UPDATE sell_products SET active = 0 WHERE key = $1', [product.key]);
+    ctx.reply('✅ محصول فروش «' + product.name + '» (کلید: ' + product.key + ') غیرفعال شد.');
   });
 
   bot.command('find', async (ctx) => {
@@ -419,15 +310,13 @@ module.exports = function registerAdminHandlers(bot) {
     if (orderRes.rows.length > 0) {
       const o = orderRes.rows[0];
       const user = await getUser(o.telegram_id);
-      const statusLabel = o.status === 'pending_delivery' ? '⏳ در انتظار تحویل' : (o.status === 'completed' ? '✅ تکمیل شده' : o.status);
       ctx.reply(
         '📦 سفارش خرید\n\n🆔 کد پیگیری: ' + o.tracking_code +
         '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') +
         '\n📱 شماره: ' + (user ? user.phone : '-') +
         '\n📦 محصول: ' + o.product_type +
         '\n💰 مبلغ: ' + Number(o.amount).toLocaleString('en-US') + ' تومان' +
-        '\n💰 کارمزد: ' + Number(o.commission || 0).toLocaleString('en-US') + ' تومان' +
-        '\n📌 وضعیت: ' + statusLabel +
+        '\n📌 وضعیت: ' + o.status +
         '\n📅 تاریخ: ' + o.created_at
       );
     }
@@ -462,122 +351,6 @@ module.exports = function registerAdminHandlers(bot) {
     }
   });
 
-  // ===== پنل سفارشات خرید در انتظار تحویل =====
-  bot.action('admin_buy_pending', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const pendingRes = await pool.query("SELECT * FROM orders WHERE status = 'pending_delivery' ORDER BY id ASC");
-    const pendingRequests = pendingRes.rows;
-
-    if (pendingRequests.length === 0) {
-      ctx.reply('در حال حاضر هیچ سفارش خریدی در انتظار تحویل نیست ✅');
-      return;
-    }
-
-    for (const req of pendingRequests) {
-      const user = await getUser(req.telegram_id);
-      const userName = user ? user.full_name : 'نامشخص';
-      const productRes = await pool.query('SELECT name FROM products WHERE key = $1', [req.product_type]);
-      const productName = productRes.rows[0] ? productRes.rows[0].name : req.product_type;
-
-      let message = '📦 سفارش خرید در انتظار تحویل\n';
-      message += '🆔 کد پیگیری: ' + req.tracking_code + '\n';
-      message += '👤 کاربر: ' + userName + ' (' + req.telegram_id + ')\n';
-      message += '📦 محصول: ' + productName + '\n';
-      message += '💰 مبلغ: ' + Number(req.amount).toLocaleString('en-US') + ' تومان\n';
-      message += '💰 کارمزد: ' + Number(req.commission || 0).toLocaleString('en-US') + ' تومان\n';
-      message += '📅 تاریخ: ' + req.created_at + '\n\n';
-      message += '⚠️ کد/متن تحویل رو با دکمه‌ی زیر وارد کن:';
-
-      const buttons = [
-        [{ text: '📤 ارسال کد تحویل', callback_data: 'admin_deliver_' + req.id, style: 'primary' }],
-        [
-          { text: '✅ تکمیل دستی', callback_data: 'admin_buy_complete_' + req.id, style: 'success' },
-          { text: '❌ لغو و بازگشت وجه', callback_data: 'admin_buy_cancel_' + req.id, style: 'danger' }
-        ]
-      ];
-
-      await ctx.reply(message, { reply_markup: { inline_keyboard: buttons } });
-    }
-  });
-
-  // ارسال کد تحویل به کاربر
-  bot.action(/^admin_deliver_(\d+)$/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const orderId = ctx.match[1];
-    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-    const order = orderRes.rows[0];
-
-    if (!order || order.status !== 'pending_delivery') {
-      ctx.reply('این سفارش قبلاً تحویل داده شده یا وجود ندارد.');
-      return;
-    }
-
-    sessions[ctx.from.id] = {
-      flow: 'admin_deliver_code',
-      step: 'waiting_code',
-      lang: 'fa',
-      data: { orderId: orderId, telegramId: order.telegram_id, trackingCode: order.tracking_code }
-    };
-
-    ctx.reply('✍️ کد/متن تحویل رو بنویس (مستقیم برای کاربر ارسال می‌شه):');
-  });
-
-  // تکمیل دستی سفارش
-  bot.action(/^admin_buy_complete_(\d+)$/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const orderId = ctx.match[1];
-    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-    const order = orderRes.rows[0];
-
-    if (!order || order.status !== 'pending_delivery') {
-      ctx.reply('این سفارش قبلاً بررسی شده است.');
-      return;
-    }
-
-    await pool.query("UPDATE orders SET status = 'completed' WHERE id = $1", [orderId]);
-    ctx.telegram.sendMessage(
-      order.telegram_id,
-      '✅ سفارش خرید شما تکمیل شد.\n🆔 کد پیگیری: ' + order.tracking_code + '\n\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.'
-    );
-    ctx.reply('سفارش شماره ' + orderId + ' تکمیل شد ✅');
-  });
-
-  // لغو سفارش و بازگشت وجه
-  bot.action(/^admin_buy_cancel_(\d+)$/, async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const orderId = ctx.match[1];
-    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-    const order = orderRes.rows[0];
-
-    if (!order || order.status !== 'pending_delivery') {
-      ctx.reply('این سفارش قبلاً بررسی شده است.');
-      return;
-    }
-
-    const totalRefund = Number(order.amount) + Number(order.commission || 0);
-    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [totalRefund, order.telegram_id]);
-    await pool.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [orderId]);
-
-    ctx.telegram.sendMessage(
-      order.telegram_id,
-      '❌ سفارش خرید شما لغو شد.\n🆔 کد پیگیری: ' + order.tracking_code + '\n💰 مبلغ ' + totalRefund.toLocaleString('en-US') + ' تومان به کیف پول شما بازگشت داده شد.'
-    );
-    ctx.reply('سفارش شماره ' + orderId + ' لغو شد و مبلغ به کاربر بازگشت داده شد ❌');
-  });
-
-  // ===== پنل درخواست‌های کیف پول =====
   bot.action('admin_pending', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -622,7 +395,6 @@ module.exports = function registerAdminHandlers(bot) {
     }
   });
 
-  // ===== پنل درخواست‌های فروش =====
   bot.action('admin_sell_pending', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -646,7 +418,7 @@ module.exports = function registerAdminHandlers(bot) {
       message += '🆔 کد پیگیری: ' + req.tracking_code + '\n';
       message += 'کاربر: ' + userName + ' (' + req.telegram_id + ')\n';
       message += 'محصول: ' + productName + '\n';
-      message += 'کد ووچر: `' + req.voucher_code + '`\n';
+      message += 'کد ووچر: ' + req.voucher_code + '\n';
 
       const buttons = [
         [
@@ -658,7 +430,7 @@ module.exports = function registerAdminHandlers(bot) {
         ]
       ];
 
-      await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+      await ctx.reply(message, { reply_markup: { inline_keyboard: buttons } });
     }
   });
 
@@ -804,38 +576,10 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('✍️ لطفاً دلیل رد این درخواست رو بنویس (همین متن مستقیم برای کاربر ارسال می‌شه):');
   });
 
-  // این هندلر فقط مراحل متنی مخصوص ادمین رو می‌گیره
+  // این هندلر فقط مراحل متنی مخصوص ادمین (رد با توضیح، مبلغ نهایی فروش) رو می‌گیره
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session) return next();
-
-    // تحویل کد خرید به کاربر
-    if (session.flow === 'admin_deliver_code' && session.step === 'waiting_code') {
-      if (!isAdmin(ctx.from.id)) return next();
-
-      const deliveredCode = ctx.message.text.trim();
-      const orderId = session.data.orderId;
-
-      const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-      const order = orderRes.rows[0];
-
-      if (!order || order.status !== 'pending_delivery') {
-        delete sessions[ctx.from.id];
-        ctx.reply('این سفارش قبلاً تحویل داده شده است.');
-        return;
-      }
-
-      await pool.query("UPDATE orders SET status = 'completed', delivered_code = $1 WHERE id = $2", [deliveredCode, orderId]);
-
-      ctx.telegram.sendMessage(
-        session.data.telegramId,
-        '🎉 سفارش خرید شما تحویل داده شد!\n\n🆔 کد پیگیری: ' + session.data.trackingCode + '\n\n📦 کد/محتوای سفارش:\n' + deliveredCode + '\n\nبا تشکر از اعتماد شما 🙏'
-      );
-
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ کد تحویل برای کاربر ارسال شد و سفارش تکمیل شد.');
-      return;
-    }
 
     if (session.flow === 'admin_reject_reason' && session.step === 'waiting_reason') {
       if (!isAdmin(ctx.from.id)) return next();
