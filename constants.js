@@ -25,14 +25,26 @@ const DEPOSIT_CARDS = [
 ];
 
 const mainMenuButtons = [
-  { key: 'sell', text: '✨ فروش' },
   { key: 'buy', text: '✨ خرید' },
-  { key: 'profile', text: '🧢 پروفایل' },
+  { key: 'sell', text: '✨ فروش' },
   { key: 'wallet', text: '🎒 جیب' },
+  { key: 'profile', text: '🧢 پروفایل' },
   { key: 'rules_education', text: '📚 قوانین و آموزش' },
   { key: 'game', text: '🎮 بازی بونوس' },
   { key: 'support', text: '📥 پشتیبانی' }
 ];
+
+// ===== تنظیمات جدید برای بخش خرید =====
+const DELIVERY_TYPES = {
+  CODE: 'code',
+  WALLET: 'wallet',
+  TELEGRAM_ID: 'telegram_id'
+};
+
+const PRICE_TYPES = {
+  USD: 'usd',
+  TOMAN: 'toman'
+};
 
 module.exports = {
   ADMIN_IDS,
@@ -45,5 +57,7 @@ module.exports = {
   BONUS_WIN_PROBABILITY,
   ALLOWED_REACTIONS,
   DEPOSIT_CARDS,
-  mainMenuButtons
+  mainMenuButtons,
+  DELIVERY_TYPES,
+  PRICE_TYPES
 };
