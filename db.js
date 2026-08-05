@@ -208,7 +208,6 @@ async function initDb() {
     ')'
   );
 
-  // اضافه کردن ستون‌های جدید به جداول موجود
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
