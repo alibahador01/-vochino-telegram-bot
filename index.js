@@ -3,6 +3,7 @@ const express = require('express');
 const https = require('https');
 
 const { pool, initDb } = require('./db');
+const { ADMIN_IDS } = require('./constants');
 
 // Express Server for Render Health Check
 const app = express();
@@ -10,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log(`Web server is running on port ${PORT}`); });
 
-// ===== سیستم ضد خواب ۴ لایه قبلی شما (دست‌نخورده) 👁️⚡ =====
+// ===== سیستم ضد خواب ۴ لایه (بدون اجازه خواب!) 👁️⚡ =====
 
 setInterval(() => {
   const url = 'https://vochino-telegram-bot.onrender.com';
@@ -41,23 +42,9 @@ setInterval(async () => {
 }, 7 * 60 * 1000);
 // ============================================================
 
-// ===== لایه‌های فوق‌العاده سریع جدید (۲۰، ۴۰ و ۵۷ ثانیه) =====
-const RENDER_URL = 'https://vochino-telegram-bot.onrender.com';
-
-function sendFastPing(intervalName) {
-    https.get(RENDER_URL, (res) => {
-        console.log(`[Fast ${intervalName}] Status: ${res.statusCode}`);
-    }).on('error', (err) => {});
-}
-
-setInterval(() => sendFastPing('20s'), 20000);
-setInterval(() => sendFastPing('40s'), 40000);
-setInterval(() => sendFastPing('57s'), 57000);
-// ============================================================
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// وصل کردن همه‌ی هندلرها به ربات
+// وصل کردن همه‌ی هندلرها به ربات (هر فایل، بخش خودش رو ثبت می‌کنه)
 require('./handlers/registration')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
@@ -66,7 +53,7 @@ require('./handlers/game')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/misc')(bot);
 
-// ✅ لایه‌ی محافظتی: جلوگیری از کرش کل برنامه
+// ✅ لایه‌ی محافظتی: جلوگیری از کرش کل برنامه به خاطر خطاهای خارج از هندلرهای تلگرام
 process.on('unhandledRejection', (err) => {
   console.log('UNHANDLED REJECTION: ' + (err && err.message ? err.message : err));
 });
@@ -75,11 +62,19 @@ process.on('uncaughtException', (err) => {
   console.log(err.stack);
 });
 
+// ✅ محافظ کلی خطا + گزارش واقعی خطا به ادمین (دیگه هیچ خطایی پنهان نمی‌مونه)
 bot.catch((err, ctx) => {
   console.log('BOT ERROR: ' + err.message);
   console.log(err.stack);
   try {
-    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن.');
+    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن. اگه ادامه داشت به پشتیبانی خبر بده.');
+  } catch (e) {}
+  try {
+    const adminId = ADMIN_IDS[0];
+    const errText = err && err.message ? err.message : String(err);
+    const chatId = ctx && ctx.chat ? ctx.chat.id : '-';
+    const userId = ctx && ctx.from ? ctx.from.id : '-';
+    ctx.telegram.sendMessage(adminId, '🧨 گزارش خطای واقعی ربات:\n' + errText + '\n\n👤 کاربر: ' + userId + '\n💬 چت: ' + chatId);
   } catch (e) {}
 });
 
