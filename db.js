@@ -26,7 +26,6 @@ async function checkMembership(ctx) {
   const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
   const channels = channelsRes.rows;
   if (channels.length === 0) return true;
-
   for (const channel of channels) {
     try {
       const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
@@ -43,7 +42,7 @@ async function checkMembership(ctx) {
 
 async function getUserTotalPurchases(telegramId) {
   const res = await pool.query(
-    "SELECT COALESCE(SUM(total_amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'",
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status IN ('completed', 'pending_delivery')",
     [String(telegramId)]
   );
   return Number(res.rows[0].total);
@@ -60,13 +59,11 @@ async function getActiveBonus(telegramId) {
 async function grantBonusIfEligible(telegramId, BONUS_THRESHOLD, BONUS_AMOUNT) {
   const total = await getUserTotalPurchases(telegramId);
   if (total < BONUS_THRESHOLD) return;
-
   const existing = await pool.query(
     'SELECT * FROM bonuses WHERE telegram_id = $1',
     [String(telegramId)]
   );
   if (existing.rows.length > 0) return;
-
   await pool.query(
     'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
     [String(telegramId), 'available', BONUS_AMOUNT, new Date().toISOString()]
@@ -78,30 +75,18 @@ async function getUsdRate() {
   return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
 }
 
-// ===== توابع جدید برای انبار کدها =====
-async function getInventoryCode(productKey) {
-  const res = await pool.query(
-    'SELECT * FROM product_inventory WHERE product_key = $1 AND is_used = 0 ORDER BY id ASC LIMIT 1',
-    [productKey]
-  );
-  return res.rows[0] || null;
+async function calculateCommission(product, amount) {
+  if (!product.commission_type || product.commission_type === 'none') {
+    return 0;
+  }
+  if (product.commission_type === 'percentage') {
+    return Math.round(amount * (Number(product.commission_value) / 100));
+  }
+  if (product.commission_type === 'fixed') {
+    return Number(product.commission_value);
+  }
+  return 0;
 }
-
-async function markCodeAsUsed(codeId, userId) {
-  await pool.query(
-    'UPDATE product_inventory SET is_used = 1, used_by = $1, used_at = $2 WHERE id = $3',
-    [String(userId), new Date().toISOString(), codeId]
-  );
-}
-
-async function countAvailableCodes(productKey) {
-  const res = await pool.query(
-    'SELECT COUNT(*) AS count FROM product_inventory WHERE product_key = $1 AND is_used = 0',
-    [productKey]
-  );
-  return Number(res.rows[0].count);
-}
-// ====================================
 
 async function initDb() {
   await pool.query(
@@ -134,8 +119,7 @@ async function initDb() {
     'card_number TEXT, ' +
     'receipt_file_id TEXT, ' +
     'status TEXT, ' +
-    'created_at TEXT, ' +
-    'tracking_code TEXT' +
+    'created_at TEXT' +
     ')'
   );
 
@@ -172,12 +156,10 @@ async function initDb() {
     'telegram_id TEXT, ' +
     'product_type TEXT, ' +
     'amount INTEGER, ' +
-    'fee_amount INTEGER DEFAULT 0, ' +
-    'total_amount INTEGER, ' +
+    'commission INTEGER DEFAULT 0, ' +
     'status TEXT, ' +
     'created_at TEXT, ' +
     'tracking_code TEXT, ' +
-    'delivery_type TEXT DEFAULT \'code\', ' +
     'delivered_code TEXT' +
     ')'
   );
@@ -188,14 +170,14 @@ async function initDb() {
     'key TEXT UNIQUE, ' +
     'name TEXT, ' +
     'min_amount NUMERIC, ' +
-    'max_amount NUMERIC, ' +
+    'max_amount NUMERIC DEFAULT 0, ' +
     'price_type TEXT, ' +
     'delivery_type TEXT DEFAULT \'code\', ' +
-    'fee_percent NUMERIC DEFAULT 0, ' +
-    'fee_fixed NUMERIC DEFAULT 0, ' +
+    'hidden INTEGER DEFAULT 0, ' +
     'api_source TEXT DEFAULT \'manual\', ' +
-    'is_hidden INTEGER DEFAULT 0, ' +
-    'auto_delivery INTEGER DEFAULT 0, ' +
+    'commission_type TEXT DEFAULT \'none\', ' +
+    'commission_value NUMERIC DEFAULT 0, ' +
+    'manual_delivery INTEGER DEFAULT 1, ' +
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
@@ -226,27 +208,26 @@ async function initDb() {
     ')'
   );
 
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS product_inventory (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'product_key TEXT, ' +
-    'code TEXT UNIQUE, ' +
-    'is_used INTEGER DEFAULT 0, ' +
-    'used_by TEXT, ' +
-    'used_at TEXT, ' +
-    'created_at TEXT' +
-    ')'
-  );
+  // اضافه کردن ستون‌های جدید به جداول موجود
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
+  await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery_type TEXT DEFAULT \'code\'');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source TEXT DEFAULT \'manual\'');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
     await pool.query(
-      'INSERT INTO products (key, name, min_amount, max_amount, price_type, delivery_type, fee_percent, fee_fixed, auto_delivery, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10), ($11, $12, $13, $14, $15, $16, $17, $18, $19, 1, $20)',
-      [
-        'voucher', '🎟 یوووچر', 1, 100, 'usd', 'code', 0, 0, 0, new Date().toISOString(),
-        'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, null, 'toman', 'code', 0, 0, 0, new Date().toISOString()
-      ]
+      'INSERT INTO products (key, name, min_amount, max_amount, price_type, delivery_type, hidden, api_source, commission_type, commission_value, manual_delivery, active, created_at) VALUES ' +
+      '($1, $2, $3, $4, $5, $6, 0, \'manual\', \'none\', 0, 1, 1, $7), ($8, $9, $10, 0, $11, $12, 0, \'manual\', \'none\', 0, 1, 1, $7)',
+      ['voucher', '🎟 یوووچر', 1, 0, 'usd', 'code', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman', 'code']
     );
   }
 
@@ -296,8 +277,6 @@ module.exports = {
   getActiveBonus,
   grantBonusIfEligible,
   getUsdRate,
-  getInventoryCode,
-  markCodeAsUsed,
-  countAvailableCodes,
+  calculateCommission,
   initDb
 };
