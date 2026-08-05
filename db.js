@@ -43,7 +43,7 @@ async function checkMembership(ctx) {
 
 async function getUserTotalPurchases(telegramId) {
   const res = await pool.query(
-    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'",
+    "SELECT COALESCE(SUM(total_amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'",
     [String(telegramId)]
   );
   return Number(res.rows[0].total);
@@ -78,6 +78,31 @@ async function getUsdRate() {
   return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
 }
 
+// ===== توابع جدید برای انبار کدها =====
+async function getInventoryCode(productKey) {
+  const res = await pool.query(
+    'SELECT * FROM product_inventory WHERE product_key = $1 AND is_used = 0 ORDER BY id ASC LIMIT 1',
+    [productKey]
+  );
+  return res.rows[0] || null;
+}
+
+async function markCodeAsUsed(codeId, userId) {
+  await pool.query(
+    'UPDATE product_inventory SET is_used = 1, used_by = $1, used_at = $2 WHERE id = $3',
+    [String(userId), new Date().toISOString(), codeId]
+  );
+}
+
+async function countAvailableCodes(productKey) {
+  const res = await pool.query(
+    'SELECT COUNT(*) AS count FROM product_inventory WHERE product_key = $1 AND is_used = 0',
+    [productKey]
+  );
+  return Number(res.rows[0].count);
+}
+// ====================================
+
 async function initDb() {
   await pool.query(
     'CREATE TABLE IF NOT EXISTS users (' +
@@ -109,7 +134,8 @@ async function initDb() {
     'card_number TEXT, ' +
     'receipt_file_id TEXT, ' +
     'status TEXT, ' +
-    'created_at TEXT' +
+    'created_at TEXT, ' +
+    'tracking_code TEXT' +
     ')'
   );
 
@@ -146,8 +172,13 @@ async function initDb() {
     'telegram_id TEXT, ' +
     'product_type TEXT, ' +
     'amount INTEGER, ' +
+    'fee_amount INTEGER DEFAULT 0, ' +
+    'total_amount INTEGER, ' +
     'status TEXT, ' +
-    'created_at TEXT' +
+    'created_at TEXT, ' +
+    'tracking_code TEXT, ' +
+    'delivery_type TEXT DEFAULT \'code\', ' +
+    'delivered_code TEXT' +
     ')'
   );
 
@@ -157,7 +188,14 @@ async function initDb() {
     'key TEXT UNIQUE, ' +
     'name TEXT, ' +
     'min_amount NUMERIC, ' +
+    'max_amount NUMERIC, ' +
     'price_type TEXT, ' +
+    'delivery_type TEXT DEFAULT \'code\', ' +
+    'fee_percent NUMERIC DEFAULT 0, ' +
+    'fee_fixed NUMERIC DEFAULT 0, ' +
+    'api_source TEXT DEFAULT \'manual\', ' +
+    'is_hidden INTEGER DEFAULT 0, ' +
+    'auto_delivery INTEGER DEFAULT 0, ' +
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
@@ -188,16 +226,27 @@ async function initDb() {
     ')'
   );
 
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_code TEXT');
-  await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+  await pool.query(
+    'CREATE TABLE IF NOT EXISTS product_inventory (' +
+    'id SERIAL PRIMARY KEY, ' +
+    'product_key TEXT, ' +
+    'code TEXT UNIQUE, ' +
+    'is_used INTEGER DEFAULT 0, ' +
+    'used_by TEXT, ' +
+    'used_at TEXT, ' +
+    'created_at TEXT' +
+    ')'
+  );
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
     await pool.query(
-      'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5)',
-      ['voucher', '🎟 یوووچر', 1, 'usd', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman']
+      'INSERT INTO products (key, name, min_amount, max_amount, price_type, delivery_type, fee_percent, fee_fixed, auto_delivery, active, created_at) VALUES ' +
+      '($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10), ($11, $12, $13, $14, $15, $16, $17, $18, $19, 1, $20)',
+      [
+        'voucher', '🎟 یوووچر', 1, 100, 'usd', 'code', 0, 0, 0, new Date().toISOString(),
+        'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, null, 'toman', 'code', 0, 0, 0, new Date().toISOString()
+      ]
     );
   }
 
@@ -247,5 +296,8 @@ module.exports = {
   getActiveBonus,
   grantBonusIfEligible,
   getUsdRate,
+  getInventoryCode,
+  markCodeAsUsed,
+  countAvailableCodes,
   initDb
 };
