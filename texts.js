@@ -54,11 +54,6 @@ const texts = {
     buyConfirmButton: '✅ تایید و خرید',
     buyCancelButton: '❌ انصراف',
     buySuccess: '🎉 خرید شما با موفقیت انجام شد!\n\n🆔 کد پیگیری: {trackingCode}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان\n\nموجودی جدید: {balance} تومان',
-    buyOrderPendingUser: '📦 سفارش شما ثبت شد!\n\n🆔 کد پیگیری: {trackingCode}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان\n\n⏳ به‌زودی توسط پشتیبانی بررسی و کدت برات ارسال می‌شه.',
-    buyAdminNotify: '🛒 سفارش خرید جدید\n\n🆔 کد پیگیری: {trackingCode}\n👤 کاربر: {userName} ({telegramId})\n📱 شماره: {phone}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان',
-    buyAskDeliverCode: '✍️ کد محصول رو همینجا بفرست تا مستقیم برای کاربر ارسال بشه:',
-    buyDeliveredUser: '✅ سفارش شما آماده شد!\n\n🆔 کد پیگیری: {trackingCode}\n📦 محصول: {product}\n💰 مبلغ: {amount} تومان\n\n🎫 کد شما:\n{code}',
-    buyRejectedUser: '❌ سفارش خرید شما رد شد.\n🆔 کد پیگیری: {trackingCode}\nمبلغ به کیف پولت برگشت داده شد.\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.',
     buyInsufficientBalance: '❌ موجودی کیف پولت کافی نیست.\nمبلغ سفارش: {amount} تومان\nموجودی فعلی: {balance} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.',
     buyChargeWalletButton: '💳 شارژ کیف پول',
     buyCancelled: 'سفارش لغو شد.',
@@ -95,7 +90,16 @@ const texts = {
     sellCodeReceived: '✅ کد شما دریافت شد.\n🆔 کد پیگیری: {trackingCode}\n\n⏳ منتظر بخش مالی باشید، به محض بررسی نتیجه رو بهت اطلاع می‌دیم.',
     sellApprovedUser: '✅ فروش شما تایید شد.\n🆔 کد پیگیری: {trackingCode}\n💰 مبلغ {amount} تومان به کیف پولت اضافه شد.',
     sellRejectedUser: '❌ درخواست فروش شما رد شد.\n🆔 کد پیگیری: {trackingCode}\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.',
-    sellAskFinalAmount: '💰 مبلغ نهایی رو (بعد از کسر کارمزد) به تومان وارد کن، این مبلغ مستقیم به کیف پول کاربر اضافه می‌شه:'
+    sellAskFinalAmount: '💰 مبلغ نهایی رو (بعد از کسر کارمزد) به تومان وارد کن، این مبلغ مستقیم به کیف پول کاربر اضافه می‌شه:',
+
+    // ===== متن‌های جدید برای بخش خرید =====
+    buyFeeInfo: '💳 کارمزد: {feePercent}% + {feeFixed} تومان',
+    buyMaxError: '⚠️ مبلغ وارد شده از حد مجاز ({max} تومان) بیشتر است. لطفاً دوباره وارد کنید:',
+    buyWaitingForCode: '⚠️ کد محصول مورد نظر در انبار موجود نیست.\n🆔 کد پیگیری: {trackingCode}\n💰 مبلغ کسر شده: {amount} تومان\n⏳ لطفاً صبر کنید، به محض موجود شدن کد برای شما ارسال می‌شود.',
+    buyAutoDelivery: '🎟 کد محصول شما:\n`{code}`',
+    buyTotalSummary: '📦 خلاصه‌ی سفارش:\n\n🛒 محصول: {product}\n💰 مبلغ پایه: {amount} تومان\n💳 کارمزد: {fee} تومان\n🔹 مجموع قابل پرداخت: {total} تومان\n\nبا تایید، این مبلغ از موجودی کیف پولت کسر می‌شه.',
+    buyDeliveryType: '📬 روش تحویل: {type}',
+    buyStockCount: ' ({count} عدد موجود)'
   }
 };
 
