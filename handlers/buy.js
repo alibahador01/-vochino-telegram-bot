@@ -1,6 +1,6 @@
 const texts = require('../texts');
 const { sessions, sendTracked, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool, getUser, getUsdRate, grantBonusIfEligible, getInventoryCode, markCodeAsUsed, countAvailableCodes } = require('../db');
+const { pool, getUser, getUsdRate, grantBonusIfEligible, getInventoryCode, markCodeAsUsed } = require('../db');
 const { BONUS_THRESHOLD, BONUS_AMOUNT } = require('../constants');
 
 module.exports = function registerBuyHandlers(bot) {
@@ -10,6 +10,7 @@ module.exports = function registerBuyHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const t = texts.fa;
+    
     const productsRes = await pool.query(
       'SELECT * FROM products WHERE active = 1 AND is_hidden = 0 ORDER BY id ASC'
     );
@@ -20,11 +21,20 @@ module.exports = function registerBuyHandlers(bot) {
     }
 
     const buttons = [];
-    for (const p of productsRes.rows) {
+    for (let i = 0; i < productsRes.rows.length; i++) {
+      const p = productsRes.rows[i];
       let label = p.name;
       if (p.auto_delivery === 1) {
-        const count = await countAvailableCodes(p.key);
-        label += ' (' + count + ' عدد موجود)';
+        try {
+          const countRes = await pool.query(
+            'SELECT COUNT(*) AS count FROM product_inventory WHERE product_key = $1 AND is_used = 0',
+            [p.key]
+          );
+          const count = Number(countRes.rows[0].count);
+          label += ' (' + count + ' عدد موجود)';
+        } catch (e) {
+          label += ' (بدون موجودی)';
+        }
       }
       buttons.push([{ text: label, callback_data: 'buy_' + p.key }]);
     }
@@ -81,13 +91,6 @@ module.exports = function registerBuyHandlers(bot) {
       if (feePercent > 0) messageText += feePercent + '% ';
       if (feeFixed > 0) messageText += '+' + feeFixed.toLocaleString('en-US') + ' تومان';
     }
-
-    const deliveryLabels = {
-      'code': '🎟 ارسال کد',
-      'wallet': '🏦 واریز به کیف پول',
-      'telegram_id': '📱 ارسال به آیدی تلگرام'
-    };
-    messageText += '\n\n📬 روش تحویل: ' + (deliveryLabels[product.delivery_type] || product.delivery_type);
 
     const session = {
       flow: 'buy',
