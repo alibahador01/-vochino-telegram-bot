@@ -19,15 +19,15 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
-    const buttons = productsRes.rows.map(function (p) {
+    const buttons = [];
+    for (const p of productsRes.rows) {
       let label = p.name;
-      // اگه تحویل خودکار باشه، تعداد موجودی رو نشون بده
       if (p.auto_delivery === 1) {
         const count = await countAvailableCodes(p.key);
         label += ' (' + count + ' عدد موجود)';
       }
-      return [{ text: label, callback_data: 'buy_' + p.key }];
-    });
+      buttons.push([{ text: label, callback_data: 'buy_' + p.key }]);
+    }
 
     ctx.reply(t.buyMenuTitle, { reply_markup: { inline_keyboard: buttons } });
   });
@@ -52,7 +52,6 @@ module.exports = function registerBuyHandlers(bot) {
     let minToman, maxToman;
     let messageText = '📦 ' + product.name + '\n\n';
 
-    // محاسبه حداقل و حداکثر بر اساس قیمت‌گذاری
     if (product.price_type === 'usd') {
       const rate = await getUsdRate();
       minToman = Math.round(Number(product.min_amount) * rate);
@@ -75,7 +74,6 @@ module.exports = function registerBuyHandlers(bot) {
       messageText += '\nمبلغ خرید خود را به تومان وارد کنید:';
     }
 
-    // نمایش کارمزد اگر وجود داشته باشه
     const feePercent = Number(product.fee_percent) || 0;
     const feeFixed = Number(product.fee_fixed) || 0;
     if (feePercent > 0 || feeFixed > 0) {
@@ -84,7 +82,6 @@ module.exports = function registerBuyHandlers(bot) {
       if (feeFixed > 0) messageText += '+' + feeFixed.toLocaleString('en-US') + ' تومان';
     }
 
-    // نمایش نوع تحویل
     const deliveryLabels = {
       'code': '🎟 ارسال کد',
       'wallet': '🏦 واریز به کیف پول',
@@ -152,13 +149,11 @@ module.exports = function registerBuyHandlers(bot) {
     const feePercent = session.data.feePercent || 0;
     const feeFixed = session.data.feeFixed || 0;
     
-    // محاسبه کارمزد
     const feeAmount = Math.round((amount * feePercent / 100) + feeFixed);
     const totalAmount = amount + feeAmount;
 
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    // بررسی موجودی (با احتساب کارمزد)
     if (!user || Number(user.balance) < totalAmount) {
       delete sessions[ctx.from.id];
       ctx.reply(fillTemplate(t.buyInsufficientBalance, {
@@ -170,14 +165,12 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
-    // کسر از کیف پول (مبلغ اصلی + کارمزد)
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [totalAmount, String(ctx.from.id)]);
 
     const trackingCode = generateTrackingCode();
     let deliveredCode = null;
     let orderStatus = 'completed';
     
-    // اگه تحویل خودکار بود، کد رو از انبار بگیر
     if (session.data.autoDelivery === 1) {
       const inventoryItem = await getInventoryCode(session.data.productKey);
       if (inventoryItem) {
@@ -185,12 +178,10 @@ module.exports = function registerBuyHandlers(bot) {
         await markCodeAsUsed(inventoryItem.id, ctx.from.id);
         orderStatus = 'completed';
       } else {
-        // اگه کدی توی انبار نبود، سفارش رو با status 'waiting_for_code' ثبت کن
         orderStatus = 'waiting_for_code';
       }
     }
 
-    // ثبت سفارش
     await pool.query(
       'INSERT INTO orders (telegram_id, product_type, amount, fee_amount, total_amount, status, created_at, tracking_code, delivery_type, delivered_code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
       [String(ctx.from.id), session.data.productKey, amount, feeAmount, totalAmount, orderStatus, new Date().toISOString(), trackingCode, session.data.deliveryType, deliveredCode]
@@ -199,7 +190,6 @@ module.exports = function registerBuyHandlers(bot) {
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
     const newBalance = newBalanceRes.rows[0].balance;
 
-    // اگه کد موجود نبود، پیام ویژه بفرست
     if (orderStatus === 'waiting_for_code') {
       delete sessions[ctx.from.id];
       ctx.reply(
@@ -214,7 +204,6 @@ module.exports = function registerBuyHandlers(bot) {
 
     delete sessions[ctx.from.id];
 
-    // پیام موفقیت
     let successMessage = fillTemplate(t.buySuccess, {
       product: session.data.productLabel,
       amount: totalAmount.toLocaleString('en-US'),
@@ -222,7 +211,6 @@ module.exports = function registerBuyHandlers(bot) {
       trackingCode: trackingCode
     });
 
-    // اگه کد تحویل داده شده، نمایش بده
     if (deliveredCode) {
       successMessage += '\n\n🎟 کد محصول شما:\n`' + deliveredCode + '`';
     }
@@ -242,19 +230,16 @@ module.exports = function registerBuyHandlers(bot) {
     const minAmount = session.data.minAmount;
     const maxAmount = session.data.maxAmount;
 
-    // بررسی حداقل
     if (!amount || amount < minAmount) {
       ctx.reply(fillTemplate(t.buyMinError, { min: minAmount.toLocaleString('en-US') }));
       return;
     }
 
-    // بررسی حداکثر
     if (maxAmount && amount > maxAmount) {
       ctx.reply('⚠️ مبلغ وارد شده از حد مجاز (' + maxAmount.toLocaleString('en-US') + ' تومان) بیشتر است. لطفاً دوباره وارد کنید:');
       return;
     }
 
-    // محاسبه کارمزد
     const feePercent = session.data.feePercent || 0;
     const feeFixed = session.data.feeFixed || 0;
     const feeAmount = Math.round((amount * feePercent / 100) + feeFixed);
