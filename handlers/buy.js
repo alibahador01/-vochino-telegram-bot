@@ -1,6 +1,6 @@
 const texts = require('../texts');
 const { sessions, sendTracked, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool, getUser, getUsdRate, grantBonusIfEligible, calculateCommission } = require('../db');
+const { pool, getUser, getUsdRate, grantBonusIfEligible } = require('../db');
 const { BONUS_THRESHOLD, BONUS_AMOUNT } = require('../constants');
 
 module.exports = function registerBuyHandlers(bot) {
@@ -74,7 +74,6 @@ module.exports = function registerBuyHandlers(bot) {
       messageText = fillTemplate(t.buyAskAmountToman, { min: minToman.toLocaleString('en-US') }) + maxText;
     }
 
-    // نمایش اطلاعات کارمزد
     if (product.commission_type === 'percentage' && Number(product.commission_value) > 0) {
       messageText += '\n\n💰 کارمزد: ' + product.commission_value + '% از مبلغ خرید';
     } else if (product.commission_type === 'fixed' && Number(product.commission_value) > 0) {
@@ -122,7 +121,7 @@ module.exports = function registerBuyHandlers(bot) {
 
     const user = await getUser(ctx.from.id);
     const amount = session.data.amount;
-    const commission = session.data.commission;
+    const commission = session.data.commission || 0;
     const totalToPay = amount + commission;
 
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -138,12 +137,10 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
-    // کسر مبلغ کل (مبلغ خرید + کارمزد) از کیف پول
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [totalToPay, String(ctx.from.id)]);
 
     const trackingCode = generateTrackingCode();
 
-    // تعیین وضعیت سفارش بر اساس نوع تحویل
     let orderStatus;
     if (session.data.manualDelivery === 1) {
       orderStatus = 'pending_delivery';
@@ -201,7 +198,6 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
-    // محاسبه کارمزد
     let commission = 0;
     if (session.data.commissionType === 'percentage') {
       commission = Math.round(amount * (session.data.commissionValue / 100));
