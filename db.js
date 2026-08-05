@@ -42,7 +42,7 @@ async function checkMembership(ctx) {
 
 async function getUserTotalPurchases(telegramId) {
   const res = await pool.query(
-    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status IN ('completed', 'pending_delivery')",
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'",
     [String(telegramId)]
   );
   return Number(res.rows[0].total);
@@ -73,19 +73,6 @@ async function grantBonusIfEligible(telegramId, BONUS_THRESHOLD, BONUS_AMOUNT) {
 async function getUsdRate() {
   const res = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
   return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
-}
-
-async function calculateCommission(product, amount) {
-  if (!product.commission_type || product.commission_type === 'none') {
-    return 0;
-  }
-  if (product.commission_type === 'percentage') {
-    return Math.round(amount * (Number(product.commission_value) / 100));
-  }
-  if (product.commission_type === 'fixed') {
-    return Number(product.commission_value);
-  }
-  return 0;
 }
 
 async function initDb() {
@@ -156,11 +143,8 @@ async function initDb() {
     'telegram_id TEXT, ' +
     'product_type TEXT, ' +
     'amount INTEGER, ' +
-    'commission INTEGER DEFAULT 0, ' +
     'status TEXT, ' +
-    'created_at TEXT, ' +
-    'tracking_code TEXT, ' +
-    'delivered_code TEXT' +
+    'created_at TEXT' +
     ')'
   );
 
@@ -170,14 +154,7 @@ async function initDb() {
     'key TEXT UNIQUE, ' +
     'name TEXT, ' +
     'min_amount NUMERIC, ' +
-    'max_amount NUMERIC DEFAULT 0, ' +
     'price_type TEXT, ' +
-    'delivery_type TEXT DEFAULT \'code\', ' +
-    'hidden INTEGER DEFAULT 0, ' +
-    'api_source TEXT DEFAULT \'manual\', ' +
-    'commission_type TEXT DEFAULT \'none\', ' +
-    'commission_value NUMERIC DEFAULT 0, ' +
-    'manual_delivery INTEGER DEFAULT 1, ' +
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
@@ -209,25 +186,22 @@ async function initDb() {
   );
 
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
   await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery_type TEXT DEFAULT \'code\'');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden INTEGER DEFAULT 0');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source TEXT DEFAULT \'manual\'');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
     await pool.query(
-      'INSERT INTO products (key, name, min_amount, max_amount, price_type, delivery_type, hidden, api_source, commission_type, commission_value, manual_delivery, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, $5, $6, 0, \'manual\', \'none\', 0, 1, 1, $7), ($8, $9, $10, 0, $11, $12, 0, \'manual\', \'none\', 0, 1, 1, $7)',
-      ['voucher', '🎟 یوووچر', 1, 0, 'usd', 'code', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman', 'code']
+      'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ' +
+      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5)',
+      ['voucher', '🎟 یوووچر', 1, 'usd', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman']
     );
+  }
+
+  // ✅ خودترمیمی: اگه به هر دلیلی هیچ محصول فعالی وجود نداشت، همه رو فعال کن
+  const activeProductsRes = await pool.query('SELECT COUNT(*) AS c FROM products WHERE active = 1');
+  if (Number(activeProductsRes.rows[0].c) === 0) {
+    await pool.query('UPDATE products SET active = 1');
+    console.log('SELF-HEAL: هیچ محصول فعالی وجود نداشت؛ همه‌ی محصولات دوباره فعال شدند.');
   }
 
   const sellProductsCountRes = await pool.query('SELECT COUNT(*) AS c FROM sell_products');
@@ -276,6 +250,5 @@ module.exports = {
   getActiveBonus,
   grantBonusIfEligible,
   getUsdRate,
-  calculateCommission,
   initDb
 };
