@@ -1,9 +1,6 @@
 const { Pool } = require('pg');
 const { DEFAULT_USD_RATE, HOT_VOUCHER_MIN } = require('./constants');
 
-// ✅ اجبار به استفاده از IPv4 اول (رندر جاده‌ی IPv6 نداره!)
-try { require('dns').setDefaultResultOrder('ipv4first'); } catch (e) {}
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -45,7 +42,7 @@ async function checkMembership(ctx) {
 
 async function getUserTotalPurchases(telegramId) {
   const res = await pool.query(
-    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'",
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status IN ('completed', 'pending_delivery')",
     [String(telegramId)]
   );
   return Number(res.rows[0].total);
@@ -146,8 +143,11 @@ await pool.query(
     'telegram_id TEXT, ' +
     'product_type TEXT, ' +
     'amount INTEGER, ' +
+    'commission INTEGER DEFAULT 0, ' +
     'status TEXT, ' +
-    'created_at TEXT' +
+    'created_at TEXT, ' +
+    'tracking_code TEXT, ' +
+    'delivered_code TEXT' +
     ')'
   );
 
@@ -157,7 +157,11 @@ await pool.query(
     'key TEXT UNIQUE, ' +
     'name TEXT, ' +
     'min_amount NUMERIC, ' +
+    'max_amount NUMERIC DEFAULT 0, ' +
     'price_type TEXT, ' +
+    'commission_type TEXT DEFAULT \'none\', ' +
+    'commission_value NUMERIC DEFAULT 0, ' +
+    'manual_delivery INTEGER DEFAULT 1, ' +
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
@@ -189,7 +193,14 @@ await pool.query(
   );
 
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
   await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
+
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
+  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
@@ -224,7 +235,8 @@ await pool.query(
   }
 
   const existingChannelRes = await pool.query('SELECT * FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
-  if (existingChannelRes.rows.length === 0) {
+
+if (existingChannelRes.rows.length === 0) {
     await pool.query(
       'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
       ['-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی']
