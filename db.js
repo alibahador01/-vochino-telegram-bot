@@ -75,6 +75,27 @@ async function getUsdRate() {
   return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
 }
 
+// ===== توابع جدید برای ارسال همگانی و نمایش اطلاعات =====
+
+async function getAllUsers(includeUnregistered = true) {
+  let query = 'SELECT telegram_id, full_name, phone, balance, registered_at FROM users';
+  if (!includeUnregistered) {
+    query += " WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL";
+  }
+  const res = await pool.query(query);
+  return res.rows;
+}
+
+async function getUserById(telegramId) {
+  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
+  return res.rows[0] || null;
+}
+
+async function isUserBlocked(telegramId) {
+  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'blocked']);
+  return res.rows.length > 0;
+}
+
 async function initDb() {
   await pool.query(
     'CREATE TABLE IF NOT EXISTS users (' +
@@ -257,5 +278,8 @@ module.exports = {
   getActiveBonus,
   grantBonusIfEligible,
   getUsdRate,
+  getAllUsers,
+  getUserById,
+  isUserBlocked,
   initDb
 };
