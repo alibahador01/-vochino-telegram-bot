@@ -30,6 +30,79 @@ module.exports = function registerBuyHandlers(bot) {
     ctx.reply(texts.fa.buyCancelled);
   });
 
+  // مهم: این هندلر باید قبل از هندلر عمومی /^buy_(.+)/ ثبت بشه
+  // وگرنه callback_data ی "buy_confirm" با اون الگو مچ می‌شه و به اشتباه به عنوان کلید محصول ("confirm") تلقی می‌شه
+  bot.action('buy_confirm', async (ctx) => {
+    ctx.answerCbQuery();
+    const t = texts.fa;
+    const session = sessions[ctx.from.id];
+
+    if (!session || session.flow !== 'buy' || session.step !== 'waiting_confirm') {
+      try { await ctx.deleteMessage(); } catch (e) {}
+      ctx.reply(t.buyCancelled);
+      return;
+    }
+
+    const user = await getUser(ctx.from.id);
+    const amount = session.data.amount;
+    const commission = session.data.commission || 0;
+    const totalToPay = amount + commission;
+
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    if (!user || Number(user.balance) < totalToPay) {
+      delete sessions[ctx.from.id];
+      ctx.reply(fillTemplate(t.buyInsufficientBalance, {
+        amount: totalToPay.toLocaleString('en-US'),
+        balance: user ? Number(user.balance).toLocaleString('en-US') : '0'
+      }), {
+        reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
+      });
+      return;
+    }
+
+    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [totalToPay, String(ctx.from.id)]);
+
+    const trackingCode = generateTrackingCode();
+
+    let orderStatus;
+    if (session.data.manualDelivery === 1) {
+      orderStatus = 'pending_delivery';
+    } else {
+      orderStatus = 'completed';
+    }
+
+    await pool.query(
+      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [String(ctx.from.id), session.data.productType, amount, commission, orderStatus, new Date().toISOString(), trackingCode]
+    );
+
+    const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
+    const newBalance = newBalanceRes.rows[0].balance;
+
+    delete sessions[ctx.from.id];
+
+    if (orderStatus === 'pending_delivery') {
+      ctx.reply(fillTemplate(t.buySuccessPending, {
+        product: session.data.productLabel,
+        amount: amount.toLocaleString('en-US'),
+        commission: commission.toLocaleString('en-US'),
+        balance: Number(newBalance).toLocaleString('en-US'),
+        trackingCode: trackingCode
+      }));
+    } else {
+      ctx.reply(fillTemplate(t.buySuccess, {
+        product: session.data.productLabel,
+        amount: amount.toLocaleString('en-US'),
+        balance: Number(newBalance).toLocaleString('en-US'),
+        trackingCode: trackingCode
+      }));
+    }
+
+    await grantBonusIfEligible(ctx.from.id, BONUS_THRESHOLD, BONUS_AMOUNT);
+  });
+
+  // هندلر عمومی محصولات — همیشه باید آخرین هندلر buy_ ثبت‌شده باشه
   bot.action(/^buy_(.+)/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
@@ -106,76 +179,6 @@ module.exports = function registerBuyHandlers(bot) {
       const sent = await ctx.reply(messageText, extra);
       session.lastBotMsgId = sent.message_id;
     }
-  });
-
-  bot.action('buy_confirm', async (ctx) => {
-    ctx.answerCbQuery();
-    const t = texts.fa;
-    const session = sessions[ctx.from.id];
-
-    if (!session || session.flow !== 'buy' || session.step !== 'waiting_confirm') {
-      try { await ctx.deleteMessage(); } catch (e) {}
-      ctx.reply(t.buyCancelled);
-      return;
-    }
-
-    const user = await getUser(ctx.from.id);
-    const amount = session.data.amount;
-    const commission = session.data.commission || 0;
-    const totalToPay = amount + commission;
-
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    if (!user || Number(user.balance) < totalToPay) {
-      delete sessions[ctx.from.id];
-      ctx.reply(fillTemplate(t.buyInsufficientBalance, {
-        amount: totalToPay.toLocaleString('en-US'),
-        balance: user ? Number(user.balance).toLocaleString('en-US') : '0'
-      }), {
-        reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
-      });
-      return;
-    }
-
-    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [totalToPay, String(ctx.from.id)]);
-
-    const trackingCode = generateTrackingCode();
-
-    let orderStatus;
-    if (session.data.manualDelivery === 1) {
-      orderStatus = 'pending_delivery';
-    } else {
-      orderStatus = 'completed';
-    }
-
-    await pool.query(
-      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [String(ctx.from.id), session.data.productType, amount, commission, orderStatus, new Date().toISOString(), trackingCode]
-    );
-
-    const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
-    const newBalance = newBalanceRes.rows[0].balance;
-
-    delete sessions[ctx.from.id];
-
-    if (orderStatus === 'pending_delivery') {
-      ctx.reply(fillTemplate(t.buySuccessPending, {
-        product: session.data.productLabel,
-        amount: amount.toLocaleString('en-US'),
-        commission: commission.toLocaleString('en-US'),
-        balance: Number(newBalance).toLocaleString('en-US'),
-        trackingCode: trackingCode
-      }));
-    } else {
-      ctx.reply(fillTemplate(t.buySuccess, {
-        product: session.data.productLabel,
-        amount: amount.toLocaleString('en-US'),
-        balance: Number(newBalance).toLocaleString('en-US'),
-        trackingCode: trackingCode
-      }));
-    }
-
-    await grantBonusIfEligible(ctx.from.id, BONUS_THRESHOLD, BONUS_AMOUNT);
   });
 
   // این هندلر فقط مرحله‌ی وارد کردن مبلغ خرید رو می‌گیره، بقیه رو با next() رد می‌کنه
