@@ -1,11 +1,3 @@
-
----
-
-## حالا بریم سراغ کدهای کامل:
-
-### 1️⃣ فایل `constants.js` (کامل):
-
-```javascript
 const ADMIN_IDS = [8231962200];
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
@@ -42,14 +34,12 @@ const mainMenuButtons = [
   { key: 'support', text: '📥 پشتیبانی' }
 ];
 
-// ===== تنظیمات جدید برای ارسال همگانی =====
 const BROADCAST_SETTINGS = {
   BATCH_SIZE: 30,
   DELAY_BETWEEN_BATCHES: 2000,
   MAX_RETRY: 3
 };
 
-// ===== تنظیمات جدید برای بخش خرید =====
 const DELIVERY_TYPES = {
   CODE: 'code',
   WALLET: 'wallet',
