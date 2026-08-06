@@ -1,0 +1,14 @@
+{
+  "name": "vochino-telegram-bot",
+  "version": "1.0.0",
+  "description": "Vochino Telegram Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.11.5",
+    "telegraf": "^4.16.3"
+  }
+}
