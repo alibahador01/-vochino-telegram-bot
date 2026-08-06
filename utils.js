@@ -43,10 +43,43 @@ function showMainMenu(ctx) {
   ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 }
 
+// ===== توابع جدید برای ارسال همگانی =====
+
+async function sendMessageToUser(bot, userId, text, extra = {}) {
+  try {
+    const sent = await bot.telegram.sendMessage(userId, text, extra);
+    return { success: true, messageId: sent.message_id };
+  } catch (error) {
+    console.log(`❌ ارسال پیام به ${userId} ناموفق: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+async function sendBroadcast(bot, userIds, text, extra = {}, isFake = false) {
+  const results = [];
+  let targetUsers = [];
+  
+  if (isFake) {
+    targetUsers = userIds.slice(0, 1);
+  } else {
+    targetUsers = userIds;
+  }
+  
+  for (const userId of targetUsers) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const result = await sendMessageToUser(bot, userId, text, extra);
+    results.push({ userId, ...result });
+  }
+  
+  return results;
+}
+
 module.exports = {
   sessions,
   generateTrackingCode,
   fillTemplate,
   sendTracked,
-  showMainMenu
+  showMainMenu,
+  sendMessageToUser,
+  sendBroadcast
 };
