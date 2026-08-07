@@ -11,6 +11,11 @@ async function getUser(telegramId) {
   return res.rows[0] || null;
 }
 
+async function getUserById(telegramId) {
+  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
+  return res.rows[0] || null;
+}
+
 async function getUserCards(telegramId) {
   const user = await getUser(telegramId);
   const extraRes = await pool.query('SELECT * FROM cards WHERE telegram_id = $1', [String(telegramId)]);
@@ -82,11 +87,6 @@ async function getAllUsers(includeUnregistered = true) {
   }
   const res = await pool.query(query);
   return res.rows;
-}
-
-async function getUserById(telegramId) {
-  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
-  return res.rows[0] || null;
 }
 
 async function isUserBlocked(telegramId) {
@@ -166,7 +166,8 @@ async function initDb() {
     'status TEXT, ' +
     'created_at TEXT, ' +
     'tracking_code TEXT, ' +
-    'delivered_code TEXT' +
+    'delivered_code TEXT, ' +
+    'provider_tx_id TEXT' +
     ')'
   );
 
@@ -216,6 +217,7 @@ async function initDb() {
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT');
   await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
@@ -279,6 +281,7 @@ async function initDb() {
 module.exports = {
   pool,
   getUser,
+  getUserById,
   getUserCards,
   checkMembership,
   getUserTotalPurchases,
@@ -286,7 +289,6 @@ module.exports = {
   grantBonusIfEligible,
   getUsdRate,
   getAllUsers,
-  getUserById,
   isUserBlocked,
   initDb
 };
