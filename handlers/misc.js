@@ -228,8 +228,43 @@ module.exports = function registerMiscHandlers(bot) {
           inline_keyboard: [
             [{ text: '💵 تغییر نرخ دلار', callback_data: 'admin_set_rate' }],
             [{ text: '🎭 تغییر ایموجی استارت', callback_data: 'admin_set_reaction' }],
+            [{ text: '💰 تنظیمات سود (کارمزد)', callback_data: 'admin_margin_settings' }],
             [{ text: '📝 ویرایش متن‌های ربات', callback_data: 'admin_edit_texts' }],
             [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
+          ]
+        }
+      }
+    );
+  });
+
+  bot.action('admin_margin_settings', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const buyMargin = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
+    const sellMargin = await pool.query("SELECT value FROM settings WHERE key = 'sell_margin'");
+    const buyMode = await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'");
+    const sellMode = await pool.query("SELECT value FROM settings WHERE key = 'sell_mode'");
+    
+    ctx.reply(
+      '💰 **تنظیمات سود (کارمزد)**\n\n' +
+      '🛒 **خرید:**\n' +
+      '   درصد سود: ' + (buyMargin.rows[0] ? buyMargin.rows[0].value : '10') + '%\n' +
+      '   حالت: ' + (buyMode.rows[0] ? buyMode.rows[0].value : 'MANUAL') + '\n\n' +
+      '🎟 **فروش:**\n' +
+      '   درصد سود: ' + (sellMargin.rows[0] ? sellMargin.rows[0].value : '10') + '%\n' +
+      '   حالت: ' + (sellMode.rows[0] ? sellMode.rows[0].value : 'MANUAL') + '\n\n' +
+      'برای تغییر هر کدام، گزینه مورد نظر را انتخاب کنید:',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🛒 تغییر سود خرید', callback_data: 'admin_set_buy_margin' }],
+            [{ text: '🎟 تغییر سود فروش', callback_data: 'admin_set_sell_margin' }],
+            [{ text: '🔄 تغییر حالت خرید (MANUAL/AUTO)', callback_data: 'admin_set_buy_mode' }],
+            [{ text: '🔄 تغییر حالت فروش (MANUAL/AUTO)', callback_data: 'admin_set_sell_mode' }],
+            [{ text: '🔙 بازگشت به تنظیمات', callback_data: 'admin_settings' }]
           ]
         }
       }
@@ -266,6 +301,108 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('🎭 **تغییر ایموجی استارت**\n\nلطفاً ایموجی مورد نظر را وارد کنید:\nمثال: `🔥` یا `🎉`', {
       parse_mode: 'Markdown'
     });
+  });
+
+  bot.action('admin_set_buy_margin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_set_buy_margin',
+      step: 'waiting_value',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🛒 **تغییر سود خرید**\n\nلطفاً درصد سود جدید را وارد کنید (مثلاً `10` برای ۱۰٪):', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  bot.action('admin_set_sell_margin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_set_sell_margin',
+      step: 'waiting_value',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🎟 **تغییر سود فروش**\n\nلطفاً درصد سود جدید را وارد کنید (مثلاً `10` برای ۱۰٪):', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  bot.action('admin_set_buy_mode', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply(
+      '🔄 **تغییر حالت خرید**\n\n' +
+      'حالت فعلی: ' + (await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'")).rows[0]?.value || 'MANUAL' + '\n\n' +
+      'لطفاً حالت مورد نظر را انتخاب کنید:',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ AUTO (خودکار)', callback_data: 'admin_set_buy_mode_auto' }],
+            [{ text: '🛠 MANUAL (دستی)', callback_data: 'admin_set_buy_mode_manual' }]
+          ]
+        }
+      }
+    );
+  });
+
+  bot.action('admin_set_sell_mode', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply(
+      '🔄 **تغییر حالت فروش**\n\n' +
+      'حالت فعلی: ' + (await pool.query("SELECT value FROM settings WHERE key = 'sell_mode'")).rows[0]?.value || 'MANUAL' + '\n\n' +
+      'لطفاً حالت مورد نظر را انتخاب کنید:',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ AUTO (خودکار)', callback_data: 'admin_set_sell_mode_auto' }],
+            [{ text: '🛠 MANUAL (دستی)', callback_data: 'admin_set_sell_mode_manual' }]
+          ]
+        }
+      }
+    );
+  });
+
+  bot.action('admin_set_buy_mode_auto', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    await pool.query("INSERT INTO settings (key, value) VALUES ('buy_mode', 'AUTO') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value");
+    ctx.reply('✅ حالت خرید به **AUTO (خودکار)** تغییر یافت.');
+  });
+
+  bot.action('admin_set_buy_mode_manual', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    await pool.query("INSERT INTO settings (key, value) VALUES ('buy_mode', 'MANUAL') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value");
+    ctx.reply('✅ حالت خرید به **MANUAL (دستی)** تغییر یافت.');
+  });
+
+  bot.action('admin_set_sell_mode_auto', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    await pool.query("INSERT INTO settings (key, value) VALUES ('sell_mode', 'AUTO') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value");
+    ctx.reply('✅ حالت فروش به **AUTO (خودکار)** تغییر یافت.');
+  });
+
+  bot.action('admin_set_sell_mode_manual', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    await pool.query("INSERT INTO settings (key, value) VALUES ('sell_mode', 'MANUAL') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value");
+    ctx.reply('✅ حالت فروش به **MANUAL (دستی)** تغییر یافت.');
   });
 
   bot.action('admin_find', async (ctx) => {
@@ -541,6 +678,32 @@ module.exports = function registerMiscHandlers(bot) {
       );
       delete sessions[ctx.from.id];
       ctx.reply('✅ ایموجی استارت با موفقیت به ' + emoji + ' تغییر یافت!');
+      return;
+    }
+
+    // تغییر سود خرید
+    if (session.flow === 'admin_set_buy_margin' && session.step === 'waiting_value') {
+      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (isNaN(value) || value < 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر یا مساوی ۰) وارد کنید.');
+        return;
+      }
+      await pool.query("INSERT INTO settings (key, value) VALUES ('buy_margin', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(value)]);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ سود خرید با موفقیت به ' + value + '% تغییر یافت.');
+      return;
+    }
+
+    // تغییر سود فروش
+    if (session.flow === 'admin_set_sell_margin' && session.step === 'waiting_value') {
+      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (isNaN(value) || value < 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر یا مساوی ۰) وارد کنید.');
+        return;
+      }
+      await pool.query("INSERT INTO settings (key, value) VALUES ('sell_margin', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(value)]);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ سود فروش با موفقیت به ' + value + '% تغییر یافت.');
       return;
     }
 
