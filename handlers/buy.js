@@ -2,6 +2,7 @@ const texts = require('../texts');
 const { sessions, sendTracked, fillTemplate, generateTrackingCode } = require('../utils');
 const { pool, getUser, getUsdRate, grantBonusIfEligible } = require('../db');
 const { BONUS_THRESHOLD, BONUS_AMOUNT } = require('../constants');
+const PricingEngine = require('../pricingEngine');
 
 module.exports = function registerBuyHandlers(bot) {
 
@@ -43,15 +44,38 @@ module.exports = function registerBuyHandlers(bot) {
 
     const user = await getUser(ctx.from.id);
     const amount = session.data.amount;
-    const commission = session.data.commission || 0;
-    const totalToPay = amount + commission;
 
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    if (!user || Number(user.balance) < totalToPay) {
+    // دریافت درصد سود از دیتابیس
+    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
+    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
+    
+    const modeRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'");
+    const mode = modeRes.rows[0] ? modeRes.rows[0].value : 'MANUAL';
+
+    // محاسبه با PricingEngine
+    const pricingResult = PricingEngine.calculate({
+      actionType: 'BUY',
+      baseAmount: amount,
+      marginPercentage: marginPercentage,
+      minAmount: session.data.minAmount || 0,
+      mode: mode
+    });
+
+    if (!pricingResult.success) {
+      ctx.reply('⚠️ خطا در محاسبه مبلغ. لطفاً دوباره تلاش کنید.');
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    const finalAmount = pricingResult.finalAmount;
+    const marginAmount = pricingResult.marginAmount;
+
+    if (!user || Number(user.balance) < finalAmount) {
       delete sessions[ctx.from.id];
       ctx.reply(fillTemplate(t.buyInsufficientBalance, {
-        amount: totalToPay.toLocaleString('en-US'),
+        amount: finalAmount.toLocaleString('en-US'),
         balance: user ? Number(user.balance).toLocaleString('en-US') : '0'
       }), {
         reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
@@ -59,12 +83,12 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
-    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [totalToPay, String(ctx.from.id)]);
+    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = generateTrackingCode();
 
     let orderStatus;
-    if (session.data.manualDelivery === 1) {
+    if (mode === 'MANUAL' || session.data.manualDelivery === 1) {
       orderStatus = 'pending_delivery';
     } else {
       orderStatus = 'completed';
@@ -72,7 +96,7 @@ module.exports = function registerBuyHandlers(bot) {
 
     await pool.query(
       'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [String(ctx.from.id), session.data.productType, amount, commission, orderStatus, new Date().toISOString(), trackingCode]
+      [String(ctx.from.id), session.data.productType, finalAmount, marginAmount, orderStatus, new Date().toISOString(), trackingCode]
     );
 
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
@@ -83,15 +107,15 @@ module.exports = function registerBuyHandlers(bot) {
     if (orderStatus === 'pending_delivery') {
       ctx.reply(fillTemplate(t.buySuccessPending, {
         product: session.data.productLabel,
-        amount: amount.toLocaleString('en-US'),
-        commission: commission.toLocaleString('en-US'),
+        amount: finalAmount.toLocaleString('en-US'),
+        commission: marginAmount.toLocaleString('en-US'),
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
     } else {
       ctx.reply(fillTemplate(t.buySuccess, {
         product: session.data.productLabel,
-        amount: amount.toLocaleString('en-US'),
+        amount: finalAmount.toLocaleString('en-US'),
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
@@ -117,8 +141,9 @@ module.exports = function registerBuyHandlers(bot) {
     let maxToman = 0;
     let messageText;
 
+    const rate = await getUsdRate();
+
     if (product.price_type === 'usd') {
-      const rate = await getUsdRate();
       minToman = Math.round(Number(product.min_amount) * rate);
       if (Number(product.max_amount) > 0) {
         maxToman = Math.round(Number(product.max_amount) * rate);
@@ -144,11 +169,10 @@ module.exports = function registerBuyHandlers(bot) {
       messageText = fillTemplate(t.buyAskAmountToman, { min: minToman.toLocaleString('en-US') }) + maxText;
     }
 
-    if (product.commission_type === 'percentage' && Number(product.commission_value) > 0) {
-      messageText += '\n\n💰 کارمزد: ' + product.commission_value + '% از مبلغ خرید';
-    } else if (product.commission_type === 'fixed' && Number(product.commission_value) > 0) {
-      messageText += '\n\n💰 کارمزد: ' + Number(product.commission_value).toLocaleString('en-US') + ' تومان (ثابت)';
-    }
+    // دریافت درصد سود از دیتابیس برای نمایش
+    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
+    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
+    messageText += '\n\n💰 کارمزد (سود ما): ' + marginPercentage + '%';
 
     const session = {
       flow: 'buy',
@@ -159,8 +183,6 @@ module.exports = function registerBuyHandlers(bot) {
         productLabel: product.name,
         minAmount: minToman,
         maxAmount: maxToman,
-        commissionType: product.commission_type || 'none',
-        commissionValue: Number(product.commission_value) || 0,
         manualDelivery: product.manual_delivery
       }
     };
@@ -197,27 +219,32 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
-    let commission = 0;
-    if (session.data.commissionType === 'percentage') {
-      commission = Math.round(amount * (session.data.commissionValue / 100));
-    } else if (session.data.commissionType === 'fixed') {
-      commission = session.data.commissionValue;
-    }
-
     session.data.amount = amount;
-    session.data.commission = commission;
     session.step = 'waiting_confirm';
 
-    const totalToPay = amount + commission;
+    // دریافت درصد سود از دیتابیس
+    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
+    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
+
+    // محاسبه با PricingEngine
+    const pricingResult = PricingEngine.calculate({
+      actionType: 'BUY',
+      baseAmount: amount,
+      marginPercentage: marginPercentage,
+      minAmount: minAmount,
+      mode: 'MANUAL'
+    });
+
+    const finalAmount = pricingResult.finalAmount;
+    const marginAmount = pricingResult.marginAmount;
+
     let summaryText = fillTemplate(t.buyConfirmSummary, {
       product: session.data.productLabel,
       amount: amount.toLocaleString('en-US')
     });
 
-    if (commission > 0) {
-      summaryText += '\n💰 کارمزد: ' + commission.toLocaleString('en-US') + ' تومان';
-      summaryText += '\n💳 مبلغ قابل پرداخت: ' + totalToPay.toLocaleString('en-US') + ' تومان';
-    }
+    summaryText += '\n💰 کارمزد (سود ما): ' + marginAmount.toLocaleString('en-US') + ' تومان';
+    summaryText += '\n💳 مبلغ قابل پرداخت: ' + finalAmount.toLocaleString('en-US') + ' تومان';
 
     await sendTracked(ctx, session, summaryText, {
       reply_markup: {
