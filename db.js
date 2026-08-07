@@ -193,6 +193,8 @@ async function initDb() {
     'name TEXT, ' +
     'unit_price NUMERIC, ' +
     'sample_code TEXT, ' +
+    'commission_type TEXT DEFAULT \'none\', ' +
+    'commission_value NUMERIC DEFAULT 0, ' +
     'active INTEGER DEFAULT 1, ' +
     'created_at TEXT' +
     ')'
@@ -204,7 +206,7 @@ async function initDb() {
     'telegram_id TEXT, ' +
     'product_type TEXT, ' +
     'voucher_code TEXT, ' +
-    'amount INTEGER, ' +
+    'amount INTEGER DEFAULT 0, ' +
     'status TEXT, ' +
     'created_at TEXT, ' +
     'tracking_code TEXT' +
@@ -219,7 +221,9 @@ async function initDb() {
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1');
-  await pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS product_type TEXT');
+  await pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
+  await pool.query('ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
