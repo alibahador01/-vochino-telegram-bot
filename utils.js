@@ -1,10 +1,15 @@
-const { mainMenuButtons, ADMIN_IDS } = require('./constants');
+const { mainMenuButtons } = require('./constants');
 
 const sessions = {};
 
 function generateTrackingCode() {
   const randomPart = Math.floor(100000 + Math.random() * 900000);
   return 'VOC-' + randomPart;
+}
+
+function generateVoucherTrackingCode() {
+  const randomPart = Math.floor(1000 + Math.random() * 9000);
+  return '#VCH_' + randomPart;
 }
 
 function fillTemplate(template, values) {
@@ -25,13 +30,10 @@ async function sendTracked(ctx, session, text, extra) {
 }
 
 function showMainMenu(ctx) {
-  // فقط دکمه‌هایی که برای همه هست رو بردار
   let buttons = mainMenuButtons.filter(b => b.key !== 'admin_panel');
-  
-  // اگه کاربر ادمین هست، دکمه‌ی پنل مدیریت رو اضافه کن
   const isAdmin = ADMIN_IDS.indexOf(Number(ctx.from.id)) !== -1;
   if (isAdmin) {
-    buttons = mainMenuButtons; // همه دکمه‌ها رو نشون بده
+    buttons = mainMenuButtons;
   }
   
   const rows = [];
@@ -63,6 +65,16 @@ async function sendMessageToUser(bot, userId, text, extra = {}) {
   }
 }
 
+async function sendMessageToUserWithPhoto(bot, userId, photo, caption, extra = {}) {
+  try {
+    const sent = await bot.telegram.sendPhoto(userId, photo, { caption: caption, ...extra });
+    return { success: true, messageId: sent.message_id };
+  } catch (error) {
+    console.log('❌ ارسال عکس به ' + userId + ' ناموفق: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
 async function sendBroadcast(bot, userIds, text, extra = {}, isFake = false) {
   const results = [];
   let targetUsers = [];
@@ -82,12 +94,34 @@ async function sendBroadcast(bot, userIds, text, extra = {}, isFake = false) {
   return results;
 }
 
+async function sendBroadcastWithPhoto(bot, userIds, photo, caption, extra = {}, isFake = false) {
+  const results = [];
+  let targetUsers = [];
+  
+  if (isFake) {
+    targetUsers = userIds.slice(0, 1);
+  } else {
+    targetUsers = userIds;
+  }
+  
+  for (const userId of targetUsers) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const result = await sendMessageToUserWithPhoto(bot, userId, photo, caption, extra);
+    results.push({ userId, ...result });
+  }
+  
+  return results;
+}
+
 module.exports = {
   sessions,
   generateTrackingCode,
+  generateVoucherTrackingCode,
   fillTemplate,
   sendTracked,
   showMainMenu,
   sendMessageToUser,
-  sendBroadcast
+  sendMessageToUserWithPhoto,
+  sendBroadcast,
+  sendBroadcastWithPhoto
 };
