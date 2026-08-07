@@ -1,6 +1,7 @@
 const texts = require('../texts');
 const { sessions, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool } = require('../db');
+const { pool, getUser } = require('../db');
+const PricingEngine = require('../pricingEngine');
 
 module.exports = function registerSellHandlers(bot) {
   bot.action('menu_sell', async (ctx) => {
@@ -34,11 +35,15 @@ module.exports = function registerSellHandlers(bot) {
       return;
     }
 
+    // دریافت درصد سود فروش از دیتابیس برای نمایش
+    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'sell_margin'");
+    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
+
     const messageText = fillTemplate(t.sellAskCode, {
       product: product.name,
       price: Number(product.unit_price).toLocaleString('en-US'),
       sample: product.sample_code
-    });
+    }) + '\n\n💰 کارمزد (سود ما): ' + marginPercentage + '%';
 
     const session = {
       flow: 'sell',
@@ -68,14 +73,50 @@ module.exports = function registerSellHandlers(bot) {
     const voucherCode = ctx.message.text.trim();
     const trackingCode = generateTrackingCode();
 
-    await pool.query(
-      'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6)',
-      [String(ctx.from.id), session.data.productType, voucherCode, 'pending_review', new Date().toISOString(), trackingCode]
-    );
+    // دریافت درصد سود فروش از دیتابیس
+    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'sell_margin'");
+    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
+
+    // دریافت قیمت پایه از محصول فروش
+    const productRes = await pool.query('SELECT unit_price FROM sell_products WHERE key = $1', [session.data.productType]);
+    const baseAmount = productRes.rows[0] ? Number(productRes.rows[0].unit_price) : 0;
+
+    // دریافت حالت فروش
+    const modeRes = await pool.query("SELECT value FROM settings WHERE key = 'sell_mode'");
+    const mode = modeRes.rows[0] ? modeRes.rows[0].value : 'MANUAL';
+
+    // محاسبه با PricingEngine (فروش - SELL)
+    const pricingResult = PricingEngine.calculate({
+      actionType: 'SELL',
+      baseAmount: baseAmount,
+      marginPercentage: marginPercentage,
+      minAmount: 0,
+      mode: mode
+    });
+
+    const finalAmount = pricingResult.finalAmount;
+
+    // اگه حالت AUTO باشه، مستقیم واریز میکنه
+    if (mode === 'AUTO') {
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
+      await pool.query(
+        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [String(ctx.from.id), session.data.productType, voucherCode, finalAmount, 'approved', new Date().toISOString(), trackingCode]
+      );
+      ctx.reply(fillTemplate(t.sellApprovedUser, {
+        trackingCode: trackingCode,
+        amount: finalAmount.toLocaleString('en-US')
+      }));
+    } else {
+      // حالت MANUAL: ثبت سفارش برای تایید ادمین
+      await pool.query(
+        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [String(ctx.from.id), session.data.productType, voucherCode, finalAmount, 'pending_review', new Date().toISOString(), trackingCode]
+      );
+      ctx.reply(fillTemplate(t.sellCodeReceived, { trackingCode: trackingCode }));
+    }
 
     try { await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId); } catch (e) {}
     delete sessions[ctx.from.id];
-
-    ctx.reply(fillTemplate(t.sellCodeReceived, { trackingCode: trackingCode }));
   });
 };
