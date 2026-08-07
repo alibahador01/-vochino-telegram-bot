@@ -1,6 +1,11 @@
 const texts = require('../texts');
 const { sessions, showMainMenu } = require('../utils');
 const { pool, getUser } = require('../db');
+const { ADMIN_IDS } = require('../constants');
+
+function isAdmin(telegramId) {
+  return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
+}
 
 module.exports = function registerMiscHandlers(bot) {
   bot.action('back_main_menu', async (ctx) => {
@@ -159,9 +164,35 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
   });
 
+  // ===== دکمه‌ی پنل مدیریت (فقط برای ادمین) =====
+  bot.action('menu_admin_panel', async (ctx) => {
+    ctx.answerCbQuery();
+    if (!isAdmin(ctx.from.id)) {
+      ctx.reply('⛔️ شما دسترسی به این بخش ندارید.');
+      return;
+    }
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply('👑 **پنل مدیریت پیشرفته ووچینو**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📦 مدیریت محصولات خرید', callback_data: 'admin_products_buy' }],
+          [{ text: '🎟 مدیریت محصولات فروش', callback_data: 'admin_products_sell' }],
+          [{ text: '📥 مدیریت درخواست‌ها', callback_data: 'admin_requests' }],
+          [{ text: '📢 ارسال همگانی', callback_data: 'admin_broadcast' }],
+          [{ text: '🕵️ ارسال مخفی به یک نفر', callback_data: 'admin_fake_broadcast' }],
+          [{ text: '🎁 هدیه به کاربران', callback_data: 'admin_gift' }],
+          [{ text: '📊 آمار کاربران', callback_data: 'admin_stats' }],
+          [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu' }]
+        ]
+      }
+    });
+  });
+
   bot.action(/^menu_.+/, async (ctx) => {
     const actionKey = ctx.match[0];
-    const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game', 'menu_rules', 'menu_education', 'menu_rules_education', 'menu_buy', 'menu_sell'];
+    const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game', 'menu_rules', 'menu_education', 'menu_rules_education', 'menu_buy', 'menu_sell', 'menu_admin_panel'];
     if (known.indexOf(actionKey) !== -1) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
