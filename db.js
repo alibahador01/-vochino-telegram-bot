@@ -1,99 +1,3 @@
-const { Pool } = require('pg');
-const { DEFAULT_USD_RATE, HOT_VOUCHER_MIN } = require('./constants');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-async function getUser(telegramId) {
-  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
-  return res.rows[0] || null;
-}
-
-async function getUserCards(telegramId) {
-  const user = await getUser(telegramId);
-  const extraRes = await pool.query('SELECT * FROM cards WHERE telegram_id = $1', [String(telegramId)]);
-  const list = [];
-  if (user && user.card_number) {
-    list.push({ card_number: user.card_number });
-  }
-  extraRes.rows.forEach(function (c) { list.push({ card_number: c.card_number }); });
-  return list;
-}
-
-async function checkMembership(ctx) {
-  const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
-  const channels = channelsRes.rows;
-  if (channels.length === 0) return true;
-  for (const channel of channels) {
-    try {
-      const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
-      if (member.status === 'left' || member.status === 'kicked') {
-        return false;
-      }
-    } catch (e) {
-      console.log('خطا در بررسی عضویت: ' + e.message);
-      return false;
-    }
-  }
-  return true;
-}
-
-async function getUserTotalPurchases(telegramId) {
-  const res = await pool.query(
-    "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status IN ('completed', 'pending_delivery')",
-    [String(telegramId)]
-  );
-  return Number(res.rows[0].total);
-}
-
-async function getActiveBonus(telegramId) {
-  const res = await pool.query(
-    "SELECT * FROM bonuses WHERE telegram_id = $1 AND status = 'available' ORDER BY id DESC LIMIT 1",
-    [String(telegramId)]
-  );
-  return res.rows[0] || null;
-}
-
-async function grantBonusIfEligible(telegramId, BONUS_THRESHOLD, BONUS_AMOUNT) {
-  const total = await getUserTotalPurchases(telegramId);
-  if (total < BONUS_THRESHOLD) return;
-  const existing = await pool.query(
-    'SELECT * FROM bonuses WHERE telegram_id = $1',
-    [String(telegramId)]
-  );
-  if (existing.rows.length > 0) return;
-  await pool.query(
-    'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
-    [String(telegramId), 'available', BONUS_AMOUNT, new Date().toISOString()]
-  );
-}
-
-async function getUsdRate() {
-  const res = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
-  return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
-}
-
-async function getAllUsers(includeUnregistered = true) {
-  let query = 'SELECT telegram_id, full_name, phone, balance, registered_at FROM users';
-  if (!includeUnregistered) {
-    query += " WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL";
-  }
-  const res = await pool.query(query);
-  return res.rows;
-}
-
-async function getUserById(telegramId) {
-  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
-  return res.rows[0] || null;
-}
-
-async function isUserBlocked(telegramId) {
-  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'blocked']);
-  return res.rows.length > 0;
-}
-
 async function initDb() {
   await pool.query(
     'CREATE TABLE IF NOT EXISTS users (' +
@@ -215,11 +119,11 @@ async function initDb() {
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
   await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
   await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1');
+  await pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS product_type TEXT');
 
   const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
   if (Number(productsCountRes.rows[0].c) === 0) {
@@ -265,20 +169,4 @@ async function initDb() {
       ['https://t.me/+DpU8DAaQei00YTFk', '-1003953090902']
     );
   }
-}
-
-module.exports = {
-  pool,
-  getUser,
-  getUserCards,
-  checkMembership,
-  getUserTotalPurchases,
-  getActiveBonus,
-  grantBonusIfEligible,
-  getUsdRate,
-  getAllUsers,
-  getUserById,
-  isUserBlocked,
-  initDb
-};
-await pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS product_type TEXT');
+    }
