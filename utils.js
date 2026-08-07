@@ -1,4 +1,4 @@
-const { mainMenuButtons } = require('./constants');
+const { mainMenuButtons, ADMIN_IDS } = require('./constants');
 
 const sessions = {};
 
@@ -25,15 +25,25 @@ async function sendTracked(ctx, session, text, extra) {
 }
 
 function showMainMenu(ctx) {
+  // فقط دکمه‌هایی که برای همه هست رو بردار
+  let buttons = mainMenuButtons.filter(b => b.key !== 'admin_panel');
+  
+  // اگه کاربر ادمین هست، دکمه‌ی پنل مدیریت رو اضافه کن
+  const isAdmin = ADMIN_IDS.indexOf(Number(ctx.from.id)) !== -1;
+  if (isAdmin) {
+    buttons = mainMenuButtons; // همه دکمه‌ها رو نشون بده
+  }
+  
   const rows = [];
-  for (let i = 0; i < mainMenuButtons.length; i += 2) {
+  for (let i = 0; i < buttons.length; i += 2) {
     const row = [];
-    row.push({ text: mainMenuButtons[i].text, callback_data: 'menu_' + mainMenuButtons[i].key });
-    if (mainMenuButtons[i + 1]) {
-      row.push({ text: mainMenuButtons[i + 1].text, callback_data: 'menu_' + mainMenuButtons[i + 1].key });
+    row.push({ text: buttons[i].text, callback_data: 'menu_' + buttons[i].key });
+    if (buttons[i + 1]) {
+      row.push({ text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key });
     }
     rows.push(row);
   }
+  
   const headerText =
     '⚜️ مرجع تخصصی معاملات ووچر| Vochino⁰¹\n' +
     '🔹 سرعت بالا در نقدشوندگی\n' +
