@@ -31,7 +31,8 @@ const mainMenuButtons = [
   { key: 'profile', text: '🧢 پروفایل' },
   { key: 'rules_education', text: '📚 قوانین و آموزش' },
   { key: 'game', text: '🎮 بازی بونوس' },
-  { key: 'support', text: '📥 پشتیبانی' }
+  { key: 'support', text: '📥 پشتیبانی' },
+  { key: 'admin_panel', text: '👑 پنل مدیریت' }
 ];
 
 const BROADCAST_SETTINGS = {
