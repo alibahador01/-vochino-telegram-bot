@@ -1,6 +1,6 @@
 const texts = require('../texts');
-const { sessions, showMainMenu } = require('../utils');
-const { pool, getUser } = require('../db');
+const { sessions, showMainMenu, sendBroadcast, sendBroadcastWithPhoto, sendMessageToUser } = require('../utils');
+const { pool, getUser, getUserById, getAllUsers } = require('../db');
 const { ADMIN_IDS, ALLOWED_REACTIONS } = require('../constants');
 
 function isAdmin(telegramId) {
@@ -164,7 +164,7 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('📚 آموزش استفاده از ربات به‌زودی همینجا قرار می‌گیره.');
   });
 
-  // ===== دکمه‌ی پنل مدیریت (فقط برای ادمین) =====
+  // ===== دکمه‌ی پنل مدیریت =====
   bot.action('menu_admin_panel', async (ctx) => {
     ctx.answerCbQuery();
     if (!isAdmin(ctx.from.id)) {
@@ -207,8 +207,7 @@ module.exports = function registerMiscHandlers(bot) {
     );
   });
 
-  // ===== دکمه‌های جدید پنل =====
-  
+  // ===== تنظیمات کلی =====
   bot.action('admin_settings', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -405,50 +404,7 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('✅ حالت فروش به **MANUAL (دستی)** تغییر یافت.');
   });
 
-  bot.action('admin_find', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    
-    sessions[ctx.from.id] = {
-      flow: 'admin_find',
-      step: 'waiting_code',
-      lang: 'fa'
-    };
-    
-    ctx.reply('🔎 **جستجوی کد پیگیری**\n\nلطفاً کد پیگیری را وارد کنید:\nمثال: `VOC-847392`', {
-      parse_mode: 'Markdown'
-    });
-  });
-
-  bot.action('admin_userinfo', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    
-    sessions[ctx.from.id] = {
-      flow: 'admin_userinfo',
-      step: 'waiting_id',
-      lang: 'fa'
-    };
-    
-    ctx.reply('👤 **اطلاعات یک کاربر**\n\nلطفاً آیدی عددی کاربر را وارد کنید:\nمثال: `8231962200`', {
-      parse_mode: 'Markdown'
-    });
-  });
-
-  bot.action('admin_edit_texts', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    
-    ctx.reply('📝 **ویرایش متن‌های ربات**\n\nاین بخش به‌زودی تکمیل می‌شود.\nدر حال حاضر می‌توانید از فایل `texts.js` برای ویرایش استفاده کنید.', {
-      parse_mode: 'Markdown'
-    });
-  });
-
-  // ===== ارسال همگانی، مخفی، هدیه =====
-  
+  // ===== ارسال همگانی با عکس و متن =====
   bot.action('admin_broadcast', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -456,15 +412,21 @@ module.exports = function registerMiscHandlers(bot) {
     
     sessions[ctx.from.id] = {
       flow: 'admin_broadcast',
-      step: 'waiting_text',
-      lang: 'fa'
+      step: 'waiting_photo_or_text',
+      lang: 'fa',
+      data: {}
     };
     
-    ctx.reply('📢 **ارسال پیام همگانی**\n\nلطفاً متن پیام را که می‌خواهید برای **همه کاربران** (حتی ثبت‌نام نشده‌ها) ارسال شود، بنویسید:', {
-      parse_mode: 'Markdown'
-    });
+    ctx.reply(
+      '📢 **ارسال همگانی**\n\n' +
+      'لطفاً **متن پیام** را ارسال کنید.\n' +
+      'اگر می‌خواهید همراه با عکس باشد، اول **عکس** را ارسال کنید و سپس متن را بنویسید.\n\n' +
+      '⚠️ این پیام به **همه کاربران** (حتی ثبت‌نام نشده‌ها) ارسال می‌شود.',
+      { parse_mode: 'Markdown' }
+    );
   });
 
+  // ===== ارسال مخفی به یک نفر با عکس و متن =====
   bot.action('admin_fake_broadcast', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -473,14 +435,19 @@ module.exports = function registerMiscHandlers(bot) {
     sessions[ctx.from.id] = {
       flow: 'admin_fake_broadcast',
       step: 'waiting_user_id',
-      lang: 'fa'
+      lang: 'fa',
+      data: {}
     };
     
-    ctx.reply('🕵️ **ارسال مخفی به یک نفر**\n\nلطفاً آیدی عددی کاربر مورد نظر را وارد کنید:\nمثال: `8231962200`', {
-      parse_mode: 'Markdown'
-    });
+    ctx.reply(
+      '🕵️ **ارسال مخفی به یک نفر**\n\n' +
+      'لطفاً آیدی عددی کاربر مورد نظر را وارد کنید:\nمثال: `8231962200`\n\n' +
+      'سپس می‌توانید **متن** یا **عکس + متن** ارسال کنید.',
+      { parse_mode: 'Markdown' }
+    );
   });
 
+  // ===== هدیه به کاربران =====
   bot.action('admin_gift', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -497,6 +464,72 @@ module.exports = function registerMiscHandlers(bot) {
     });
   });
 
+  // ===== اطلاعات یک کاربر =====
+  bot.action('admin_userinfo', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_userinfo',
+      step: 'waiting_id',
+      lang: 'fa'
+    };
+    
+    ctx.reply('👤 **اطلاعات یک کاربر**\n\nلطفاً آیدی عددی کاربر را وارد کنید:\nمثال: `8231962200`', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  // ===== جستجوی کد پیگیری =====
+  bot.action('admin_find', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_find',
+      step: 'waiting_code',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🔎 **جستجوی کد پیگیری**\n\nلطفاً کد پیگیری را وارد کنید:\nمثال: `VOC-847392` یا `#VCH_1024`', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  bot.action('admin_stats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const totalUsers = await pool.query('SELECT COUNT(*) AS c FROM users');
+    const registeredUsers = await pool.query("SELECT COUNT(*) AS c FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
+    const totalBalance = await pool.query('SELECT COALESCE(SUM(balance), 0) AS total FROM users');
+    const todayOrders = await pool.query("SELECT COUNT(*) AS c FROM orders WHERE created_at::date >= CURRENT_DATE");
+    const todaySells = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE created_at::date >= CURRENT_DATE");
+    
+    ctx.reply(
+      '📊 **آمار کاربران ووچینو**\n\n' +
+      '👥 **کل کاربران:** ' + totalUsers.rows[0].c + '\n' +
+      '✅ **ثبت‌نام کامل:** ' + registeredUsers.rows[0].c + '\n' +
+      '💰 **مجموع موجودی:** ' + Number(totalBalance.rows[0].total).toLocaleString('en-US') + ' تومان\n' +
+      '🛒 **سفارشات امروز:** ' + todayOrders.rows[0].c + '\n' +
+      '🎟 **فروش امروز:** ' + todaySells.rows[0].c,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  bot.action('admin_edit_texts', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply('📝 **ویرایش متن‌های ربات**\n\nاین بخش به‌زودی تکمیل می‌شود.\nدر حال حاضر می‌توانید از فایل `texts.js` برای ویرایش استفاده کنید.', {
+      parse_mode: 'Markdown'
+    });
+  });
+
   bot.action(/^menu_.+/, async (ctx) => {
     const actionKey = ctx.match[0];
     const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game', 'menu_rules', 'menu_education', 'menu_rules_education', 'menu_buy', 'menu_sell', 'menu_admin_panel'];
@@ -506,7 +539,7 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('این بخش به‌زودی تکمیل می‌شود 🛠');
   });
 
-  // ===== هندلرهای متنی برای تنظیمات و جستجو =====
+  // ===== هندلرهای متنی =====
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session) return next();
@@ -516,44 +549,61 @@ module.exports = function registerMiscHandlers(bot) {
       return next();
     }
 
-    // ارسال همگانی
-    if (session.flow === 'admin_broadcast' && session.step === 'waiting_text') {
-      const { sendBroadcast, getAllUsers } = require('../utils');
-      const allUsers = await getAllUsers(true);
+    // ===== ارسال همگانی (متن) =====
+    if (session.flow === 'admin_broadcast' && session.step === 'waiting_photo_or_text') {
+      const text = ctx.message.text;
       
-      if (allUsers.length === 0) {
-        delete sessions[ctx.from.id];
-        ctx.reply('❌ هیچ کاربری برای ارسال پیدا نشد.');
-        return;
+      if (session.data.photo) {
+        // ارسال با عکس
+        const allUsers = await getAllUsers(true);
+        if (allUsers.length === 0) {
+          delete sessions[ctx.from.id];
+          ctx.reply('❌ هیچ کاربری برای ارسال پیدا نشد.');
+          return;
+        }
+        
+        const msg = await ctx.reply('📢 در حال ارسال پیام همگانی با عکس...\n👥 تعداد کاربران: ' + allUsers.length);
+        const userIds = allUsers.map(u => u.telegram_id);
+        const results = await sendBroadcastWithPhoto(bot, userIds, session.data.photo, text, { parse_mode: 'HTML' });
+        
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.filter(r => !r.success).length;
+        
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          msg.message_id,
+          null,
+          '✅ ارسال همگانی با عکس انجام شد!\n\n✅ موفق: ' + successCount + '\n❌ ناموفق: ' + failCount
+        );
+      } else {
+        // ارسال بدون عکس
+        const allUsers = await getAllUsers(true);
+        if (allUsers.length === 0) {
+          delete sessions[ctx.from.id];
+          ctx.reply('❌ هیچ کاربری برای ارسال پیدا نشد.');
+          return;
+        }
+        
+        const msg = await ctx.reply('📢 در حال ارسال پیام همگانی...\n👥 تعداد کاربران: ' + allUsers.length);
+        const userIds = allUsers.map(u => u.telegram_id);
+        const results = await sendBroadcast(bot, userIds, text, { parse_mode: 'HTML' });
+        
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.filter(r => !r.success).length;
+        
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          msg.message_id,
+          null,
+          '✅ ارسال همگانی انجام شد!\n\n✅ موفق: ' + successCount + '\n❌ ناموفق: ' + failCount
+        );
       }
-      
-      const msg = await ctx.reply(
-        '📢 در حال ارسال پیام همگانی...\n\n' +
-        '👥 تعداد کاربران: ' + allUsers.length + '\n' +
-        '⏳ لطفاً صبر کنید...'
-      );
-      
-      const userIds = allUsers.map(u => u.telegram_id);
-      const results = await sendBroadcast(bot, userIds, ctx.message.text, { parse_mode: 'HTML' });
-      
-      const successCount = results.filter(r => r.success).length;
-      const failCount = results.filter(r => !r.success).length;
-      
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        msg.message_id,
-        null,
-        '✅ ارسال همگانی انجام شد!\n\n' +
-        '✅ موفق: ' + successCount + '\n' +
-        '❌ ناموفق: ' + failCount + '\n' +
-        '👥 مجموع: ' + results.length
-      );
       
       delete sessions[ctx.from.id];
       return;
     }
 
-    // ارسال مخفی به یک نفر
+    // ===== ارسال مخفی (متن) =====
     if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_user_id') {
       const targetUserId = ctx.message.text.trim();
       const user = await getUserById(targetUserId);
@@ -564,33 +614,36 @@ module.exports = function registerMiscHandlers(bot) {
       }
       
       session.data = { targetUserId: targetUserId };
-      session.step = 'waiting_text';
-      ctx.reply('✅ کاربر پیدا شد: ' + (user.full_name || 'نامشخص') + '\n\n📝 حالا متن پیام را بنویس (کاربر فکر میکند همگانی بوده!):');
+      session.step = 'waiting_photo_or_text';
+      ctx.reply('✅ کاربر پیدا شد: ' + (user.full_name || 'نامشخص') + '\n\n📝 حالا متن پیام را بنویس (کاربر فکر میکند همگانی بوده!)، یا اگر عکس داری اول عکس را بفرست.');
       return;
     }
 
-    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_text') {
-      const { sendBroadcast } = require('../utils');
+    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_photo_or_text') {
+      const text = ctx.message.text;
       const targetUserId = session.data.targetUserId;
       
-      const result = await sendBroadcast(bot, [targetUserId], ctx.message.text, { parse_mode: 'HTML' }, true);
-      
-      if (result[0].success) {
-        ctx.reply(
-          '✅ پیام مخفی ارسال شد!\n\n' +
-          '🆔 آیدی: ' + targetUserId + '\n' +
-          '📝 متن: ' + ctx.message.text + '\n\n' +
-          '🔮 کاربر فکر میکند این پیام همگانی بوده! 😎'
-        );
+      if (session.data.photo) {
+        const result = await sendBroadcastWithPhoto(bot, [targetUserId], session.data.photo, text, { parse_mode: 'HTML' }, true);
+        if (result[0].success) {
+          ctx.reply('✅ پیام مخفی با عکس ارسال شد!\n🆔 آیدی: ' + targetUserId);
+        } else {
+          ctx.reply('❌ ارسال پیام ناموفق بود.\nخطا: ' + result[0].error);
+        }
       } else {
-        ctx.reply('❌ ارسال پیام ناموفق بود.\nخطا: ' + result[0].error);
+        const result = await sendBroadcast(bot, [targetUserId], text, { parse_mode: 'HTML' }, true);
+        if (result[0].success) {
+          ctx.reply('✅ پیام مخفی ارسال شد!\n🆔 آیدی: ' + targetUserId);
+        } else {
+          ctx.reply('❌ ارسال پیام ناموفق بود.\nخطا: ' + result[0].error);
+        }
       }
       
       delete sessions[ctx.from.id];
       return;
     }
 
-    // هدیه به کاربران
+    // ===== هدیه =====
     if (session.flow === 'admin_gift' && session.step === 'waiting_user_ids') {
       const ids = ctx.message.text.split('-').map(id => id.trim());
       const validUsers = [];
@@ -649,69 +702,39 @@ module.exports = function registerMiscHandlers(bot) {
       return;
     }
 
-    // تغییر نرخ دلار
-    if (session.flow === 'admin_set_rate' && session.step === 'waiting_value') {
-      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-      if (!value || value <= 0) {
-        ctx.reply('❌ لطفاً یک عدد معتبر وارد کنید.');
+    // ===== اطلاعات یک کاربر =====
+    if (session.flow === 'admin_userinfo' && session.step === 'waiting_id') {
+      const targetUserId = ctx.message.text.trim();
+      const user = await getUserById(targetUserId);
+      
+      if (!user) {
+        ctx.reply('❌ کاربری با آیدی ' + targetUserId + ' پیدا نشد.');
+        delete sessions[ctx.from.id];
         return;
       }
-      await pool.query(
-        'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
-        ['usd_rate', String(value)]
-      );
+      
+      const isFullyRegistered = user.full_name && user.phone && user.card_number;
+      
+      let infoText = 
+        '👤 **اطلاعات کاربر**\n\n' +
+        '🆔 **آیدی:** ' + user.telegram_id + '\n' +
+        '👤 **نام:** ' + (user.full_name || '❌ ثبت‌نام ناقص') + '\n' +
+        '📱 **شماره:** ' + (user.phone || '❌ ثبت نشده') + '\n' +
+        '💳 **کارت:** ' + (user.card_number || '❌ ثبت نشده') + '\n' +
+        '💰 **موجودی:** ' + Number(user.balance).toLocaleString('en-US') + ' تومان\n' +
+        '📅 **تاریخ ثبت:** ' + (user.registered_at || 'نامشخص') + '\n' +
+        '📌 **وضعیت ثبت‌نام:** ' + (isFullyRegistered ? '✅ کامل' : '⚠️ ناقص') + '\n';
+      
+      ctx.reply(infoText, { parse_mode: 'Markdown' });
       delete sessions[ctx.from.id];
-      ctx.reply('✅ نرخ دلار با موفقیت به ' + value.toLocaleString('en-US') + ' تومان تغییر یافت!');
       return;
     }
 
-    // تغییر ایموجی استارت
-    if (session.flow === 'admin_set_reaction' && session.step === 'waiting_value') {
-      const emoji = ctx.message.text.trim();
-      if (ALLOWED_REACTIONS.indexOf(emoji) === -1) {
-        ctx.reply('❌ این ایموجی مجاز نیست. لطفاً یکی از ایموجی‌های مجاز را انتخاب کنید.');
-        return;
-      }
-      await pool.query(
-        'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
-        ['start_reaction', emoji]
-      );
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ ایموجی استارت با موفقیت به ' + emoji + ' تغییر یافت!');
-      return;
-    }
-
-    // تغییر سود خرید
-    if (session.flow === 'admin_set_buy_margin' && session.step === 'waiting_value') {
-      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-      if (isNaN(value) || value < 0) {
-        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر یا مساوی ۰) وارد کنید.');
-        return;
-      }
-      await pool.query("INSERT INTO settings (key, value) VALUES ('buy_margin', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(value)]);
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ سود خرید با موفقیت به ' + value + '% تغییر یافت.');
-      return;
-    }
-
-    // تغییر سود فروش
-    if (session.flow === 'admin_set_sell_margin' && session.step === 'waiting_value') {
-      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-      if (isNaN(value) || value < 0) {
-        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر یا مساوی ۰) وارد کنید.');
-        return;
-      }
-      await pool.query("INSERT INTO settings (key, value) VALUES ('sell_margin', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(value)]);
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ سود فروش با موفقیت به ' + value + '% تغییر یافت.');
-      return;
-    }
-
-    // جستجوی کد پیگیری
+    // ===== جستجوی کد پیگیری =====
     if (session.flow === 'admin_find' && session.step === 'waiting_code') {
       const code = ctx.message.text.trim().toUpperCase();
       
-      const orderRes = await pool.query('SELECT * FROM orders WHERE tracking_code = $1', [code]);
+      const orderRes = await pool.query('SELECT * FROM orders WHERE tracking_code = $1 OR tracking_code = $2', [code, code]);
       const walletRes = await pool.query('SELECT * FROM wallet_requests WHERE tracking_code = $1', [code]);
       const sellRes = await pool.query('SELECT * FROM sell_orders WHERE tracking_code = $1', [code]);
 
@@ -766,31 +789,92 @@ module.exports = function registerMiscHandlers(bot) {
       return;
     }
 
-    // اطلاعات یک کاربر
-    if (session.flow === 'admin_userinfo' && session.step === 'waiting_id') {
-      const targetUserId = ctx.message.text.trim();
-      const user = await getUserById(targetUserId);
-      
-      if (!user) {
-        ctx.reply('❌ کاربری با آیدی ' + targetUserId + ' پیدا نشد.');
-        delete sessions[ctx.from.id];
+    // ===== تغییر نرخ دلار =====
+    if (session.flow === 'admin_set_rate' && session.step === 'waiting_value') {
+      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (!value || value <= 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر وارد کنید.');
         return;
       }
-      
-      const isFullyRegistered = user.full_name && user.phone && user.card_number;
-      
-      let infoText = 
-        '👤 **اطلاعات کاربر**\n\n' +
-        '🆔 **آیدی:** ' + user.telegram_id + '\n' +
-        '👤 **نام:** ' + (user.full_name || '❌ ثبت‌نام ناقص') + '\n' +
-        '📱 **شماره:** ' + (user.phone || '❌ ثبت نشده') + '\n' +
-        '💳 **کارت:** ' + (user.card_number || '❌ ثبت نشده') + '\n' +
-        '💰 **موجودی:** ' + Number(user.balance).toLocaleString('en-US') + ' تومان\n' +
-        '📅 **تاریخ ثبت:** ' + (user.registered_at || 'نامشخص') + '\n' +
-        '📌 **وضعیت ثبت‌نام:** ' + (isFullyRegistered ? '✅ کامل' : '⚠️ ناقص') + '\n';
-      
-      ctx.reply(infoText, { parse_mode: 'Markdown' });
+      await pool.query(
+        'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+        ['usd_rate', String(value)]
+      );
       delete sessions[ctx.from.id];
+      ctx.reply('✅ نرخ دلار با موفقیت به ' + value.toLocaleString('en-US') + ' تومان تغییر یافت!');
+      return;
+    }
+
+    // ===== تغییر ایموجی استارت =====
+    if (session.flow === 'admin_set_reaction' && session.step === 'waiting_value') {
+      const emoji = ctx.message.text.trim();
+      if (ALLOWED_REACTIONS.indexOf(emoji) === -1) {
+        ctx.reply('❌ این ایموجی مجاز نیست. لطفاً یکی از ایموجی‌های مجاز را انتخاب کنید.');
+        return;
+      }
+      await pool.query(
+        'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+        ['start_reaction', emoji]
+      );
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ ایموجی استارت با موفقیت به ' + emoji + ' تغییر یافت!');
+      return;
+    }
+
+    // ===== تغییر سود خرید =====
+    if (session.flow === 'admin_set_buy_margin' && session.step === 'waiting_value') {
+      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (isNaN(value) || value < 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر یا مساوی ۰) وارد کنید.');
+        return;
+      }
+      await pool.query("INSERT INTO settings (key, value) VALUES ('buy_margin', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(value)]);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ سود خرید با موفقیت به ' + value + '% تغییر یافت.');
+      return;
+    }
+
+    // ===== تغییر سود فروش =====
+    if (session.flow === 'admin_set_sell_margin' && session.step === 'waiting_value') {
+      const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (isNaN(value) || value < 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر یا مساوی ۰) وارد کنید.');
+        return;
+      }
+      await pool.query("INSERT INTO settings (key, value) VALUES ('sell_margin', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(value)]);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ سود فروش با موفقیت به ' + value + '% تغییر یافت.');
+      return;
+    }
+
+    return next();
+  });
+
+  // ===== هندلر عکس برای ارسال همگانی و مخفی =====
+  bot.on('photo', async (ctx, next) => {
+    const session = sessions[ctx.from.id];
+    if (!session) return next();
+    
+    if (!isAdmin(ctx.from.id)) {
+      delete sessions[ctx.from.id];
+      return next();
+    }
+
+    // ارسال همگانی با عکس
+    if (session.flow === 'admin_broadcast' && session.step === 'waiting_photo_or_text') {
+      const photos = ctx.message.photo;
+      const fileId = photos[photos.length - 1].file_id;
+      session.data.photo = fileId;
+      ctx.reply('✅ عکس دریافت شد. حالا **متن پیام** را بنویسید:');
+      return;
+    }
+
+    // ارسال مخفی با عکس
+    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_photo_or_text') {
+      const photos = ctx.message.photo;
+      const fileId = photos[photos.length - 1].file_id;
+      session.data.photo = fileId;
+      ctx.reply('✅ عکس دریافت شد. حالا **متن پیام** را بنویسید:');
       return;
     }
 
