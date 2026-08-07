@@ -22,12 +22,158 @@ module.exports = function registerAdminHandlers(bot) {
           [{ text: '➕ افزودن محصول جدید', callback_data: 'admin_add_product_buy' }],
           [{ text: '📋 لیست محصولات', callback_data: 'admin_list_products_buy' }],
           [{ text: '❌ غیرفعال کردن محصول', callback_data: 'admin_remove_product_buy' }],
+          [{ text: '💰 تنظیم کارمزد محصول', callback_data: 'admin_commission_product_buy' }],
           [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
         ]
       }
     });
   });
 
+  // ===== لیست محصولات خرید با نمایش کارمزد =====
+  bot.action('admin_list_products_buy', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const res = await pool.query('SELECT * FROM products ORDER BY id ASC');
+    
+    if (res.rows.length === 0) {
+      ctx.reply('📋 هیچ محصولی تعریف نشده است.');
+      return;
+    }
+    
+    let message = '📋 **لیست محصولات خرید**\n\n';
+    res.rows.forEach(function (p) {
+      const status = p.active ? '✅ فعال' : '⛔️ غیرفعال';
+      const price = p.price_type === 'usd' ? Number(p.min_amount) + ' دلار' : Number(p.min_amount).toLocaleString('en-US') + ' تومان';
+      const commission = p.commission_type === 'percentage' ? p.commission_value + '%' : (p.commission_type === 'fixed' ? Number(p.commission_value).toLocaleString('en-US') + ' تومان' : 'بدون کارمزد');
+      message += '🔹 **' + p.name + '**\n';
+      message += '   کلید: `' + p.key + '`\n';
+      message += '   حداقل: ' + price + '\n';
+      message += '   کارمزد: ' + commission + '\n';
+      message += '   وضعیت: ' + status + '\n\n';
+    });
+    
+    ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // ===== تنظیم کارمزد محصول خرید =====
+  bot.action('admin_commission_product_buy', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const res = await pool.query('SELECT key, name FROM products WHERE active = 1 ORDER BY id ASC');
+    if (res.rows.length === 0) {
+      ctx.reply('❌ هیچ محصول فعالی برای تنظیم کارمزد وجود ندارد.');
+      return;
+    }
+    
+    let message = '💰 **تنظیم کارمزد محصولات خرید**\n\n';
+    message += 'برای تنظیم کارمزد هر محصول، کلید آن را به همراه نوع و مقدار وارد کنید:\n\n';
+    message += 'فرمت: `کلید|نوع|مقدار`\n\n';
+    message += 'نوع: `percentage` (درصدی) یا `fixed` (ثابت)\n\n';
+    message += 'مثال‌ها:\n';
+    message += '`voucher|percentage|10` → ۱۰٪ کارمزد\n';
+    message += '`hotvoucher|fixed|5000` → ۵۰۰۰ تومان کارمزد ثابت\n';
+    message += '`voucher|none|0` → بدون کارمزد\n\n';
+    message += '📋 لیست محصولات فعال:\n';
+    res.rows.forEach(p => {
+      message += '• `' + p.key + '` → ' + p.name + '\n';
+    });
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_commission_product_buy',
+      step: 'waiting_details',
+      lang: 'fa'
+    };
+    
+    ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // ===== مدیریت محصولات فروش =====
+  bot.action('admin_products_sell', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply('🎟 **مدیریت محصولات فروش**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ افزودن محصول جدید', callback_data: 'admin_add_product_sell' }],
+          [{ text: '📋 لیست محصولات', callback_data: 'admin_list_products_sell' }],
+          [{ text: '❌ غیرفعال کردن محصول', callback_data: 'admin_remove_product_sell' }],
+          [{ text: '💰 تنظیم کارمزد محصول', callback_data: 'admin_commission_product_sell' }],
+          [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
+        ]
+      }
+    });
+  });
+
+  // ===== لیست محصولات فروش با نمایش کارمزد =====
+  bot.action('admin_list_products_sell', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const res = await pool.query('SELECT * FROM sell_products ORDER BY id ASC');
+    
+    if (res.rows.length === 0) {
+      ctx.reply('📋 هیچ محصول فروشی تعریف نشده است.');
+      return;
+    }
+    
+    let message = '📋 **لیست محصولات فروش**\n\n';
+    res.rows.forEach(function (p) {
+      const status = p.active ? '✅ فعال' : '⛔️ غیرفعال';
+      const commission = p.commission_type === 'percentage' ? p.commission_value + '%' : (p.commission_type === 'fixed' ? Number(p.commission_value).toLocaleString('en-US') + ' تومان' : 'بدون کارمزد');
+      message += '🔹 **' + p.name + '**\n';
+      message += '   کلید: `' + p.key + '`\n';
+      message += '   قیمت واحد: ' + Number(p.unit_price).toLocaleString('en-US') + ' تومان\n';
+      message += '   کارمزد: ' + commission + '\n';
+      message += '   وضعیت: ' + status + '\n\n';
+    });
+    
+    ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // ===== تنظیم کارمزد محصول فروش =====
+  bot.action('admin_commission_product_sell', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const res = await pool.query('SELECT key, name FROM sell_products WHERE active = 1 ORDER BY id ASC');
+    if (res.rows.length === 0) {
+      ctx.reply('❌ هیچ محصول فروش فعالی برای تنظیم کارمزد وجود ندارد.');
+      return;
+    }
+    
+    let message = '💰 **تنظیم کارمزد محصولات فروش**\n\n';
+    message += 'برای تنظیم کارمزد هر محصول، کلید آن را به همراه نوع و مقدار وارد کنید:\n\n';
+    message += 'فرمت: `کلید|نوع|مقدار`\n\n';
+    message += 'نوع: `percentage` (درصدی) یا `fixed` (ثابت)\n\n';
+    message += 'مثال‌ها:\n';
+    message += '`uvoucher|percentage|5` → ۵٪ کارمزد\n';
+    message += '`psvoucher|fixed|3000` → ۳۰۰۰ تومان کارمزد ثابت\n';
+    message += '`uvoucher|none|0` → بدون کارمزد\n\n';
+    message += '📋 لیست محصولات فعال:\n';
+    res.rows.forEach(p => {
+      message += '• `' + p.key + '` → ' + p.name + '\n';
+    });
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_commission_product_sell',
+      step: 'waiting_details',
+      lang: 'fa'
+    };
+    
+    ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // ===== دکمه‌های افزودن، غیرفعال کردن و ... =====
+  
   bot.action('admin_add_product_buy', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -49,31 +195,6 @@ module.exports = function registerAdminHandlers(bot) {
     );
   });
 
-  bot.action('admin_list_products_buy', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    
-    const res = await pool.query('SELECT * FROM products ORDER BY id ASC');
-    
-    if (res.rows.length === 0) {
-      ctx.reply('📋 هیچ محصولی تعریف نشده است.');
-      return;
-    }
-    
-    let message = '📋 **لیست محصولات خرید**\n\n';
-    res.rows.forEach(function (p) {
-      const status = p.active ? '✅ فعال' : '⛔️ غیرفعال';
-      const price = p.price_type === 'usd' ? Number(p.min_amount) + ' دلار' : Number(p.min_amount).toLocaleString('en-US') + ' تومان';
-      message += '🔹 **' + p.name + '**\n';
-      message += '   کلید: `' + p.key + '`\n';
-      message += '   حداقل: ' + price + '\n';
-      message += '   وضعیت: ' + status + '\n\n';
-    });
-    
-    ctx.reply(message, { parse_mode: 'Markdown' });
-  });
-
   bot.action('admin_remove_product_buy', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -87,25 +208,6 @@ module.exports = function registerAdminHandlers(bot) {
     
     ctx.reply('❌ **غیرفعال کردن محصول**\n\nلطفاً کلید محصول مورد نظر را وارد کنید:\nمثال: `voucher`', {
       parse_mode: 'Markdown'
-    });
-  });
-
-  // ===== مدیریت محصولات فروش =====
-  bot.action('admin_products_sell', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    
-    ctx.reply('🎟 **مدیریت محصولات فروش**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '➕ افزودن محصول جدید', callback_data: 'admin_add_product_sell' }],
-          [{ text: '📋 لیست محصولات', callback_data: 'admin_list_products_sell' }],
-          [{ text: '❌ غیرفعال کردن محصول', callback_data: 'admin_remove_product_sell' }],
-          [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
-        ]
-      }
     });
   });
 
@@ -127,31 +229,6 @@ module.exports = function registerAdminHandlers(bot) {
       'مثال:\n`uvoucher|🎟 یوووچر|173031|USD-7T3H-C2QG-P6YA-D4UW-XOIQ`',
       { parse_mode: 'Markdown' }
     );
-  });
-
-  bot.action('admin_list_products_sell', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    
-    const res = await pool.query('SELECT * FROM sell_products ORDER BY id ASC');
-    
-    if (res.rows.length === 0) {
-      ctx.reply('📋 هیچ محصول فروشی تعریف نشده است.');
-      return;
-    }
-    
-    let message = '📋 **لیست محصولات فروش**\n\n';
-    res.rows.forEach(function (p) {
-      const status = p.active ? '✅ فعال' : '⛔️ غیرفعال';
-      message += '🔹 **' + p.name + '**\n';
-      message += '   کلید: `' + p.key + '`\n';
-      message += '   قیمت: ' + Number(p.unit_price).toLocaleString('en-US') + ' تومان\n';
-      message += '   نمونه کد: `' + p.sample_code + '`\n';
-      message += '   وضعیت: ' + status + '\n\n';
-    });
-    
-    ctx.reply(message, { parse_mode: 'Markdown' });
   });
 
   bot.action('admin_remove_product_sell', async (ctx) => {
@@ -290,8 +367,6 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
   });
-
-  // ===== ارسال همگانی، مخفی و هدیه (توی misc.js هست) =====
 
   // ===== آمار کاربران =====
   bot.action('admin_stats', async (ctx) => {
@@ -539,6 +614,70 @@ module.exports = function registerAdminHandlers(bot) {
     if (!isAdmin(ctx.from.id)) {
       delete sessions[ctx.from.id];
       return next();
+    }
+
+    // تنظیم کارمزد محصول خرید
+    if (session.flow === 'admin_commission_product_buy' && session.step === 'waiting_details') {
+      const parts = ctx.message.text.split('|').map(p => p.trim());
+      if (parts.length !== 3) {
+        ctx.reply('❌ فرمت صحیح نیست. لطفاً به صورت `کلید|نوع|مقدار` وارد کنید.');
+        return;
+      }
+      const [key, type, value] = parts;
+      if (!key || !type || !value) {
+        ctx.reply('❌ مقادیر نامعتبر است. لطفاً دوباره تلاش کنید.');
+        return;
+      }
+      if (type !== 'none' && type !== 'percentage' && type !== 'fixed') {
+        ctx.reply('❌ نوع کارمزد باید `none`، `percentage` یا `fixed` باشد.');
+        return;
+      }
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0) {
+        ctx.reply('❌ مقدار کارمزد باید عددی مثبت باشد.');
+        return;
+      }
+      const res = await pool.query('UPDATE products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name', [type, numValue, key]);
+      if (res.rows.length === 0) {
+        ctx.reply('❌ محصولی با این کلید پیدا نشد.');
+        delete sessions[ctx.from.id];
+        return;
+      }
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ کارمزد محصول «' + res.rows[0].name + '» با موفقیت تنظیم شد.');
+      return;
+    }
+
+    // تنظیم کارمزد محصول فروش
+    if (session.flow === 'admin_commission_product_sell' && session.step === 'waiting_details') {
+      const parts = ctx.message.text.split('|').map(p => p.trim());
+      if (parts.length !== 3) {
+        ctx.reply('❌ فرمت صحیح نیست. لطفاً به صورت `کلید|نوع|مقدار` وارد کنید.');
+        return;
+      }
+      const [key, type, value] = parts;
+      if (!key || !type || !value) {
+        ctx.reply('❌ مقادیر نامعتبر است. لطفاً دوباره تلاش کنید.');
+        return;
+      }
+      if (type !== 'none' && type !== 'percentage' && type !== 'fixed') {
+        ctx.reply('❌ نوع کارمزد باید `none`، `percentage` یا `fixed` باشد.');
+        return;
+      }
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0) {
+        ctx.reply('❌ مقدار کارمزد باید عددی مثبت باشد.');
+        return;
+      }
+      const res = await pool.query('UPDATE sell_products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name', [type, numValue, key]);
+      if (res.rows.length === 0) {
+        ctx.reply('❌ محصولی با این کلید پیدا نشد.');
+        delete sessions[ctx.from.id];
+        return;
+      }
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ کارمزد محصول فروش «' + res.rows[0].name + '» با موفقیت تنظیم شد.');
+      return;
     }
 
     // افزودن محصول خرید
