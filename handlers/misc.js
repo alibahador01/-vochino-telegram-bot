@@ -1,7 +1,7 @@
 const texts = require('../texts');
 const { sessions, showMainMenu } = require('../utils');
 const { pool, getUser } = require('../db');
-const { ADMIN_IDS } = require('../constants');
+const { ADMIN_IDS, ALLOWED_REACTIONS } = require('../constants');
 
 function isAdmin(telegramId) {
   return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
@@ -173,7 +173,6 @@ module.exports = function registerMiscHandlers(bot) {
     }
     try { await ctx.deleteMessage(); } catch (e) {}
     
-    // گرفتن تعداد درخواست‌های در انتظار
     const pendingWallet = await pool.query("SELECT COUNT(*) AS c FROM wallet_requests WHERE status = 'pending'");
     const pendingSell = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE status = 'pending_review'");
     const pendingBuy = await pool.query("SELECT COUNT(*) AS c FROM orders WHERE status = 'pending_delivery'");
@@ -311,6 +310,56 @@ module.exports = function registerMiscHandlers(bot) {
     });
   });
 
+  // ===== ارسال همگانی، مخفی، هدیه =====
+  
+  bot.action('admin_broadcast', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_broadcast',
+      step: 'waiting_text',
+      lang: 'fa'
+    };
+    
+    ctx.reply('📢 **ارسال پیام همگانی**\n\nلطفاً متن پیام را که می‌خواهید برای **همه کاربران** (حتی ثبت‌نام نشده‌ها) ارسال شود، بنویسید:', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  bot.action('admin_fake_broadcast', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_fake_broadcast',
+      step: 'waiting_user_id',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🕵️ **ارسال مخفی به یک نفر**\n\nلطفاً آیدی عددی کاربر مورد نظر را وارد کنید:\nمثال: `8231962200`', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  bot.action('admin_gift', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_gift',
+      step: 'waiting_user_ids',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🎁 **هدیه به کاربران**\n\nلطفاً آیدی‌های کاربران را با `-` جدا کنید:\nمثال: `8231962200-8231962201-8231962202`\n\nیا برای هدیه به یک نفر فقط آیدی را وارد کنید.', {
+      parse_mode: 'Markdown'
+    });
+  });
+
   bot.action(/^menu_.+/, async (ctx) => {
     const actionKey = ctx.match[0];
     const known = ['menu_wallet', 'menu_referral', 'menu_profile', 'menu_invoices', 'menu_support', 'menu_game', 'menu_rules', 'menu_education', 'menu_rules_education', 'menu_buy', 'menu_sell', 'menu_admin_panel'];
@@ -328,6 +377,139 @@ module.exports = function registerMiscHandlers(bot) {
     if (!isAdmin(ctx.from.id)) {
       delete sessions[ctx.from.id];
       return next();
+    }
+
+    // ارسال همگانی
+    if (session.flow === 'admin_broadcast' && session.step === 'waiting_text') {
+      const { sendBroadcast, getAllUsers } = require('../utils');
+      const allUsers = await getAllUsers(true);
+      
+      if (allUsers.length === 0) {
+        delete sessions[ctx.from.id];
+        ctx.reply('❌ هیچ کاربری برای ارسال پیدا نشد.');
+        return;
+      }
+      
+      const msg = await ctx.reply(
+        '📢 در حال ارسال پیام همگانی...\n\n' +
+        '👥 تعداد کاربران: ' + allUsers.length + '\n' +
+        '⏳ لطفاً صبر کنید...'
+      );
+      
+      const userIds = allUsers.map(u => u.telegram_id);
+      const results = await sendBroadcast(bot, userIds, ctx.message.text, { parse_mode: 'HTML' });
+      
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+      
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        msg.message_id,
+        null,
+        '✅ ارسال همگانی انجام شد!\n\n' +
+        '✅ موفق: ' + successCount + '\n' +
+        '❌ ناموفق: ' + failCount + '\n' +
+        '👥 مجموع: ' + results.length
+      );
+      
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    // ارسال مخفی به یک نفر
+    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_user_id') {
+      const targetUserId = ctx.message.text.trim();
+      const user = await getUserById(targetUserId);
+      
+      if (!user) {
+        ctx.reply('❌ کاربری با آیدی ' + targetUserId + ' پیدا نشد. لطفاً دوباره وارد کنید:');
+        return;
+      }
+      
+      session.data = { targetUserId: targetUserId };
+      session.step = 'waiting_text';
+      ctx.reply('✅ کاربر پیدا شد: ' + (user.full_name || 'نامشخص') + '\n\n📝 حالا متن پیام را بنویس (کاربر فکر میکند همگانی بوده!):');
+      return;
+    }
+
+    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_text') {
+      const { sendBroadcast } = require('../utils');
+      const targetUserId = session.data.targetUserId;
+      
+      const result = await sendBroadcast(bot, [targetUserId], ctx.message.text, { parse_mode: 'HTML' }, true);
+      
+      if (result[0].success) {
+        ctx.reply(
+          '✅ پیام مخفی ارسال شد!\n\n' +
+          '🆔 آیدی: ' + targetUserId + '\n' +
+          '📝 متن: ' + ctx.message.text + '\n\n' +
+          '🔮 کاربر فکر میکند این پیام همگانی بوده! 😎'
+        );
+      } else {
+        ctx.reply('❌ ارسال پیام ناموفق بود.\nخطا: ' + result[0].error);
+      }
+      
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    // هدیه به کاربران
+    if (session.flow === 'admin_gift' && session.step === 'waiting_user_ids') {
+      const ids = ctx.message.text.split('-').map(id => id.trim());
+      const validUsers = [];
+      
+      for (const id of ids) {
+        const user = await getUserById(id);
+        if (user) {
+          validUsers.push(id);
+        }
+      }
+      
+      if (validUsers.length === 0) {
+        ctx.reply('❌ هیچ کاربر معتبری پیدا نشد. لطفاً دوباره آیدی‌ها را با `-` جدا کنید:');
+        return;
+      }
+      
+      session.data = { userIds: validUsers };
+      session.step = 'waiting_amount';
+      ctx.reply(
+        '✅ ' + validUsers.length + ' کاربر معتبر پیدا شد:\n' +
+        validUsers.map(id => '• ' + id).join('\n') + '\n\n' +
+        '💰 مبلغ هدیه به **هر کاربر** را به تومان وارد کنید:'
+      );
+      return;
+    }
+
+    if (session.flow === 'admin_gift' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      
+      if (!amount || amount <= 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر از ۰) وارد کنید:');
+        return;
+      }
+      
+      const userIds = session.data.userIds;
+      let successCount = 0;
+      
+      for (const id of userIds) {
+        try {
+          await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, id]);
+          successCount++;
+        } catch (e) {
+          console.log('خطا در هدیه به ' + id + ': ' + e.message);
+        }
+      }
+      
+      ctx.reply(
+        '✅ **هدیه با موفقیت انجام شد!**\n\n' +
+        '👥 تعداد کاربران: ' + userIds.length + '\n' +
+        '✅ موفق: ' + successCount + '\n' +
+        '💰 مبلغ هر هدیه: ' + Number(amount).toLocaleString('en-US') + ' تومان\n' +
+        '💸 مجموع: ' + Number(amount * successCount).toLocaleString('en-US') + ' تومان'
+      );
+      
+      delete sessions[ctx.from.id];
+      return;
     }
 
     // تغییر نرخ دلار
