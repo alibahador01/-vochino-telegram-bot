@@ -60,6 +60,141 @@ module.exports = function registerAdminHandlers(bot) {
     await showAdminMenu(ctx);
   });
 
+  // ===== بخش جدید: پنل دکمه‌ای مدیریت =====
+
+  // مدیریت محصولات خرید
+  bot.action('admin_products_buy', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply('📦 **مدیریت محصولات خرید**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ افزودن محصول جدید', callback_data: 'admin_add_product_buy' }],
+          [{ text: '📋 لیست محصولات', callback_data: 'admin_list_products_buy' }],
+          [{ text: '❌ غیرفعال کردن محصول', callback_data: 'admin_remove_product_buy' }],
+          [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
+        ]
+      }
+    });
+  });
+
+  // مدیریت محصولات فروش
+  bot.action('admin_products_sell', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply('🎟 **مدیریت محصولات فروش**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ افزودن محصول جدید', callback_data: 'admin_add_product_sell' }],
+          [{ text: '📋 لیست محصولات', callback_data: 'admin_list_products_sell' }],
+          [{ text: '❌ غیرفعال کردن محصول', callback_data: 'admin_remove_product_sell' }],
+          [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
+        ]
+      }
+    });
+  });
+
+  // مدیریت درخواست‌ها
+  bot.action('admin_requests', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    ctx.reply('📥 **مدیریت درخواست‌ها**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💰 درخواست‌های کیف پول', callback_data: 'admin_pending' }],
+          [{ text: '🎟 درخواست‌های فروش', callback_data: 'admin_sell_pending' }],
+          [{ text: '📦 سفارش‌های خرید', callback_data: 'admin_buy_pending' }],
+          [{ text: '🔙 بازگشت به پنل مدیریت', callback_data: 'menu_admin_panel' }]
+        ]
+      }
+    });
+  });
+
+  // ارسال همگانی
+  bot.action('admin_broadcast', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_broadcast',
+      step: 'waiting_text',
+      lang: 'fa'
+    };
+    
+    ctx.reply('📢 **ارسال پیام همگانی**\n\nلطفاً متن پیام را که می‌خواهید برای **همه کاربران** (حتی ثبت‌نام نشده‌ها) ارسال شود، بنویسید:', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  // ارسال مخفی به یک نفر
+  bot.action('admin_fake_broadcast', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_fake_broadcast',
+      step: 'waiting_user_id',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🕵️ **ارسال مخفی به یک نفر**\n\nلطفاً آیدی عددی کاربر مورد نظر را وارد کنید:\nمثال: `8231962200`', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  // هدیه به کاربران
+  bot.action('admin_gift', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    sessions[ctx.from.id] = {
+      flow: 'admin_gift',
+      step: 'waiting_user_ids',
+      lang: 'fa'
+    };
+    
+    ctx.reply('🎁 **هدیه به کاربران**\n\nلطفاً آیدی‌های کاربران را با `-` جدا کنید:\nمثال: `8231962200-8231962201-8231962202`\n\nیا برای هدیه به یک نفر فقط آیدی را وارد کنید.', {
+      parse_mode: 'Markdown'
+    });
+  });
+
+  // آمار کاربران
+  bot.action('admin_stats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    const totalUsers = await pool.query('SELECT COUNT(*) AS c FROM users');
+    const registeredUsers = await pool.query("SELECT COUNT(*) AS c FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
+    const totalBalance = await pool.query('SELECT COALESCE(SUM(balance), 0) AS total FROM users');
+    const todayOrders = await pool.query("SELECT COUNT(*) AS c FROM orders WHERE created_at >= CURRENT_DATE");
+    const todaySells = await pool.query("SELECT COUNT(*) AS c FROM sell_orders WHERE created_at >= CURRENT_DATE");
+    
+    ctx.reply(
+      '📊 **آمار کاربران ووچینو**\n\n' +
+      '👥 **کل کاربران:** ' + totalUsers.rows[0].c + '\n' +
+      '✅ **ثبت‌نام کامل:** ' + registeredUsers.rows[0].c + '\n' +
+      '💰 **مجموع موجودی:** ' + Number(totalBalance.rows[0].total).toLocaleString('en-US') + ' تومان\n' +
+      '🛒 **سفارشات امروز:** ' + todayOrders.rows[0].c + '\n' +
+      '🎟 **فروش امروز:** ' + todaySells.rows[0].c,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  // ===== بخش‌های قبلی (دستورات /admin و /broadcast و ...) =====
+
   bot.command('broadcast', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     
@@ -480,6 +615,13 @@ module.exports = function registerAdminHandlers(bot) {
     }
   });
 
+  // ===== بقیه کدهای قبلی (مدیریت درخواست‌ها و ...) =====
+  // ... (ادامه دارد)
+  
+  // چون کد خیلی طولانیه، ادامه‌اش رو میفرستم
+  
+  // ===== بخش مدیریت درخواست‌ها (همون کدهای قبلی) =====
+  
   bot.action('admin_buy_pending', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery();
@@ -816,10 +958,156 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('✍️ لطفاً دلیل رد این درخواست رو بنویس (همین متن مستقیم برای کاربر ارسال می‌شه):');
   });
 
+  // ===== هندلرهای متنی برای مراحل مختلف =====
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session) return next();
 
+    // ارسال همگانی
+    if (session.flow === 'admin_broadcast' && session.step === 'waiting_text') {
+      if (!isAdmin(ctx.from.id)) return next();
+      
+      const messageText = ctx.message.text;
+      const allUsers = await getAllUsers(true);
+      
+      if (allUsers.length === 0) {
+        delete sessions[ctx.from.id];
+        ctx.reply('❌ هیچ کاربری برای ارسال پیدا نشد.');
+        return;
+      }
+      
+      const msg = await ctx.reply(
+        '📢 در حال ارسال پیام همگانی...\n\n' +
+        '👥 تعداد کاربران: ' + allUsers.length + '\n' +
+        '⏳ لطفاً صبر کنید...'
+      );
+      
+      const userIds = allUsers.map(u => u.telegram_id);
+      const results = await sendBroadcast(bot, userIds, messageText, { parse_mode: 'HTML' });
+      
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+      
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        msg.message_id,
+        null,
+        '✅ ارسال همگانی انجام شد!\n\n' +
+        '✅ موفق: ' + successCount + '\n' +
+        '❌ ناموفق: ' + failCount + '\n' +
+        '👥 مجموع: ' + results.length
+      );
+      
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    // ارسال مخفی به یک نفر
+    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_user_id') {
+      if (!isAdmin(ctx.from.id)) return next();
+      
+      const targetUserId = ctx.message.text.trim();
+      const user = await getUserById(targetUserId);
+      
+      if (!user) {
+        ctx.reply('❌ کاربری با آیدی ' + targetUserId + ' پیدا نشد. لطفاً دوباره وارد کنید:');
+        return;
+      }
+      
+      session.data = { targetUserId: targetUserId };
+      session.step = 'waiting_text';
+      ctx.reply('✅ کاربر پیدا شد: ' + (user.full_name || 'نامشخص') + '\n\n📝 حالا متن پیام رو بنویس (کاربر فکر میکنه همگانی بوده!):');
+      return;
+    }
+
+    if (session.flow === 'admin_fake_broadcast' && session.step === 'waiting_text') {
+      if (!isAdmin(ctx.from.id)) return next();
+      
+      const messageText = ctx.message.text;
+      const targetUserId = session.data.targetUserId;
+      
+      const result = await sendBroadcast(bot, [targetUserId], messageText, { parse_mode: 'HTML' }, true);
+      
+      if (result[0].success) {
+        ctx.reply(
+          '✅ پیام مخفی ارسال شد!\n\n' +
+          '🆔 آیدی: ' + targetUserId + '\n' +
+          '📝 متن: ' + messageText + '\n\n' +
+          '🔮 کاربر فکر میکنه این پیام همگانی بوده! 😎'
+        );
+      } else {
+        ctx.reply('❌ ارسال پیام ناموفق بود.\nخطا: ' + result[0].error);
+      }
+      
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    // هدیه به کاربران
+    if (session.flow === 'admin_gift' && session.step === 'waiting_user_ids') {
+      if (!isAdmin(ctx.from.id)) return next();
+      
+      const ids = ctx.message.text.split('-').map(id => id.trim());
+      const validUsers = [];
+      
+      for (const id of ids) {
+        const user = await getUserById(id);
+        if (user) {
+          validUsers.push(id);
+        }
+      }
+      
+      if (validUsers.length === 0) {
+        ctx.reply('❌ هیچ کاربر معتبری پیدا نشد. لطفاً دوباره آیدی‌ها رو با `-` جدا کنید:');
+        return;
+      }
+      
+      session.data = { userIds: validUsers };
+      session.step = 'waiting_amount';
+      ctx.reply(
+        '✅ ' + validUsers.length + ' کاربر معتبر پیدا شد:\n' +
+        validUsers.map(id => '• ' + id).join('\n') + '\n\n' +
+        '💰 مبلغ هدیه به **هر کاربر** رو به تومان وارد کنید:'
+      );
+      return;
+    }
+
+    if (session.flow === 'admin_gift' && session.step === 'waiting_amount') {
+      if (!isAdmin(ctx.from.id)) return next();
+      
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      
+      if (!amount || amount <= 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر از ۰) وارد کنید:');
+        return;
+      }
+      
+      const userIds = session.data.userIds;
+      let successCount = 0;
+      
+      for (const id of userIds) {
+        try {
+          await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, id]);
+          successCount++;
+        } catch (e) {
+          console.log('خطا در هدیه به ' + id + ': ' + e.message);
+        }
+      }
+      
+      ctx.reply(
+        '✅ **هدیه با موفقیت انجام شد!**\n\n' +
+        '👥 تعداد کاربران: ' + userIds.length + '\n' +
+        '✅ موفق: ' + successCount + '\n' +
+        '💰 مبلغ هر هدیه: ' + Number(amount).toLocaleString('en-US') + ' تومان\n' +
+        '💸 مجموع: ' + Number(amount * successCount).toLocaleString('en-US') + ' تومان'
+      );
+      
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    // ===== بقیه موارد قبلی =====
+    
     if (session.flow === 'admin_deliver_code' && session.step === 'waiting_code') {
       if (!isAdmin(ctx.from.id)) return next();
 
