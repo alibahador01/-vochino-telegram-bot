@@ -1,5 +1,5 @@
 const texts = require('../texts');
-const { sessions, sendTracked, fillTemplate, generateTrackingCode } = require('../utils');
+const { sessions, sendTracked, fillTemplate, generateTrackingCode, generateVoucherTrackingCode } = require('../utils');
 const { pool, getUser, getUsdRate, grantBonusIfEligible } = require('../db');
 const { BONUS_THRESHOLD, BONUS_AMOUNT } = require('../constants');
 const PricingEngine = require('../pricingEngine');
@@ -47,14 +47,12 @@ module.exports = function registerBuyHandlers(bot) {
 
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    // دریافت درصد سود از دیتابیس
     const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
     const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
     
     const modeRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'");
     const mode = modeRes.rows[0] ? modeRes.rows[0].value : 'MANUAL';
 
-    // محاسبه با PricingEngine
     const pricingResult = PricingEngine.calculate({
       actionType: 'BUY',
       baseAmount: amount,
@@ -86,6 +84,10 @@ module.exports = function registerBuyHandlers(bot) {
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = generateTrackingCode();
+    const voucherTrackingCode = generateVoucherTrackingCode();
+    
+    // کد مرجع ساختگی از صرافی (در آینده از API واقعی میاد)
+    const providerTxId = 'TX_' + Math.floor(10000000 + Math.random() * 90000000);
 
     let orderStatus;
     if (mode === 'MANUAL' || session.data.manualDelivery === 1) {
@@ -95,12 +97,33 @@ module.exports = function registerBuyHandlers(bot) {
     }
 
     await pool.query(
-      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [String(ctx.from.id), session.data.productType, finalAmount, marginAmount, orderStatus, new Date().toISOString(), trackingCode]
+      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code, provider_tx_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [String(ctx.from.id), session.data.productType, finalAmount, marginAmount, orderStatus, new Date().toISOString(), trackingCode, providerTxId]
     );
 
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
     const newBalance = newBalanceRes.rows[0].balance;
+
+    // محاسبه مقدار ووچر بر اساس نرخ دلار
+    const rate = await getUsdRate();
+    const voucherAmount = (finalAmount / rate).toFixed(2);
+
+    // کد ووچر ساختگی (در آینده از API واقعی میاد)
+    const voucherCode = 'VCH-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+    // ===== رسید نهایی =====
+    const receiptText = 
+      '🧾 **رسید تراکنش موفق - ربات ووچینو⁰¹**\n\n' +
+      'با تشکر، سفارش شما با موفقیت انجام شد!\n\n' +
+      '📌 **نوع تراکنش:** خرید ووچر دلار\n' +
+      '💰 **مبلغ پرداختی:** ' + finalAmount.toLocaleString('en-US') + ' تومان\n' +
+      '💵 **مقدار ووچر:** ' + voucherAmount + ' دلار\n\n' +
+      '🔢 **کد پیگیری ووچینو:** #VCH_' + voucherTrackingCode + '\n' +
+      '🏛 **کد مرجع شبکه (صرافی):** ' + providerTxId + '\n\n' +
+      '🎟 **کد ووچر شما:**\n`' + voucherCode + '`\n\n' +
+      '⏱ **تاریخ و ساعت:** ' + new Date().toLocaleString('fa-IR') + '\n' +
+      '----------------------------------\n' +
+      '💡 کد ووچر را در جای امن نگهداری کنید.';
 
     delete sessions[ctx.from.id];
 
@@ -112,6 +135,8 @@ module.exports = function registerBuyHandlers(bot) {
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
+      // رسید رو هم جدا میفرستیم
+      ctx.reply(receiptText, { parse_mode: 'Markdown' });
     } else {
       ctx.reply(fillTemplate(t.buySuccess, {
         product: session.data.productLabel,
@@ -119,6 +144,7 @@ module.exports = function registerBuyHandlers(bot) {
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
+      ctx.reply(receiptText, { parse_mode: 'Markdown' });
     }
 
     await grantBonusIfEligible(ctx.from.id, BONUS_THRESHOLD, BONUS_AMOUNT);
@@ -222,11 +248,9 @@ module.exports = function registerBuyHandlers(bot) {
     session.data.amount = amount;
     session.step = 'waiting_confirm';
 
-    // دریافت درصد سود از دیتابیس
     const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
     const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
 
-    // محاسبه با PricingEngine
     const pricingResult = PricingEngine.calculate({
       actionType: 'BUY',
       baseAmount: amount,
