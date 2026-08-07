@@ -257,6 +257,11 @@ async function initDb() {
     await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['usd_rate', String(DEFAULT_USD_RATE)]);
   }
 
+  await pool.query("INSERT INTO settings (key, value) VALUES ('buy_margin', '10') ON CONFLICT (key) DO NOTHING");
+  await pool.query("INSERT INTO settings (key, value) VALUES ('sell_margin', '10') ON CONFLICT (key) DO NOTHING");
+  await pool.query("INSERT INTO settings (key, value) VALUES ('buy_mode', 'MANUAL') ON CONFLICT (key) DO NOTHING");
+  await pool.query("INSERT INTO settings (key, value) VALUES ('sell_mode', 'MANUAL') ON CONFLICT (key) DO NOTHING");
+
   const existingChannelRes = await pool.query('SELECT * FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
   if (existingChannelRes.rows.length === 0) {
     await pool.query(
