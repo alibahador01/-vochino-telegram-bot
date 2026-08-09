@@ -5,13 +5,11 @@ const https = require('https');
 const { pool, initDb, sendRatesToChannel } = require('./db');
 const { ADMIN_IDS } = require('./constants');
 
-// ===== Express Server =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 app.listen(PORT, () => { console.log('Web server is running on port ' + PORT); });
 
-// ===== سیستم ضدخواب =====
 setInterval(() => {
   const url = 'https://vochino-telegram-bot.onrender.com';
   https.get(url, (res) => {
@@ -26,10 +24,8 @@ setInterval(async () => {
   } catch (err) {}
 }, 3 * 60 * 1000);
 
-// ===== ربات =====
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ===== هندلرها =====
 require('./handlers/registration')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
@@ -37,8 +33,10 @@ require('./handlers/sell')(bot);
 require('./handlers/game')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/misc')(bot);
+require('./handlers/profile')(bot);
+require('./handlers/vpn')(bot);
+require('./handlers/currencyFeed')(bot);
 
-// ===== مدیریت خطا =====
 process.on('unhandledRejection', (err) => {
   console.log('UNHANDLED REJECTION: ' + (err && err.message ? err.message : err));
 });
@@ -59,12 +57,14 @@ bot.catch((err, ctx) => {
   } catch (e) {}
 });
 
-// ===== شروع =====
 async function init() {
   await initDb();
   
   try {
-    await sendRatesToChannel(bot);
+    const isFeedActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
+    if (isFeedActive.rows.length > 0 && isFeedActive.rows[0].value === 'true') {
+        await sendRatesToChannel(bot);
+    }
   } catch (e) {
     console.log('خطا در ارسال نرخ: ' + e.message);
   }
