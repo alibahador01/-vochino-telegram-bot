@@ -1,1 +1,318 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ووچینو - پنل اشتراک VPN</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Vazir', Tahoma, Arial, sans-serif;
+        }
+        body {
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border-radius: 30px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo h1 {
+            color: #fff;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .logo span {
+            color: #f7971e;
+        }
+        .user-info {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .user-info p {
+            color: #ccc;
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        .user-info strong {
+            color: #fff;
+        }
+        .status-card {
+            background: linear-gradient(135deg, rgba(247, 151, 30, 0.15), rgba(255, 200, 0, 0.05));
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(247, 151, 30, 0.2);
+        }
+        .status-card h3 {
+            color: #f7971e;
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            color: #ddd;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .status-item:last-child {
+            border-bottom: none;
+        }
+        .status-item .label {
+            color: #999;
+        }
+        .status-item .value {
+            color: #fff;
+            font-weight: 600;
+        }
+        .value.active {
+            color: #4caf50;
+        }
+        .value.warning {
+            color: #f7971e;
+        }
+        .value.danger {
+            color: #f44336;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            margin: 10px 0;
+            transition: all 0.3s ease;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #f7971e, #ffd200);
+            color: #1a1a2e;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(247, 151, 30, 0.3);
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .btn-outline {
+            background: transparent;
+            color: #f7971e;
+            border: 2px solid #f7971e;
+        }
+        .btn-outline:hover {
+            background: #f7971e;
+            color: #1a1a2e;
+        }
+        .banner {
+            background: linear-gradient(135deg, rgba(247, 151, 30, 0.1), rgba(255, 200, 0, 0.05));
+            border-radius: 12px;
+            padding: 15px;
+            margin: 15px 0;
+            border: 1px solid rgba(247, 151, 30, 0.15);
+            text-align: center;
+        }
+        .banner p {
+            color: #ddd;
+            font-size: 13px;
+            line-height: 1.8;
+        }
+        .banner strong {
+            color: #f7971e;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .stat-box {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+        }
+        .stat-box .number {
+            color: #f7971e;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .stat-box .label {
+            color: #999;
+            font-size: 12px;
+        }
+        .qr-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .qr-container img {
+            width: 150px;
+            height: 150px;
+            border-radius: 10px;
+            border: 2px solid rgba(247, 151, 30, 0.3);
+            padding: 5px;
+            background: #fff;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 25px;
+            color: #666;
+            font-size: 12px;
+        }
+        .footer a {
+            color: #f7971e;
+            text-decoration: none;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #f7971e);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+            }
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>⚜️ <span>ووچینو</span>⁰¹</h1>
+            <p style="color: #666; font-size: 14px;">مرجع تخصصی معاملات ووچر</p>
+        </div>
 
+        <div class="user-info">
+            <p>👤 <strong><%= user.full_name || 'کاربر' %></strong></p>
+            <p>🆔 <strong style="font-family: monospace; color: #f7971e;"><%= user.telegram_id %></strong></p>
+            <p>📱 <strong><%= user.phone || 'ثبت نشده' %></strong></p>
+        </div>
+
+        <div class="status-card">
+            <h3>🌐 وضعیت اشتراک VPN</h3>
+            
+            <% if (subscription && daysLeft > 0) { %>
+                <div class="status-item">
+                    <span class="label">📅 روزهای باقی‌مانده</span>
+                    <span class="value <%= daysLeft > 10 ? 'active' : daysLeft > 5 ? 'warning' : 'danger' %>">
+                        <%= daysLeft %> روز
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="label">📊 حجم مصرفی</span>
+                    <span class="value">
+                        <%= (dataUsed / (1024 * 1024)).toFixed(2) %> / <%= (dataLimit / (1024 * 1024 * 1024)).toFixed(0) %> GB
+                    </span>
+                </div>
+                <div class="progress-bar">
+                    <div class="fill" style="width: <%= Math.min((dataUsed / dataLimit) * 100, 100) %>%"></div>
+                </div>
+                <div class="status-item" style="margin-top: 10px;">
+                    <span class="label">🆔 کد پیگیری</span>
+                    <span class="value" style="font-family: monospace; font-size: 12px;"><%= subscription.tracking_code %></span>
+                </div>
+            <% } else { %>
+                <div class="status-item">
+                    <span class="label">وضعیت</span>
+                    <span class="value danger">❌ سرویس فعالی یافت نشد</span>
+                </div>
+                <div style="margin-top: 15px; text-align: center;">
+                    <a href="https://t.me/Vochino01_bot" class="btn btn-primary" style="display: inline-block; width: auto; padding: 10px 30px;">
+                        🛒 دریافت سرویس از ربات
+                    </a>
+                </div>
+            <% } %>
+        </div>
+
+        <div class="qr-container">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<%= baseUrl %>/sub/<%= user.telegram_id %>" alt="QR Code">
+            <p style="color: #999; font-size: 12px; margin-top: 8px;">🔗 لینک اشتراک خود را اسکن کنید</p>
+        </div>
+
+        <div style="text-align: center; margin: 10px 0;">
+            <p style="color: #666; font-size: 13px; word-break: break-all;">
+                <code style="background: rgba(255,255,255,0.05); padding: 5px 10px; border-radius: 5px; color: #f7971e;">
+                    <%= baseUrl %>/sub/<%= user.telegram_id %>
+                </code>
+            </p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="number"><%= totalUsers %></div>
+                <div class="label">👥 کاربران</div>
+            </div>
+            <div class="stat-box">
+                <div class="number"><%= activeOrders %></div>
+                <div class="label">🛒 خرید هفته</div>
+            </div>
+        </div>
+
+        <div class="banner">
+            <p>
+                💰 <strong>خرید و فروش ووچر</strong> با بهترین نرخ روز<br>
+                🔥 <strong>اشتراک VPN اختصاصی</strong> با سرعت بالا
+            </p>
+        </div>
+
+        <a href="https://t.me/Vochino01_bot" class="btn btn-primary">
+            🚀 ورود به ربات ووچینو
+        </a>
+
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <a href="https://t.me/Vochino01_bot?start=buy" class="btn btn-secondary" style="flex: 1;">
+                🛍 خرید ووچر
+            </a>
+            <a href="https://t.me/Vochino01_bot?start=vpn" class="btn btn-secondary" style="flex: 1;">
+                🌐 خرید VPN
+            </a>
+        </div>
+
+        <div class="footer">
+            ⚜️ ووچینو⁰¹ | مرجع تخصصی معاملات ووچر<br>
+            <a href="https://t.me/Vochino01_bot">@Vochino01_bot</a>
+        </div>
+    </div>
+</body>
+</html>
