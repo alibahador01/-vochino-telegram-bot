@@ -1,7 +1,6 @@
 const texts = require('../texts');
-const { sessions, sendTracked, generateTrackingCode } = require('../utils');
-const { pool, getUser, checkMembership } = require('../db');
-const QRCode = require('qrcode');
+const { sessions, generateTrackingCode } = require('../utils');
+const { pool, checkMembership } = require('../db');
 
 module.exports = function registerVPNHandlers(bot) {
 
@@ -73,7 +72,6 @@ module.exports = function registerVPNHandlers(bot) {
     );
 
     const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + ctx.from.id;
-    const qrBuffer = await QRCode.toBuffer(subUrl);
 
     const caption =
       '🎉 **تبریک! سرویس VPN رایگان شما فعال شد.**\n\n' +
@@ -82,12 +80,9 @@ module.exports = function registerVPNHandlers(bot) {
       '🔗 **لینک سابسکرایب:**\n`' + subUrl + '`\n\n' +
       '📅 **مدت اعتبار:** ۳۰ روز\n' +
       '📊 **حجم:** ۵ گیگابایت\n\n' +
-      '✅ QR Code زیر را اسکن کنید یا از لینک استفاده کنید.';
+      '✅ لینک زیر را کپی کنید یا از دکمه‌های مدیریت استفاده کنید.';
 
-    await ctx.replyWithPhoto(
-      { source: qrBuffer },
-      { caption: caption, parse_mode: 'Markdown' }
-    );
+    ctx.reply(caption, { parse_mode: 'Markdown' });
 
     ctx.reply(
       '🌐 **سرویس VPN شما فعال شد.**\n\n' +
@@ -108,12 +103,7 @@ module.exports = function registerVPNHandlers(bot) {
   bot.action('vpn_qr', async (ctx) => {
     ctx.answerCbQuery();
     const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + ctx.from.id;
-    const qrBuffer = await QRCode.toBuffer(subUrl);
-
-    await ctx.replyWithPhoto(
-      { source: qrBuffer },
-      { caption: '🔗 لینک سابسکرایب شما:\n`' + subUrl + '`', parse_mode: 'Markdown' }
-    );
+    ctx.reply('🔗 لینک سابسکرایب شما:\n`' + subUrl + '`\n\nبرای دریافت QR Code از لینک‌های زیر استفاده کنید:', { parse_mode: 'Markdown' });
   });
 
   bot.action('vpn_status', async (ctx) => {
