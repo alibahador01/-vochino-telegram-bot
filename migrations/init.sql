@@ -1,3 +1,6 @@
+-- ============================================
+-- جدول کاربران
+-- ============================================
 CREATE TABLE IF NOT EXISTS users (
     telegram_id TEXT PRIMARY KEY,
     phone TEXT,
@@ -14,6 +17,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_blocked BOOLEAN DEFAULT FALSE
 );
 
+-- ============================================
+-- جدول کارت‌های بانکی
+-- ============================================
 CREATE TABLE IF NOT EXISTS cards (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -21,6 +27,9 @@ CREATE TABLE IF NOT EXISTS cards (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول درخواست‌های کیف پول
+-- ============================================
 CREATE TABLE IF NOT EXISTS wallet_requests (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -34,22 +43,31 @@ CREATE TABLE IF NOT EXISTS wallet_requests (
     tracking_code TEXT UNIQUE
 );
 
+-- ============================================
+-- جدول کانال‌های اجباری
+-- ============================================
 CREATE TABLE IF NOT EXISTS required_channels (
     id SERIAL PRIMARY KEY,
     chat_id TEXT UNIQUE,
     invite_link TEXT,
     title TEXT,
-    active BOOLEAN DEFAULT TRUE,
-    force_join_enabled BOOLEAN DEFAULT TRUE,
+    active INTEGER DEFAULT 1,
+    force_join_enabled INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول تنظیمات
+-- ============================================
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول بونوس‌ها
+-- ============================================
 CREATE TABLE IF NOT EXISTS bonuses (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -59,6 +77,9 @@ CREATE TABLE IF NOT EXISTS bonuses (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول سفارشات خرید
+-- ============================================
 CREATE TABLE IF NOT EXISTS orders (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -73,6 +94,9 @@ CREATE TABLE IF NOT EXISTS orders (
     voucher_code TEXT
 );
 
+-- ============================================
+-- جدول محصولات خرید
+-- ============================================
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     key TEXT UNIQUE,
@@ -82,13 +106,16 @@ CREATE TABLE IF NOT EXISTS products (
     price_type TEXT CHECK (price_type IN ('usd', 'toman', 'crypto')),
     commission_type TEXT DEFAULT 'none',
     commission_value NUMERIC DEFAULT 0,
-    manual_delivery BOOLEAN DEFAULT TRUE,
-    active BOOLEAN DEFAULT TRUE,
-    hidden BOOLEAN DEFAULT FALSE,
+    manual_delivery INTEGER DEFAULT 1,
+    active INTEGER DEFAULT 1,
+    hidden INTEGER DEFAULT 0,
     api_source_id INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول محصولات فروش
+-- ============================================
 CREATE TABLE IF NOT EXISTS sell_products (
     id SERIAL PRIMARY KEY,
     key TEXT UNIQUE,
@@ -97,11 +124,14 @@ CREATE TABLE IF NOT EXISTS sell_products (
     sample_code TEXT,
     commission_type TEXT DEFAULT 'none',
     commission_value NUMERIC DEFAULT 0,
-    active BOOLEAN DEFAULT TRUE,
+    active INTEGER DEFAULT 1,
     api_source_id INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول سفارشات فروش
+-- ============================================
 CREATE TABLE IF NOT EXISTS sell_orders (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -113,6 +143,9 @@ CREATE TABLE IF NOT EXISTS sell_orders (
     tracking_code TEXT UNIQUE
 );
 
+-- ============================================
+-- جدول منابع API (صرافی‌ها)
+-- ============================================
 CREATE TABLE IF NOT EXISTS api_sources (
     id SERIAL PRIMARY KEY,
     name TEXT,
@@ -121,13 +154,16 @@ CREATE TABLE IF NOT EXISTS api_sources (
     api_key TEXT,
     secret_key TEXT,
     supports_products TEXT[],
-    is_active BOOLEAN DEFAULT TRUE,
-    is_multi BOOLEAN DEFAULT FALSE,
+    is_active INTEGER DEFAULT 1,
+    is_multi INTEGER DEFAULT 0,
     priority INTEGER DEFAULT 1,
     ip_slot TEXT DEFAULT 'default',
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول کدهای تخفیف و هدیه
+-- ============================================
 CREATE TABLE IF NOT EXISTS coupons (
     id SERIAL PRIMARY KEY,
     code TEXT UNIQUE,
@@ -136,10 +172,13 @@ CREATE TABLE IF NOT EXISTS coupons (
     usage_limit INTEGER DEFAULT 1,
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMP,
-    active BOOLEAN DEFAULT TRUE,
+    active INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول تیکت‌های پشتیبانی
+-- ============================================
 CREATE TABLE IF NOT EXISTS tickets (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -151,6 +190,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- جدول لاگ تراکنش‌ها
+-- ============================================
 CREATE TABLE IF NOT EXISTS transaction_logs (
     id SERIAL PRIMARY KEY,
     telegram_id TEXT REFERENCES users(telegram_id),
@@ -163,6 +205,9 @@ CREATE TABLE IF NOT EXISTS transaction_logs (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ============================================
+-- تنظیمات اولیه
+-- ============================================
 INSERT INTO settings (key, value) VALUES 
     ('usd_rate', '60000'),
     ('start_reaction', '🎉'),
@@ -177,17 +222,26 @@ INSERT INTO settings (key, value) VALUES
     ('force_join_enabled', 'true')
 ON CONFLICT (key) DO NOTHING;
 
+-- ============================================
+-- کانال پیش‌فرض
+-- ============================================
 INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
-VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', TRUE, TRUE)
+VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)
 ON CONFLICT (chat_id) DO NOTHING;
 
+-- ============================================
+-- محصولات پیش‌فرض خرید
+-- ============================================
 INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES 
-    ('voucher', '🎟 یوووچر', 1, 'usd', TRUE, NOW()),
-    ('hotvoucher', '🎟 هات ووچر', 50000, 'toman', TRUE, NOW())
+    ('voucher', '🎟 یوووچر', 1, 'usd', 1, NOW()),
+    ('hotvoucher', '🎟 هات ووچر', 50000, 'toman', 1, NOW())
 ON CONFLICT (key) DO NOTHING;
 
+-- ============================================
+-- محصولات پیش‌فرض فروش
+-- ============================================
 INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES 
-    ('uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', TRUE, NOW()),
-    ('premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', TRUE, NOW()),
-    ('psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', TRUE, NOW())
+    ('uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', 1, NOW()),
+    ('premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', 1, NOW()),
+    ('psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', 1, NOW())
 ON CONFLICT (key) DO NOTHING;
