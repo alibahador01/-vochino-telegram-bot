@@ -49,7 +49,18 @@ const DELIVERY_TYPES = {
 
 const PRICE_TYPES = {
   USD: 'usd',
-  TOMAN: 'toman'
+  TOMAN: 'toman',
+  CRYPTO: 'crypto'
+};
+
+const GAME_TYPES = {
+  DICE: 'dice',
+  BASKETBALL: 'basketball',
+  DARTS: 'darts',
+  BOWLING: 'bowling',
+  FOOTBALL: 'football',
+  RPS: 'rock_paper_scissors',
+  SPIN: 'spin'
 };
 
 module.exports = {
@@ -66,5 +77,6 @@ module.exports = {
   mainMenuButtons,
   BROADCAST_SETTINGS,
   DELIVERY_TYPES,
-  PRICE_TYPES
+  PRICE_TYPES,
+  GAME_TYPES
 };
