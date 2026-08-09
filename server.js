@@ -5,16 +5,12 @@ const { pool } = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// تنظیمات
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ============================================
-// صفحه اصلی - سابسکرایب VPN
-// ============================================
 app.get('/sub/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -24,7 +20,6 @@ app.get('/sub/:userId', async (req, res) => {
       return res.status(404).send('کاربر یافت نشد.');
     }
 
-    // اطلاعات سرویس VPN از جدول vpn_subscriptions
     const vpnService = await pool.query(
       'SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 1',
       [userId, 'active']
@@ -33,19 +28,17 @@ app.get('/sub/:userId', async (req, res) => {
     let subscriptionData = null;
     let daysLeft = 0;
     let dataUsed = 0;
-    let dataLimit = 5 * 1024 * 1024 * 1024; // 5 گیگابایت
+    let dataLimit = 5 * 1024 * 1024 * 1024;
 
     if (vpnService.rows[0]) {
       const sub = vpnService.rows[0];
       const now = new Date();
       const expiry = new Date(sub.expires_at);
       daysLeft = Math.max(0, Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)));
-      // ساده‌سازی: فرض می‌کنیم مصرف به‌روزرسانی می‌شود
       dataUsed = sub.data_used || 0;
       subscriptionData = sub;
     }
 
-    // آمار برای نمایش بنرها
     const totalUsers = await pool.query('SELECT COUNT(*) AS count FROM users');
     const activeOrders = await pool.query("SELECT COUNT(*) AS count FROM orders WHERE status = 'completed' AND created_at > NOW() - INTERVAL '7 days'");
 
@@ -65,9 +58,6 @@ app.get('/sub/:userId', async (req, res) => {
   }
 });
 
-// ============================================
-// API برای استعلام وضعیت اشتراک (برای ربات)
-// ============================================
 app.get('/api/vpn/status/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -100,9 +90,6 @@ app.get('/api/vpn/status/:userId', async (req, res) => {
   }
 });
 
-// ============================================
-// Webhook برای به‌روزرسانی مصرف VPN (از پنل)
-// ============================================
 app.post('/api/vpn/update', async (req, res) => {
   try {
     const { userId, dataUsed } = req.body;
@@ -121,10 +108,9 @@ app.post('/api/vpn/update', async (req, res) => {
   }
 });
 
-// شروع سرور
 app.listen(PORT, () => {
-  console.log(`🌐 Web server running on port ${PORT}`);
-  console.log(`📌 Subscription page: ${process.env.BASE_URL || 'http://localhost:' + PORT}/sub/{USER_ID}`);
+  console.log('🌐 Web server running on port ' + PORT);
+  console.log('📌 Subscription page: ' + (process.env.BASE_URL || 'http://localhost:' + PORT) + '/sub/{USER_ID}');
 });
 
 module.exports = app;
