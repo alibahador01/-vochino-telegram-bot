@@ -22,18 +22,6 @@ async function createUser(telegramId, phone, fullName, cardNumber, language = 'f
     'INSERT INTO users (telegram_id, phone, full_name, card_number, language, referrer_id, registered_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *',
     [String(telegramId), phone, fullName, cardNumber, language, referrerId]
   );
-  
-  // اگر کاربر با کد معرف ثبت شده، هدیه بده
-  if (referrerId) {
-    const referralBonus = await getSetting('referral_bonus', 5000);
-    const referralEnabled = await getSetting('referral_enabled', 'true');
-    
-    if (referralEnabled === 'true') {
-      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [referralBonus, referrerId]);
-      await logTransaction(referrerId, 'bonus', referralBonus, 'هدیه معرفی کاربر جدید');
-    }
-  }
-  
   return res.rows[0];
 }
 
@@ -409,16 +397,12 @@ async function sendRatesToChannel(bot) {
 
 // ===== مقداردهی اولیه دیتابیس =====
 async function initDb() {
-  // تمام جدول‌ها با اسکیمای بالا ایجاد میشن
-  // کد کامل در فایل migrations/init.sql موجود است
-  
   console.log('✅ دیتابیس با موفقیت مقداردهی اولیه شد');
 }
 
 module.exports = {
   pool,
   
-  // کاربران
   getUser,
   getUserById,
   createUser,
@@ -427,63 +411,52 @@ module.exports = {
   getReferrals,
   getUserStats,
   
-  // کارت‌ها
   getUserCards,
   
-  // کانال‌ها
   getRequiredChannels,
   updateChannel,
   addChannel,
   deleteChannel,
   checkMembership,
   
-  // بونوس
   getUserTotalPurchases,
   getActiveBonus,
   grantBonusIfEligible,
   
-  // تنظیمات
   getSetting,
   setSetting,
   getUsdRate,
   
-  // API
   getApiSources,
   getApiSourceById,
   addApiSource,
   updateApiSource,
   deleteApiSource,
   
-  // محصولات خرید
   getProducts,
   getProductByKey,
   addProduct,
   updateProduct,
   deleteProduct,
   
-  // محصولات فروش
   getSellProducts,
   getSellProductByKey,
   addSellProduct,
   updateSellProduct,
   deleteSellProduct,
   
-  // کوپن‌ها
   getCoupon,
   useCoupon,
   addCoupon,
   deleteCoupon,
   
-  // تیکت‌ها
   getTickets,
   addTicket,
   updateTicket,
   
-  // لاگ
   logTransaction,
   getTransactionLogs,
   
-  // ارسال نرخ
   sendRatesToChannel,
   
   initDb
