@@ -9,14 +9,12 @@ module.exports = function registerVPNHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    // بررسی عضویت در کانال اجباری
     const isMember = await checkMembership(ctx);
     if (!isMember) {
       ctx.reply('⚠️ لطفاً ابتدا در کانال اجباری عضو شوید.');
       return;
     }
 
-    // بررسی سرویس فعال
     const activeService = await pool.query(
       "SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active' AND expires_at > NOW()",
       [String(ctx.from.id)]
@@ -26,7 +24,7 @@ module.exports = function registerVPNHandlers(bot) {
       const service = activeService.rows[0];
       const daysLeft = Math.ceil((new Date(service.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
       const dataUsed = service.data_used || 0;
-      const dataLimit = 5 * 1024 * 1024 * 1024; // 5GB
+      const dataLimit = 5 * 1024 * 1024 * 1024;
 
       ctx.reply(
         '🌐 **سرویس VPN فعال شما**\n\n' +
@@ -48,7 +46,6 @@ module.exports = function registerVPNHandlers(bot) {
       return;
     }
 
-    // سرویس جدید
     const canGetFree = await pool.query(
       "SELECT COUNT(*) AS count FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active'",
       [String(ctx.from.id)]
@@ -66,7 +63,6 @@ module.exports = function registerVPNHandlers(bot) {
       return;
     }
 
-    // دریافت سرویس رایگان جدید
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);
 
@@ -76,7 +72,6 @@ module.exports = function registerVPNHandlers(bot) {
       [String(ctx.from.id), 'active', expiryDate.toISOString(), 5 * 1024 * 1024 * 1024, trackingCode]
     );
 
-    // ارسال QR Code
     const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + ctx.from.id;
     const qrBuffer = await QRCode.toBuffer(subUrl);
 
