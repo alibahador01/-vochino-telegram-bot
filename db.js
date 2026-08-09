@@ -356,6 +356,7 @@ async function sendRatesToChannel(bot) {
   if (channels.length === 0) return;
   
   const products = await getProducts(true);
+  const sellProducts = await getSellProducts(true);
   const rate = await getUsdRate();
   
   let message = '📊 **نرخ‌های امروز ووچینو⁰¹**\n\n';
@@ -370,7 +371,6 @@ async function sendRatesToChannel(bot) {
   }
   
   message += '\n🔄 **محصولات قابل فروش:**\n';
-  const sellProducts = await getSellProducts(true);
   for (const product of sellProducts) {
     message += '• ' + product.name + ': ' + Number(product.unit_price).toLocaleString('en-US') + ' تومان\n';
   }
