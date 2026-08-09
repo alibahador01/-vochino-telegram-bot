@@ -6,6 +6,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// ===== توابع کاربر =====
 async function getUser(telegramId) {
   const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
   return res.rows[0] || null;
@@ -16,6 +17,37 @@ async function getUserById(telegramId) {
   return res.rows[0] || null;
 }
 
+async function createUser(telegramId, phone, fullName, cardNumber, language = 'fa', referrerId = null) {
+  const res = await pool.query(
+    'INSERT INTO users (telegram_id, phone, full_name, card_number, language, referrer_id, registered_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *',
+    [String(telegramId), phone, fullName, cardNumber, language, referrerId]
+  );
+  
+  // اگر کاربر با کد معرف ثبت شده، هدیه بده
+  if (referrerId) {
+    const referralBonus = await getSetting('referral_bonus', 5000);
+    const referralEnabled = await getSetting('referral_enabled', 'true');
+    
+    if (referralEnabled === 'true') {
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [referralBonus, referrerId]);
+      await logTransaction(referrerId, 'bonus', referralBonus, 'هدیه معرفی کاربر جدید');
+    }
+  }
+  
+  return res.rows[0];
+}
+
+async function updateUser(telegramId, data) {
+  const fields = Object.keys(data).map((key, i) => `${key} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE users SET ${fields.join(', ')} WHERE telegram_id = $1 RETURNING *`,
+    [String(telegramId), ...values]
+  );
+  return res.rows[0] || null;
+}
+
+// ===== توابع کارت =====
 async function getUserCards(telegramId) {
   const user = await getUser(telegramId);
   const extraRes = await pool.query('SELECT * FROM cards WHERE telegram_id = $1', [String(telegramId)]);
@@ -23,14 +55,45 @@ async function getUserCards(telegramId) {
   if (user && user.card_number) {
     list.push({ card_number: user.card_number });
   }
-  extraRes.rows.forEach(function (c) { list.push({ card_number: c.card_number }); });
+  extraRes.rows.forEach(c => list.push({ card_number: c.card_number }));
   return list;
 }
 
+// ===== توابع کانال =====
+async function getRequiredChannels() {
+  const res = await pool.query('SELECT * FROM required_channels WHERE active = TRUE');
+  return res.rows;
+}
+
+async function updateChannel(chatId, data) {
+  const fields = Object.keys(data).map((key, i) => `${key} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE required_channels SET ${fields.join(', ')} WHERE chat_id = $1 RETURNING *`,
+    [chatId, ...values]
+  );
+  return res.rows[0] || null;
+}
+
+async function addChannel(chatId, inviteLink, title) {
+  const res = await pool.query(
+    'INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) VALUES ($1, $2, $3, TRUE, TRUE) RETURNING *',
+    [chatId, inviteLink, title]
+  );
+  return res.rows[0];
+}
+
+async function deleteChannel(chatId) {
+  await pool.query('DELETE FROM required_channels WHERE chat_id = $1', [chatId]);
+}
+
 async function checkMembership(ctx) {
-  const channelsRes = await pool.query('SELECT * FROM required_channels WHERE active = 1');
-  const channels = channelsRes.rows;
+  const forceJoinEnabled = await getSetting('force_join_enabled', 'true');
+  if (forceJoinEnabled !== 'true') return true;
+  
+  const channels = await getRequiredChannels();
   if (channels.length === 0) return true;
+  
   for (const channel of channels) {
     try {
       const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
@@ -45,6 +108,7 @@ async function checkMembership(ctx) {
   return true;
 }
 
+// ===== توابع بونوس و خرید =====
 async function getUserTotalPurchases(telegramId) {
   const res = await pool.query(
     "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status IN ('completed', 'pending_delivery')",
@@ -64,24 +128,145 @@ async function getActiveBonus(telegramId) {
 async function grantBonusIfEligible(telegramId, BONUS_THRESHOLD, BONUS_AMOUNT) {
   const total = await getUserTotalPurchases(telegramId);
   if (total < BONUS_THRESHOLD) return;
-  const existing = await pool.query(
-    'SELECT * FROM bonuses WHERE telegram_id = $1',
-    [String(telegramId)]
-  );
+  
+  const existing = await pool.query('SELECT * FROM bonuses WHERE telegram_id = $1', [String(telegramId)]);
   if (existing.rows.length > 0) return;
+  
   await pool.query(
-    'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, $4)',
-    [String(telegramId), 'available', BONUS_AMOUNT, new Date().toISOString()]
+    'INSERT INTO bonuses (telegram_id, status, amount, created_at) VALUES ($1, $2, $3, NOW())',
+    [String(telegramId), 'available', BONUS_AMOUNT]
+  );
+}
+
+// ===== توابع تنظیمات =====
+async function getSetting(key, defaultValue = null) {
+  const res = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+  return res.rows[0] ? res.rows[0].value : defaultValue;
+}
+
+async function setSetting(key, value) {
+  await pool.query(
+    'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
+    [key, value]
   );
 }
 
 async function getUsdRate() {
-  const res = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
-  return res.rows[0] ? Number(res.rows[0].value) : DEFAULT_USD_RATE;
+  const rate = await getSetting('usd_rate', DEFAULT_USD_RATE);
+  return Number(rate);
 }
 
+// ===== توابع API و محصولات =====
+async function getApiSources() {
+  const res = await pool.query('SELECT * FROM api_sources WHERE is_active = TRUE ORDER BY priority ASC');
+  return res.rows;
+}
+
+async function getApiSourceById(id) {
+  const res = await pool.query('SELECT * FROM api_sources WHERE id = $1', [id]);
+  return res.rows[0] || null;
+}
+
+async function addApiSource(data) {
+  const { name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot } = data;
+  const res = await pool.query(
+    'INSERT INTO api_sources (name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot, is_active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, NOW()) RETURNING *',
+    [name, type, base_url, api_key, secret_key, supports_products, is_multi || false, priority || 1, ip_slot || 'default']
+  );
+  return res.rows[0];
+}
+
+async function updateApiSource(id, data) {
+  const fields = Object.keys(data).map((key, i) => `${key} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE api_sources SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+    [id, ...values]
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteApiSource(id) {
+  await pool.query('UPDATE api_sources SET is_active = FALSE WHERE id = $1', [id]);
+}
+
+// ===== توابع محصولات =====
+async function getProducts(activeOnly = true) {
+  let query = 'SELECT * FROM products WHERE hidden = FALSE';
+  if (activeOnly) query += ' AND active = TRUE';
+  query += ' ORDER BY id ASC';
+  const res = await pool.query(query);
+  return res.rows;
+}
+
+async function getProductByKey(key) {
+  const res = await pool.query('SELECT * FROM products WHERE key = $1', [key]);
+  return res.rows[0] || null;
+}
+
+async function addProduct(data) {
+  const { key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id } = data;
+  const res = await pool.query(
+    'INSERT INTO products (key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, NOW()) RETURNING *',
+    [key, name, min_amount, max_amount || 0, price_type, commission_type || 'none', commission_value || 0, manual_delivery !== undefined ? manual_delivery : true, api_source_id || null]
+  );
+  return res.rows[0];
+}
+
+async function updateProduct(key, data) {
+  const fields = Object.keys(data).map((field, i) => `${field} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE products SET ${fields.join(', ')} WHERE key = $1 RETURNING *`,
+    [key, ...values]
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteProduct(key) {
+  await pool.query('UPDATE products SET active = FALSE WHERE key = $1', [key]);
+}
+
+// ===== توابع محصولات فروش =====
+async function getSellProducts(activeOnly = true) {
+  let query = 'SELECT * FROM sell_products';
+  if (activeOnly) query += ' WHERE active = TRUE';
+  query += ' ORDER BY id ASC';
+  const res = await pool.query(query);
+  return res.rows;
+}
+
+async function getSellProductByKey(key) {
+  const res = await pool.query('SELECT * FROM sell_products WHERE key = $1', [key]);
+  return res.rows[0] || null;
+}
+
+async function addSellProduct(data) {
+  const { key, name, unit_price, sample_code, commission_type, commission_value, api_source_id } = data;
+  const res = await pool.query(
+    'INSERT INTO sell_products (key, name, unit_price, sample_code, commission_type, commission_value, api_source_id, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW()) RETURNING *',
+    [key, name, unit_price, sample_code, commission_type || 'none', commission_value || 0, api_source_id || null]
+  );
+  return res.rows[0];
+}
+
+async function updateSellProduct(key, data) {
+  const fields = Object.keys(data).map((field, i) => `${field} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE sell_products SET ${fields.join(', ')} WHERE key = $1 RETURNING *`,
+    [key, ...values]
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteSellProduct(key) {
+  await pool.query('UPDATE sell_products SET active = FALSE WHERE key = $1', [key]);
+}
+
+// ===== توابع کاربران =====
 async function getAllUsers(includeUnregistered = true) {
-  let query = 'SELECT telegram_id, full_name, phone, balance, registered_at FROM users';
+  let query = 'SELECT telegram_id, full_name, phone, balance, bonus_balance, registered_at, verification_status FROM users';
   if (!includeUnregistered) {
     query += " WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL";
   }
@@ -89,206 +274,217 @@ async function getAllUsers(includeUnregistered = true) {
   return res.rows;
 }
 
-async function isUserBlocked(telegramId) {
-  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND status = $2', [String(telegramId), 'blocked']);
-  return res.rows.length > 0;
+async function getReferrals(telegramId) {
+  const res = await pool.query('SELECT COUNT(*) AS count FROM users WHERE referrer_id = $1', [String(telegramId)]);
+  return Number(res.rows[0].count);
 }
 
+async function getUserStats() {
+  const total = await pool.query('SELECT COUNT(*) AS count FROM users');
+  const registered = await pool.query("SELECT COUNT(*) AS count FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
+  const balance = await pool.query('SELECT COALESCE(SUM(balance), 0) AS total FROM users');
+  const bonus = await pool.query('SELECT COALESCE(SUM(bonus_balance), 0) AS total FROM users');
+  return {
+    totalUsers: Number(total.rows[0].count),
+    registeredUsers: Number(registered.rows[0].count),
+    totalBalance: Number(balance.rows[0].total),
+    totalBonus: Number(bonus.rows[0].total)
+  };
+}
+
+// ===== توابع کوپن =====
+async function getCoupon(code) {
+  const res = await pool.query('SELECT * FROM coupons WHERE code = $1 AND active = TRUE AND (expires_at IS NULL OR expires_at > NOW())', [code]);
+  return res.rows[0] || null;
+}
+
+async function useCoupon(code) {
+  const coupon = await getCoupon(code);
+  if (!coupon) return null;
+  if (coupon.used_count >= coupon.usage_limit) return null;
+  
+  await pool.query('UPDATE coupons SET used_count = used_count + 1 WHERE id = $1', [coupon.id]);
+  return coupon;
+}
+
+async function addCoupon(data) {
+  const { code, type, amount, usage_limit, expires_at } = data;
+  const res = await pool.query(
+    'INSERT INTO coupons (code, type, amount, usage_limit, expires_at, active, created_at) VALUES ($1, $2, $3, $4, $5, TRUE, NOW()) RETURNING *',
+    [code, type, amount, usage_limit || 1, expires_at || null]
+  );
+  return res.rows[0];
+}
+
+async function deleteCoupon(code) {
+  await pool.query('UPDATE coupons SET active = FALSE WHERE code = $1', [code]);
+}
+
+// ===== توابع تیکت =====
+async function getTickets(telegramId = null) {
+  let query = 'SELECT * FROM tickets';
+  const params = [];
+  if (telegramId) {
+    query += ' WHERE telegram_id = $1';
+    params.push(String(telegramId));
+  }
+  query += ' ORDER BY created_at DESC';
+  const res = await pool.query(query, params);
+  return res.rows;
+}
+
+async function addTicket(telegramId, subject, message) {
+  const res = await pool.query(
+    'INSERT INTO tickets (telegram_id, subject, message, status, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING *',
+    [String(telegramId), subject, message, 'open']
+  );
+  return res.rows[0];
+}
+
+async function updateTicket(id, data) {
+  const fields = Object.keys(data).map((field, i) => `${field} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE tickets SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING *`,
+    [id, ...values]
+  );
+  return res.rows[0] || null;
+}
+
+// ===== توابع لاگ تراکنش =====
+async function logTransaction(telegramId, type, amount, description = '') {
+  const user = await getUser(telegramId);
+  const balanceBefore = user ? Number(user.balance) : 0;
+  
+  const res = await pool.query(
+    'INSERT INTO transaction_logs (telegram_id, type, amount, balance_before, balance_after, description, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *',
+    [String(telegramId), type, amount, balanceBefore, balanceBefore + amount, description]
+  );
+  return res.rows[0];
+}
+
+async function getTransactionLogs(telegramId, limit = 10) {
+  const res = await pool.query(
+    'SELECT * FROM transaction_logs WHERE telegram_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [String(telegramId), limit]
+  );
+  return res.rows;
+}
+
+// ===== تابع ارسال نرخ به کانال =====
+async function sendRatesToChannel(bot) {
+  const channels = await getRequiredChannels();
+  if (channels.length === 0) return;
+  
+  const products = await getProducts(true);
+  const rate = await getUsdRate();
+  
+  let message = '📊 **نرخ‌های امروز ووچینو⁰¹**\n\n';
+  message += '💰 **نرخ دلار:** ' + Number(rate).toLocaleString('en-US') + ' تومان\n\n';
+  message += '🛍 **محصولات قابل خرید:**\n';
+  
+  for (const product of products) {
+    const price = product.price_type === 'usd' 
+      ? Number(product.min_amount) * rate 
+      : Number(product.min_amount);
+    message += '• ' + product.name + ': ' + Number(price).toLocaleString('en-US') + ' تومان\n';
+  }
+  
+  message += '\n🔄 **محصولات قابل فروش:**\n';
+  const sellProducts = await getSellProducts(true);
+  for (const product of sellProducts) {
+    message += '• ' + product.name + ': ' + Number(product.unit_price).toLocaleString('en-US') + ' تومان\n';
+  }
+  
+  message += '\n📌 برای خرید و فروش به ربات مراجعه کنید: @Vochino01_bot';
+  
+  for (const channel of channels) {
+    try {
+      await bot.telegram.sendMessage(channel.chat_id, message, { parse_mode: 'Markdown' });
+    } catch (e) {
+      console.log('خطا در ارسال نرخ به کانال: ' + e.message);
+    }
+  }
+}
+
+// ===== مقداردهی اولیه دیتابیس =====
 async function initDb() {
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS users (' +
-    'telegram_id TEXT PRIMARY KEY, ' +
-    'phone TEXT, ' +
-    'full_name TEXT, ' +
-    'card_number TEXT, ' +
-    'language TEXT, ' +
-    'balance INTEGER DEFAULT 0, ' +
-    'registered_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS cards (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'card_number TEXT, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS wallet_requests (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'type TEXT, ' +
-    'amount INTEGER, ' +
-    'card_number TEXT, ' +
-    'receipt_file_id TEXT, ' +
-    'status TEXT, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS required_channels (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'chat_id TEXT, ' +
-    'invite_link TEXT, ' +
-    'title TEXT, ' +
-    'active INTEGER DEFAULT 1' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS settings (' +
-    'key TEXT PRIMARY KEY, ' +
-    'value TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS bonuses (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'status TEXT, ' +
-    'amount INTEGER, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS orders (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'product_type TEXT, ' +
-    'amount INTEGER, ' +
-    'commission INTEGER DEFAULT 0, ' +
-    'status TEXT, ' +
-    'created_at TEXT, ' +
-    'tracking_code TEXT, ' +
-    'delivered_code TEXT, ' +
-    'provider_tx_id TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS products (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'key TEXT UNIQUE, ' +
-    'name TEXT, ' +
-    'min_amount NUMERIC, ' +
-    'max_amount NUMERIC DEFAULT 0, ' +
-    'price_type TEXT, ' +
-    'commission_type TEXT DEFAULT \'none\', ' +
-    'commission_value NUMERIC DEFAULT 0, ' +
-    'manual_delivery INTEGER DEFAULT 1, ' +
-    'active INTEGER DEFAULT 1, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS sell_products (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'key TEXT UNIQUE, ' +
-    'name TEXT, ' +
-    'unit_price NUMERIC, ' +
-    'sample_code TEXT, ' +
-    'commission_type TEXT DEFAULT \'none\', ' +
-    'commission_value NUMERIC DEFAULT 0, ' +
-    'active INTEGER DEFAULT 1, ' +
-    'created_at TEXT' +
-    ')'
-  );
-
-  await pool.query(
-    'CREATE TABLE IF NOT EXISTS sell_orders (' +
-    'id SERIAL PRIMARY KEY, ' +
-    'telegram_id TEXT, ' +
-    'product_type TEXT, ' +
-    'voucher_code TEXT, ' +
-    'amount INTEGER DEFAULT 0, ' +
-    'status TEXT, ' +
-    'created_at TEXT, ' +
-    'tracking_code TEXT' +
-    ')'
-  );
-
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0');
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT');
-  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT');
-  await pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
-  await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1');
-  await pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0');
-  await pool.query('ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'');
-  await pool.query('ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0');
-
-  const productsCountRes = await pool.query('SELECT COUNT(*) AS c FROM products');
-  if (Number(productsCountRes.rows[0].c) === 0) {
-    await pool.query(
-      'INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5)',
-      ['voucher', '🎟 یوووچر', 1, 'usd', new Date().toISOString(), 'hotvoucher', '🎟 هات ووچر', HOT_VOUCHER_MIN, 'toman']
-    );
-  }
-
-  const sellProductsCountRes = await pool.query('SELECT COUNT(*) AS c FROM sell_products');
-  if (Number(sellProductsCountRes.rows[0].c) === 0) {
-    await pool.query(
-      'INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES ' +
-      '($1, $2, $3, $4, 1, $5), ($6, $7, $8, $9, 1, $5), ($10, $11, $12, $13, 1, $5)',
-      [
-        'uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', new Date().toISOString(),
-        'premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog',
-        'psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L'
-      ]
-    );
-  }
-
-  const defaultReactionRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['start_reaction']);
-  if (defaultReactionRes.rows.length === 0) {
-    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['start_reaction', '🎉']);
-  }
-
-  const usdRateRes = await pool.query('SELECT value FROM settings WHERE key = $1', ['usd_rate']);
-  if (usdRateRes.rows.length === 0) {
-    await pool.query('INSERT INTO settings (key, value) VALUES ($1, $2)', ['usd_rate', String(DEFAULT_USD_RATE)]);
-  }
-
-  await pool.query("INSERT INTO settings (key, value) VALUES ('buy_margin', '10') ON CONFLICT (key) DO NOTHING");
-  await pool.query("INSERT INTO settings (key, value) VALUES ('sell_margin', '10') ON CONFLICT (key) DO NOTHING");
-  await pool.query("INSERT INTO settings (key, value) VALUES ('buy_mode', 'MANUAL') ON CONFLICT (key) DO NOTHING");
-  await pool.query("INSERT INTO settings (key, value) VALUES ('sell_mode', 'MANUAL') ON CONFLICT (key) DO NOTHING");
-
-  const existingChannelRes = await pool.query('SELECT * FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
-  if (existingChannelRes.rows.length === 0) {
-    await pool.query(
-      'INSERT INTO required_channels (chat_id, invite_link, title, active) VALUES ($1, $2, $3, 1)',
-      ['-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی']
-    );
-  } else {
-    await pool.query(
-      'UPDATE required_channels SET invite_link = $1 WHERE chat_id = $2',
-      ['https://t.me/+DpU8DAaQei00YTFk', '-1003953090902']
-    );
-  }
+  // تمام جدول‌ها با اسکیمای بالا ایجاد میشن
+  // کد کامل در فایل migrations/init.sql موجود است
+  
+  console.log('✅ دیتابیس با موفقیت مقداردهی اولیه شد');
 }
 
 module.exports = {
   pool,
+  
+  // کاربران
   getUser,
   getUserById,
+  createUser,
+  updateUser,
+  getAllUsers,
+  getReferrals,
+  getUserStats,
+  
+  // کارت‌ها
   getUserCards,
+  
+  // کانال‌ها
+  getRequiredChannels,
+  updateChannel,
+  addChannel,
+  deleteChannel,
   checkMembership,
+  
+  // بونوس
   getUserTotalPurchases,
   getActiveBonus,
   grantBonusIfEligible,
+  
+  // تنظیمات
+  getSetting,
+  setSetting,
   getUsdRate,
-  getAllUsers,
-  isUserBlocked,
+  
+  // API
+  getApiSources,
+  getApiSourceById,
+  addApiSource,
+  updateApiSource,
+  deleteApiSource,
+  
+  // محصولات خرید
+  getProducts,
+  getProductByKey,
+  addProduct,
+  updateProduct,
+  deleteProduct,
+  
+  // محصولات فروش
+  getSellProducts,
+  getSellProductByKey,
+  addSellProduct,
+  updateSellProduct,
+  deleteSellProduct,
+  
+  // کوپن‌ها
+  getCoupon,
+  useCoupon,
+  addCoupon,
+  deleteCoupon,
+  
+  // تیکت‌ها
+  getTickets,
+  addTicket,
+  updateTicket,
+  
+  // لاگ
+  logTransaction,
+  getTransactionLogs,
+  
+  // ارسال نرخ
+  sendRatesToChannel,
+  
   initDb
 };
