@@ -6,7 +6,6 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ===== توابع کاربر =====
 async function getUser(telegramId) {
   const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
   return res.rows[0] || null;
@@ -35,7 +34,6 @@ async function updateUser(telegramId, data) {
   return res.rows[0] || null;
 }
 
-// ===== توابع کارت =====
 async function getUserCards(telegramId) {
   const user = await getUser(telegramId);
   const extraRes = await pool.query('SELECT * FROM cards WHERE telegram_id = $1', [String(telegramId)]);
@@ -47,9 +45,8 @@ async function getUserCards(telegramId) {
   return list;
 }
 
-// ===== توابع کانال =====
 async function getRequiredChannels() {
-  const res = await pool.query('SELECT * FROM required_channels WHERE active = true');
+  const res = await pool.query('SELECT * FROM required_channels WHERE active = 1');
   return res.rows;
 }
 
@@ -65,8 +62,8 @@ async function updateChannel(chatId, data) {
 
 async function addChannel(chatId, inviteLink, title) {
   const res = await pool.query(
-    'INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-    [chatId, inviteLink, title, true, true]
+    'INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) VALUES ($1, $2, $3, 1, 1) RETURNING *',
+    [chatId, inviteLink, title]
   );
   return res.rows[0];
 }
@@ -96,7 +93,6 @@ async function checkMembership(ctx) {
   return true;
 }
 
-// ===== توابع بونوس و خرید =====
 async function getUserTotalPurchases(telegramId) {
   const res = await pool.query(
     "SELECT COALESCE(SUM(amount), 0) AS total FROM orders WHERE telegram_id = $1 AND status IN ('completed', 'pending_delivery')",
@@ -126,7 +122,6 @@ async function grantBonusIfEligible(telegramId, BONUS_THRESHOLD, BONUS_AMOUNT) {
   );
 }
 
-// ===== توابع تنظیمات =====
 async function getSetting(key, defaultValue = null) {
   const res = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
   return res.rows[0] ? res.rows[0].value : defaultValue;
@@ -144,9 +139,8 @@ async function getUsdRate() {
   return Number(rate);
 }
 
-// ===== توابع API و محصولات =====
 async function getApiSources() {
-  const res = await pool.query('SELECT * FROM api_sources WHERE is_active = true ORDER BY priority ASC');
+  const res = await pool.query('SELECT * FROM api_sources WHERE is_active = 1 ORDER BY priority ASC');
   return res.rows;
 }
 
@@ -158,8 +152,8 @@ async function getApiSourceById(id) {
 async function addApiSource(data) {
   const { name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot } = data;
   const res = await pool.query(
-    'INSERT INTO api_sources (name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot, is_active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) RETURNING *',
-    [name, type, base_url, api_key, secret_key, supports_products, is_multi || false, priority || 1, ip_slot || 'default', true]
+    'INSERT INTO api_sources (name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot, is_active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, NOW()) RETURNING *',
+    [name, type, base_url, api_key, secret_key, supports_products, is_multi || false, priority || 1, ip_slot || 'default']
   );
   return res.rows[0];
 }
@@ -175,14 +169,13 @@ async function updateApiSource(id, data) {
 }
 
 async function deleteApiSource(id) {
-  await pool.query('UPDATE api_sources SET is_active = false WHERE id = $1', [id]);
+  await pool.query('UPDATE api_sources SET is_active = 0 WHERE id = $1', [id]);
 }
 
-// ===== توابع محصولات =====
 async function getProducts(activeOnly = true) {
-  let query = 'SELECT * FROM products WHERE hidden = false';
+  let query = 'SELECT * FROM products WHERE hidden = 0';
   if (activeOnly) {
-    query += ' AND active = true';
+    query += ' AND active = 1';
   }
   query += ' ORDER BY id ASC';
   const res = await pool.query(query);
@@ -197,8 +190,8 @@ async function getProductByKey(key) {
 async function addProduct(data) {
   const { key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id } = data;
   const res = await pool.query(
-    'INSERT INTO products (key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id, active, hidden, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING *',
-    [key, name, min_amount, max_amount || 0, price_type, commission_type || 'none', commission_value || 0, manual_delivery !== undefined ? manual_delivery : true, api_source_id || null, true, false]
+    'INSERT INTO products (key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id, active, hidden, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 0, NOW()) RETURNING *',
+    [key, name, min_amount, max_amount || 0, price_type, commission_type || 'none', commission_value || 0, manual_delivery !== undefined ? manual_delivery : 1, api_source_id || null]
   );
   return res.rows[0];
 }
@@ -214,14 +207,13 @@ async function updateProduct(key, data) {
 }
 
 async function deleteProduct(key) {
-  await pool.query('UPDATE products SET active = false WHERE key = $1', [key]);
+  await pool.query('UPDATE products SET active = 0 WHERE key = $1', [key]);
 }
 
-// ===== توابع محصولات فروش =====
 async function getSellProducts(activeOnly = true) {
   let query = 'SELECT * FROM sell_products';
   if (activeOnly) {
-    query += ' WHERE active = true';
+    query += ' WHERE active = 1';
   }
   query += ' ORDER BY id ASC';
   const res = await pool.query(query);
@@ -236,8 +228,8 @@ async function getSellProductByKey(key) {
 async function addSellProduct(data) {
   const { key, name, unit_price, sample_code, commission_type, commission_value, api_source_id } = data;
   const res = await pool.query(
-    'INSERT INTO sell_products (key, name, unit_price, sample_code, commission_type, commission_value, api_source_id, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *',
-    [key, name, unit_price, sample_code, commission_type || 'none', commission_value || 0, api_source_id || null, true]
+    'INSERT INTO sell_products (key, name, unit_price, sample_code, commission_type, commission_value, api_source_id, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, NOW()) RETURNING *',
+    [key, name, unit_price, sample_code, commission_type || 'none', commission_value || 0, api_source_id || null]
   );
   return res.rows[0];
 }
@@ -253,10 +245,9 @@ async function updateSellProduct(key, data) {
 }
 
 async function deleteSellProduct(key) {
-  await pool.query('UPDATE sell_products SET active = false WHERE key = $1', [key]);
+  await pool.query('UPDATE sell_products SET active = 0 WHERE key = $1', [key]);
 }
 
-// ===== توابع کاربران =====
 async function getAllUsers(includeUnregistered = true) {
   let query = 'SELECT telegram_id, full_name, phone, balance, bonus_balance, registered_at, verification_status FROM users';
   if (!includeUnregistered) {
@@ -284,9 +275,8 @@ async function getUserStats() {
   };
 }
 
-// ===== توابع کوپن =====
 async function getCoupon(code) {
-  const res = await pool.query('SELECT * FROM coupons WHERE code = $1 AND active = true AND (expires_at IS NULL OR expires_at > NOW())', [code]);
+  const res = await pool.query('SELECT * FROM coupons WHERE code = $1 AND active = 1 AND (expires_at IS NULL OR expires_at > NOW())', [code]);
   return res.rows[0] || null;
 }
 
@@ -302,17 +292,16 @@ async function useCoupon(code) {
 async function addCoupon(data) {
   const { code, type, amount, usage_limit, expires_at } = data;
   const res = await pool.query(
-    'INSERT INTO coupons (code, type, amount, usage_limit, expires_at, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *',
-    [code, type, amount, usage_limit || 1, expires_at || null, true]
+    'INSERT INTO coupons (code, type, amount, usage_limit, expires_at, active, created_at) VALUES ($1, $2, $3, $4, $5, 1, NOW()) RETURNING *',
+    [code, type, amount, usage_limit || 1, expires_at || null]
   );
   return res.rows[0];
 }
 
 async function deleteCoupon(code) {
-  await pool.query('UPDATE coupons SET active = false WHERE code = $1', [code]);
+  await pool.query('UPDATE coupons SET active = 0 WHERE code = $1', [code]);
 }
 
-// ===== توابع تیکت =====
 async function getTickets(telegramId = null) {
   let query = 'SELECT * FROM tickets';
   const params = [];
@@ -343,7 +332,6 @@ async function updateTicket(id, data) {
   return res.rows[0] || null;
 }
 
-// ===== توابع لاگ تراکنش =====
 async function logTransaction(telegramId, type, amount, description = '') {
   const user = await getUser(telegramId);
   const balanceBefore = user ? Number(user.balance) : 0;
@@ -363,7 +351,6 @@ async function getTransactionLogs(telegramId, limit = 10) {
   return res.rows;
 }
 
-// ===== تابع ارسال نرخ به کانال =====
 async function sendRatesToChannel(bot) {
   const channels = await getRequiredChannels();
   if (channels.length === 0) return;
@@ -399,7 +386,6 @@ async function sendRatesToChannel(bot) {
   }
 }
 
-// ===== مقداردهی اولیه دیتابیس =====
 async function initDb() {
   console.log('✅ دیتابیس با موفقیت مقداردهی اولیه شد');
 }
