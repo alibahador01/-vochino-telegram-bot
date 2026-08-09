@@ -1,7 +1,6 @@
 const { Telegraf } = require('telegraf');
 const express = require('express');
 const https = require('https');
-const AntiSleepBot = require('./antiSleep');
 
 const { pool, initDb, sendRatesToChannel } = require('./db');
 const { ADMIN_IDS } = require('./constants');
@@ -9,46 +8,14 @@ const { ADMIN_IDS } = require('./constants');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const antiSleep = new AntiSleepBot(process.env.APP_URL || `https://vochino-telegram-bot.onrender.com`);
+app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
 
 app.get('/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'alive', 
-        message: "نمیتونی منو بخوابونی! 😎",
-        wakeCount: antiSleep.wakeCount,
-        uptime: process.uptime()
-    });
+  res.status(200).json({ status: 'alive', uptime: process.uptime() });
 });
 
 app.get('/ping', (req, res) => {
-    res.status(200).send('pong 🏓');
-});
-
-app.get('/wake-up', (req, res) => {
-    antiSleep.emergencyWakeUp();
-    res.status(200).json({ message: 'بیدار شدم! 🚨' });
-});
-
-app.get('/keep-alive', (req, res) => {
-    antiSleep.internalActivity();
-    res.status(200).json({ message: 'هنوز زندم! 💪' });
-});
-
-app.get('/api/status', (req, res) => {
-    res.status(200).json({
-        status: 'running',
-        wakeCount: antiSleep.wakeCount,
-        memory: process.memoryUsage(),
-        uptime: process.uptime()
-    });
-});
-
-app.get('/', (req, res) => {
-    res.send(`
-        <h1>🤖 ربات ضد خواب فعاله!</h1>
-        <p>تعداد دفعات بیداری: ${antiSleep.wakeCount}</p>
-        <p>حتی Render هم نمی‌تونه منو بخوابونه! 😂</p>
-    `);
+  res.status(200).send('pong');
 });
 
 setInterval(() => {
@@ -112,9 +79,6 @@ async function init() {
   
   bot.launch();
   console.log('✅ ربات با موفقیت به Supabase متصل و روشن شد');
-  
-  antiSleep.startAll();
-  console.log('🛡️ سیستم ضد خواب با موفقیت فعال شد');
 }
 
 init().catch(function (e) {
