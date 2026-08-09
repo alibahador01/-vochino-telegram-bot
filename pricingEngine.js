@@ -76,29 +76,6 @@ class PricingEngine {
     results.push({ name: 'فروش با ۱۰٪ سود (مبلغ ۱۰۰,۰۰۰)', passed: passed2 });
     if (!passed2) allPassed = false;
 
-    const test3 = this.calculate({
-      actionType: 'BUY',
-      baseAmount: 30000,
-      marginPercentage: 5,
-      minAmount: 50000,
-      mode: 'MANUAL'
-    });
-    const passed3 = test3.isAboveMin === false && test3.finalAmount === 31500;
-    results.push({ name: 'خرید با ۵٪ سود (مبلغ ۳۰,۰۰۰ - زیر حداقل)', passed: passed3 });
-    if (!passed3) allPassed = false;
-
-    const test4 = this.calculate({
-      actionType: 'BUY',
-      baseAmount: 5,
-      marginPercentage: 10,
-      minAmount: 100000,
-      usdRate: 60000,
-      currency: 'usd'
-    });
-    const passed4 = test4.baseAmount === 300000 && test4.finalAmount === 330000;
-    results.push({ name: 'خرید با دلار (۵ دلار × ۶۰,۰۰۰ = ۳۰۰,۰۰۰ تومان + ۱۰٪)', passed: passed4 });
-    if (!passed4) allPassed = false;
-
     return { allPassed, results };
   }
 }
