@@ -1075,6 +1075,75 @@ module.exports = function registerAdminHandlers(bot) {
   });
 
   // ============================================
+  // دکمه تنظیم کارمزد محصولات (فراخوانی)
+  // ============================================
+  bot.action('admin_commission_product_buy', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const res = await pool.query('SELECT key, name FROM products WHERE active = 1 ORDER BY id ASC');
+    if (res.rows.length === 0) {
+      ctx.reply('❌ هیچ محصول فعالی برای تنظیم کارمزد وجود ندارد.');
+      return;
+    }
+
+    let message = '💰 **تنظیم کارمزد محصولات خرید**\n\n';
+    message += 'برای تنظیم کارمزد هر محصول، کلید آن را به همراه نوع و مقدار وارد کنید:\n\n';
+    message += 'فرمت: `کلید|نوع|مقدار`\n\n';
+    message += 'نوع: `percentage` (درصدی) یا `fixed` (ثابت)\n\n';
+    message += 'مثال‌ها:\n';
+    message += '`voucher|percentage|10` → ۱۰٪ کارمزد\n';
+    message += '`hotvoucher|fixed|5000` → ۵۰۰۰ تومان کارمزد ثابت\n';
+    message += '`voucher|none|0` → بدون کارمزد\n\n';
+    message += '📋 لیست محصولات فعال:\n';
+    res.rows.forEach(p => {
+      message += '• `' + p.key + '` → ' + p.name + '\n';
+    });
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_commission_product_buy',
+      step: 'waiting_details',
+      lang: 'fa'
+    };
+
+    ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  bot.action('admin_commission_product_sell', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const res = await pool.query('SELECT key, name FROM sell_products WHERE active = 1 ORDER BY id ASC');
+    if (res.rows.length === 0) {
+      ctx.reply('❌ هیچ محصول فروش فعالی برای تنظیم کارمزد وجود ندارد.');
+      return;
+    }
+
+    let message = '💰 **تنظیم کارمزد محصولات فروش**\n\n';
+    message += 'برای تنظیم کارمزد هر محصول، کلید آن را به همراه نوع و مقدار وارد کنید:\n\n';
+    message += 'فرمت: `کلید|نوع|مقدار`\n\n';
+    message += 'نوع: `percentage` (درصدی) یا `fixed` (ثابت)\n\n';
+    message += 'مثال‌ها:\n';
+    message += '`uvoucher|percentage|5` → ۵٪ کارمزد\n';
+    message += '`psvoucher|fixed|3000` → ۳۰۰۰ تومان کارمزد ثابت\n';
+    message += '`uvoucher|none|0` → بدون کارمزد\n\n';
+    message += '📋 لیست محصولات فعال:\n';
+    res.rows.forEach(p => {
+      message += '• `' + p.key + '` → ' + p.name + '\n';
+    });
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_commission_product_sell',
+      step: 'waiting_details',
+      lang: 'fa'
+    };
+
+    ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // ============================================
   // هندلرهای متنی
   // ============================================
   bot.on('text', async (ctx, next) => {
@@ -1343,7 +1412,6 @@ module.exports = function registerAdminHandlers(bot) {
           await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, id]);
           successCount++;
 
-          // ارسال پیام تبریک به کاربر
           const user = await getUserById(id);
           if (user) {
             const giftMessage =
@@ -1611,6 +1679,139 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
+    // ============================================
+    // ادامه مراحل کوپن (بعد از waiting_amount)
+    // ============================================
+    if (session.flow === 'admin_add_coupon' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (!amount || amount <= 0) {
+        ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر از ۰) وارد کنید.');
+        return;
+      }
+
+      session.data.amount = amount;
+      session.step = 'waiting_limit';
+      ctx.reply(
+        '✅ مبلغ ثبت شد.\n\n' +
+        'لطفاً **سقف تعداد استفاده** را وارد کنید (پیش‌فرض: ۱):\n' +
+        'مثال: `10` یا `1`'
+      );
+      return;
+    }
+
+    if (session.flow === 'admin_add_coupon' && session.step === 'waiting_limit') {
+      const limit = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      const usageLimit = (limit && limit > 0) ? limit : 1;
+
+      session.data.usage_limit = usageLimit;
+      session.step = 'waiting_expiry';
+      ctx.reply(
+        '✅ سقف استفاده ثبت شد.\n\n' +
+        'لطفاً **تاریخ انقضا** را وارد کنید (یا `0` برای بدون انقضا):\n' +
+        'فرمت: `YYYY-MM-DD`\n' +
+        'مثال: `2026-12-31` یا `0`'
+      );
+      return;
+    }
+
+    if (session.flow === 'admin_add_coupon' && session.step === 'waiting_expiry') {
+      let expiresAt = null;
+      const input = ctx.message.text.trim();
+
+      if (input !== '0') {
+        const date = new Date(input);
+        if (isNaN(date.getTime())) {
+          ctx.reply('❌ تاریخ نامعتبر است. لطفاً به فرمت `YYYY-MM-DD` وارد کنید یا `0` برای بدون انقضا:');
+          return;
+        }
+        expiresAt = date.toISOString();
+      }
+
+      const { code, type, amount, usage_limit } = session.data;
+
+      await pool.query(
+        'INSERT INTO coupons (code, type, amount, usage_limit, expires_at, active, created_at) VALUES ($1, $2, $3, $4, $5, 1, NOW())',
+        [code, type, amount, usage_limit, expiresAt]
+      );
+
+      delete sessions[ctx.from.id];
+      ctx.reply(
+        '✅ **کوپن با موفقیت ایجاد شد!**\n\n' +
+        '🔹 کد: `' + code + '`\n' +
+        '🔹 نوع: ' + (type === 'discount' ? 'تخفیف' : 'هدیه') + '\n' +
+        '🔹 مبلغ: ' + Number(amount).toLocaleString('en-US') + ' تومان\n' +
+        '🔹 سقف استفاده: ' + usage_limit + '\n' +
+        '🔹 انقضا: ' + (expiresAt ? new Date(expiresAt).toLocaleDateString('fa-IR') : 'بدون انقضا'),
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    // ============================================
+    // ادامه مراحل کارمزد محصولات
+    // ============================================
+    if (session.flow === 'admin_commission_product_buy' && session.step === 'waiting_details') {
+      const parts = ctx.message.text.split('|').map(p => p.trim());
+      if (parts.length !== 3) {
+        ctx.reply('❌ فرمت صحیح نیست. لطفاً به صورت `کلید|نوع|مقدار` وارد کنید.');
+        return;
+      }
+      const [key, type, value] = parts;
+      if (!key || !type || !value) {
+        ctx.reply('❌ مقادیر نامعتبر است. لطفاً دوباره تلاش کنید.');
+        return;
+      }
+      if (type !== 'none' && type !== 'percentage' && type !== 'fixed') {
+        ctx.reply('❌ نوع کارمزد باید `none`، `percentage` یا `fixed` باشد.');
+        return;
+      }
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0) {
+        ctx.reply('❌ مقدار کارمزد باید عددی مثبت باشد.');
+        return;
+      }
+      const res = await pool.query('UPDATE products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name', [type, numValue, key]);
+      if (res.rows.length === 0) {
+        ctx.reply('❌ محصولی با این کلید پیدا نشد.');
+        delete sessions[ctx.from.id];
+        return;
+      }
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ کارمزد محصول «' + res.rows[0].name + '» با موفقیت تنظیم شد.');
+      return;
+    }
+
+    if (session.flow === 'admin_commission_product_sell' && session.step === 'waiting_details') {
+      const parts = ctx.message.text.split('|').map(p => p.trim());
+      if (parts.length !== 3) {
+        ctx.reply('❌ فرمت صحیح نیست. لطفاً به صورت `کلید|نوع|مقدار` وارد کنید.');
+        return;
+      }
+      const [key, type, value] = parts;
+      if (!key || !type || !value) {
+        ctx.reply('❌ مقادیر نامعتبر است. لطفاً دوباره تلاش کنید.');
+        return;
+      }
+      if (type !== 'none' && type !== 'percentage' && type !== 'fixed') {
+        ctx.reply('❌ نوع کارمزد باید `none`، `percentage` یا `fixed` باشد.');
+        return;
+      }
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0) {
+        ctx.reply('❌ مقدار کارمزد باید عددی مثبت باشد.');
+        return;
+      }
+      const res = await pool.query('UPDATE sell_products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name', [type, numValue, key]);
+      if (res.rows.length === 0) {
+        ctx.reply('❌ محصولی با این کلید پیدا نشد.');
+        delete sessions[ctx.from.id];
+        return;
+      }
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ کارمزد محصول فروش «' + res.rows[0].name + '» با موفقیت تنظیم شد.');
+      return;
+    }
+
     return next();
   });
 
@@ -1670,217 +1871,4 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('💰 **تخفیف**\n\nمبلغ تخفیف را به تومان وارد کنید:\nمثال: `20000`');
   });
 
-  // ============================================
-  // ادامه مراحل افزودن کوپن (بعد از انتخاب مبلغ و محدودیت)
-  // ============================================
-  // ادامه در هندلر text (بعد از waiting_amount)
-  // اضافه کردن بخش ادامه در هندلر text
-  // این بخش رو به انتهای هندلر text اضافه کنید (قبل از return next())
-
-  // اضافه کردن ادامه مراحل کوپن در هندلر text
-  // ============================================
-  // ادامه مراحل کوپن (بعد از waiting_amount)
-  // ============================================
-  // این بخش رو به هندلر text اضافه کنید:
-
-  // بعد از بخش هدیه و قبل از return next()
-  // === ادامه کوپن ===
-  if (session.flow === 'admin_add_coupon' && session.step === 'waiting_amount') {
-    const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-    if (!amount || amount <= 0) {
-      ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر از ۰) وارد کنید.');
-      return;
-    }
-
-    session.data.amount = amount;
-    session.step = 'waiting_limit';
-    ctx.reply(
-      '✅ مبلغ ثبت شد.\n\n' +
-      'لطفاً **سقف تعداد استفاده** را وارد کنید (پیش‌فرض: ۱):\n' +
-      'مثال: `10` یا `1`'
-    );
-    return;
-  }
-
-  if (session.flow === 'admin_add_coupon' && session.step === 'waiting_limit') {
-    const limit = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-    const usageLimit = (limit && limit > 0) ? limit : 1;
-
-    session.data.usage_limit = usageLimit;
-    session.step = 'waiting_expiry';
-    ctx.reply(
-      '✅ سقف استفاده ثبت شد.\n\n' +
-      'لطفاً **تاریخ انقضا** را وارد کنید (یا `0` برای بدون انقضا):\n' +
-      'فرمت: `YYYY-MM-DD`\n' +
-      'مثال: `2026-12-31` یا `0`'
-    );
-    return;
-  }
-
-  if (session.flow === 'admin_add_coupon' && session.step === 'waiting_expiry') {
-    let expiresAt = null;
-    const input = ctx.message.text.trim();
-
-    if (input !== '0') {
-      const date = new Date(input);
-      if (isNaN(date.getTime())) {
-        ctx.reply('❌ تاریخ نامعتبر است. لطفاً به فرمت `YYYY-MM-DD` وارد کنید یا `0` برای بدون انقضا:');
-        return;
-      }
-      expiresAt = date.toISOString();
-    }
-
-    const { code, type, amount, usage_limit } = session.data;
-
-    await pool.query(
-      'INSERT INTO coupons (code, type, amount, usage_limit, expires_at, active, created_at) VALUES ($1, $2, $3, $4, $5, 1, NOW())',
-      [code, type, amount, usage_limit, expiresAt]
-    );
-
-    delete sessions[ctx.from.id];
-    ctx.reply(
-      '✅ **کوپن با موفقیت ایجاد شد!**\n\n' +
-      '🔹 کد: `' + code + '`\n' +
-      '🔹 نوع: ' + (type === 'discount' ? 'تخفیف' : 'هدیه') + '\n' +
-      '🔹 مبلغ: ' + Number(amount).toLocaleString('en-US') + ' تومان\n' +
-      '🔹 سقف استفاده: ' + usage_limit + '\n' +
-      '🔹 انقضا: ' + (expiresAt ? new Date(expiresAt).toLocaleDateString('fa-IR') : 'بدون انقضا'),
-      { parse_mode: 'Markdown' }
-    );
-    return;
-  }
-
-  // ============================================
-  // ادامه مراحل کارمزد محصولات
-  // ============================================
-  if (session.flow === 'admin_commission_product_buy' && session.step === 'waiting_details') {
-    const parts = ctx.message.text.split('|').map(p => p.trim());
-    if (parts.length !== 3) {
-      ctx.reply('❌ فرمت صحیح نیست. لطفاً به صورت `کلید|نوع|مقدار` وارد کنید.');
-      return;
-    }
-    const [key, type, value] = parts;
-    if (!key || !type || !value) {
-      ctx.reply('❌ مقادیر نامعتبر است. لطفاً دوباره تلاش کنید.');
-      return;
-    }
-    if (type !== 'none' && type !== 'percentage' && type !== 'fixed') {
-      ctx.reply('❌ نوع کارمزد باید `none`، `percentage` یا `fixed` باشد.');
-      return;
-    }
-    const numValue = parseFloat(value);
-    if (isNaN(numValue) || numValue < 0) {
-      ctx.reply('❌ مقدار کارمزد باید عددی مثبت باشد.');
-      return;
-    }
-    const res = await pool.query('UPDATE products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name', [type, numValue, key]);
-    if (res.rows.length === 0) {
-      ctx.reply('❌ محصولی با این کلید پیدا نشد.');
-      delete sessions[ctx.from.id];
-      return;
-    }
-    delete sessions[ctx.from.id];
-    ctx.reply('✅ کارمزد محصول «' + res.rows[0].name + '» با موفقیت تنظیم شد.');
-    return;
-  }
-
-  if (session.flow === 'admin_commission_product_sell' && session.step === 'waiting_details') {
-    const parts = ctx.message.text.split('|').map(p => p.trim());
-    if (parts.length !== 3) {
-      ctx.reply('❌ فرمت صحیح نیست. لطفاً به صورت `کلید|نوع|مقدار` وارد کنید.');
-      return;
-    }
-    const [key, type, value] = parts;
-    if (!key || !type || !value) {
-      ctx.reply('❌ مقادیر نامعتبر است. لطفاً دوباره تلاش کنید.');
-      return;
-    }
-    if (type !== 'none' && type !== 'percentage' && type !== 'fixed') {
-      ctx.reply('❌ نوع کارمزد باید `none`، `percentage` یا `fixed` باشد.');
-      return;
-    }
-    const numValue = parseFloat(value);
-    if (isNaN(numValue) || numValue < 0) {
-      ctx.reply('❌ مقدار کارمزد باید عددی مثبت باشد.');
-      return;
-    }
-    const res = await pool.query('UPDATE sell_products SET commission_type = $1, commission_value = $2 WHERE key = $3 RETURNING name', [type, numValue, key]);
-    if (res.rows.length === 0) {
-      ctx.reply('❌ محصولی با این کلید پیدا نشد.');
-      delete sessions[ctx.from.id];
-      return;
-    }
-    delete sessions[ctx.from.id];
-    ctx.reply('✅ کارمزد محصول فروش «' + res.rows[0].name + '» با موفقیت تنظیم شد.');
-    return;
-  }
-
-  // ============================================
-  // دکمه تنظیم کارمزد محصولات (فراخوانی)
-  // ============================================
-  bot.action('admin_commission_product_buy', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const res = await pool.query('SELECT key, name FROM products WHERE active = 1 ORDER BY id ASC');
-    if (res.rows.length === 0) {
-      ctx.reply('❌ هیچ محصول فعالی برای تنظیم کارمزد وجود ندارد.');
-      return;
-    }
-
-    let message = '💰 **تنظیم کارمزد محصولات خرید**\n\n';
-    message += 'برای تنظیم کارمزد هر محصول، کلید آن را به همراه نوع و مقدار وارد کنید:\n\n';
-    message += 'فرمت: `کلید|نوع|مقدار`\n\n';
-    message += 'نوع: `percentage` (درصدی) یا `fixed` (ثابت)\n\n';
-    message += 'مثال‌ها:\n';
-    message += '`voucher|percentage|10` → ۱۰٪ کارمزد\n';
-    message += '`hotvoucher|fixed|5000` → ۵۰۰۰ تومان کارمزد ثابت\n';
-    message += '`voucher|none|0` → بدون کارمزد\n\n';
-    message += '📋 لیست محصولات فعال:\n';
-    res.rows.forEach(p => {
-      message += '• `' + p.key + '` → ' + p.name + '\n';
-    });
-
-    sessions[ctx.from.id] = {
-      flow: 'admin_commission_product_buy',
-      step: 'waiting_details',
-      lang: 'fa'
-    };
-
-    ctx.reply(message, { parse_mode: 'Markdown' });
-  });
-
-  bot.action('admin_commission_product_sell', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const res = await pool.query('SELECT key, name FROM sell_products WHERE active = 1 ORDER BY id ASC');
-    if (res.rows.length === 0) {
-      ctx.reply('❌ هیچ محصول فروش فعالی برای تنظیم کارمزد وجود ندارد.');
-      return;
-    }
-
-    let message = '💰 **تنظیم کارمزد محصولات فروش**\n\n';
-    message += 'برای تنظیم کارمزد هر محصول، کلید آن را به همراه نوع و مقدار وارد کنید:\n\n';
-    message += 'فرمت: `کلید|نوع|مقدار`\n\n';
-    message += 'نوع: `percentage` (درصدی) یا `fixed` (ثابت)\n\n';
-    message += 'مثال‌ها:\n';
-    message += '`uvoucher|percentage|5` → ۵٪ کارمزد\n';
-    message += '`psvoucher|fixed|3000` → ۳۰۰۰ تومان کارمزد ثابت\n';
-    message += '`uvoucher|none|0` → بدون کارمزد\n\n';
-    message += '📋 لیست محصولات فعال:\n';
-    res.rows.forEach(p => {
-      message += '• `' + p.key + '` → ' + p.name + '\n';
-    });
-
-    sessions[ctx.from.id] = {
-      flow: 'admin_commission_product_sell',
-      step: 'waiting_details',
-      lang: 'fa'
-    };
-
-    ctx.reply(message, { parse_mode: 'Markdown' });
-  });
 };
