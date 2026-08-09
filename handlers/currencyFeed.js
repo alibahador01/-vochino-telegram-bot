@@ -1,12 +1,11 @@
 const { pool, sendRatesToChannel } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+const { sessions } = require('../utils');
 
-// تایمر برای ارسال خودکار نرخ
 let feedInterval = null;
 
 module.exports = function registerCurrencyFeedHandlers(bot) {
 
-  // راه‌اندازی تایمر در هنگام راه‌اندازی ربات
   (async function initFeed() {
     const isActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
     if (isActive.rows.length > 0 && isActive.rows[0].value === 'true') {
@@ -14,7 +13,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     }
   })();
 
-  // تابع شروع تایمر
   async function startFeedTimer(botInstance) {
     if (feedInterval) {
       clearInterval(feedInterval);
@@ -36,7 +34,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     console.log('⏱️ تایمر فید نرخ ارز با زمان ' + seconds + ' ثانیه راه‌اندازی شد.');
   }
 
-  // توقف تایمر
   async function stopFeedTimer() {
     if (feedInterval) {
       clearInterval(feedInterval);
@@ -45,10 +42,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     }
   }
 
-  // بازنویسی تابع sendRatesToChannel در db.js برای استفاده در اینجا
-  // (قبلاً در db.js تعریف شده بود)
-
-  // مشاهده تنظیمات فعلی
   bot.action('admin_currency_feed', async (ctx) => {
     if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
     ctx.answerCbQuery();
@@ -79,7 +72,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     );
   });
 
-  // تغییر وضعیت
   bot.action('admin_currency_feed_toggle', async (ctx) => {
     if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
     ctx.answerCbQuery();
@@ -101,7 +93,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     }
   });
 
-  // تنظیم زمانبندی
   bot.action('admin_currency_feed_interval', async (ctx) => {
     if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
     ctx.answerCbQuery();
@@ -116,7 +107,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     ctx.reply('⏱️ **تنظیم زمانبندی فید نرخ ارز**\n\nلطفاً زمان را به **دقیقه** وارد کنید:\nمثال: `60` (هر یک ساعت)', { parse_mode: 'Markdown' });
   });
 
-  // ارسال دستی
   bot.action('admin_currency_feed_send', async (ctx) => {
     if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
     ctx.answerCbQuery();
@@ -131,7 +121,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
     }
   });
 
-  // هندلر متنی برای تنظیم زمانبندی
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'admin_currency_feed_interval') return next();
@@ -148,7 +137,6 @@ module.exports = function registerCurrencyFeedHandlers(bot) {
       [String(seconds)]
     );
 
-    // راه‌اندازی مجدد تایمر با زمان جدید
     const isActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
     if (isActive.rows.length > 0 && isActive.rows[0].value === 'true') {
       await startFeedTimer(bot);
