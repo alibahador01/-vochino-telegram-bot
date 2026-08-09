@@ -1,127 +1,87 @@
-const { mainMenuButtons, ADMIN_IDS } = require('./constants');
+const { Telegraf } = require('telegraf');
+const express = require('express');
+const https = require('https');
 
-const sessions = {};
+const { pool, initDb, sendRatesToChannel } = require('./db');
+const { ADMIN_IDS } = require('./constants');
 
-function generateTrackingCode() {
-  const randomPart = Math.floor(100000 + Math.random() * 900000);
-  return 'VOC-' + randomPart;
-}
+// ===== Express Server =====
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
+app.listen(PORT, () => { console.log('Web server is running on port ' + PORT); });
 
-function generateVoucherTrackingCode() {
-  const randomPart = Math.floor(1000 + Math.random() * 9000);
-  return '#VCH_' + randomPart;
-}
+// ===== سیستم ضدخواب =====
+setInterval(() => {
+  const url = 'https://vochino-telegram-bot.onrender.com';
+  https.get(url, (res) => {
+    console.log('[Layer 1 - Web] Status: ' + res.statusCode);
+  }).on('error', (err) => {});
+}, 2 * 60 * 1000);
 
-function fillTemplate(template, values) {
-  let result = template;
-  Object.keys(values).forEach(function (key) {
-    result = result.split('{' + key + '}').join(values[key]);
-  });
-  return result;
-}
+setInterval(async () => {
+  try {
+    await pool.query('SELECT 1');
+    console.log('[Layer 2 - DB] Supabase pinged!');
+  } catch (err) {}
+}, 3 * 60 * 1000);
 
-async function sendTracked(ctx, session, text, extra) {
-  if (session && session.lastBotMsgId) {
-    try { await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId); } catch (e) {}
-  }
-  const sent = await ctx.reply(text, extra);
-  if (session) session.lastBotMsgId = sent.message_id;
-  return sent;
-}
+// ===== ربات =====
+const bot = new Telegraf(process.env.BOT_TOKEN);
 
-function showMainMenu(ctx) {
-  let buttons = mainMenuButtons.filter(b => b.key !== 'admin_panel');
-  const isAdmin = ADMIN_IDS.indexOf(Number(ctx.from.id)) !== -1;
-  if (isAdmin) {
-    buttons = mainMenuButtons;
-  }
+// ===== هندلرها =====
+require('./handlers/registration')(bot);
+require('./handlers/wallet')(bot);
+require('./handlers/buy')(bot);
+require('./handlers/sell')(bot);
+require('./handlers/game')(bot);
+require('./handlers/admin')(bot);
+require('./handlers/misc')(bot);
+// هندلرهای جدید
+require('./handlers/profile')(bot);       // برای پروفایل و احراز هویت
+require('./handlers/vpn')(bot);           // برای سرویس فیلترشکن رایگان
+require('./handlers/currencyFeed')(bot);  // برای مدیریت نرخ ارز
+
+// ===== مدیریت خطا =====
+process.on('unhandledRejection', (err) => {
+  console.log('UNHANDLED REJECTION: ' + (err && err.message ? err.message : err));
+});
+process.on('uncaughtException', (err) => {
+  console.log('UNCAUGHT EXCEPTION: ' + err.message);
+  console.log(err.stack);
+});
+
+bot.catch((err, ctx) => {
+  console.log('BOT ERROR: ' + err.message);
+  console.log(err.stack);
+  try {
+    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن.');
+  } catch (e) {}
+  try {
+    const adminId = ADMIN_IDS[0];
+    ctx.telegram.sendMessage(adminId, '🧨 گزارش خطای واقعی ربات:\n' + err.message + '\n\n👤 کاربر: ' + (ctx.from ? ctx.from.id : '-'));
+  } catch (e) {}
+});
+
+// ===== شروع =====
+async function init() {
+  await initDb();
   
-  const rows = [];
-  for (let i = 0; i < buttons.length; i += 2) {
-    const row = [];
-    row.push({ text: buttons[i].text, callback_data: 'menu_' + buttons[i].key });
-    if (buttons[i + 1]) {
-      row.push({ text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key });
+  try {
+    // ارسال نرخ اولیه به کانال (در صورت فعال بودن)
+    const isFeedActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
+    if (isFeedActive.rows.length > 0 && isFeedActive.rows[0].value === 'true') {
+        await sendRatesToChannel(bot);
     }
-    rows.push(row);
+  } catch (e) {
+    console.log('خطا در ارسال نرخ: ' + e.message);
   }
   
-  const headerText =
-    '⚜️ مرجع تخصصی معاملات ووچر| Vochino⁰¹\n' +
-    '🔹 سرعت بالا در نقدشوندگی\n' +
-    '🔹️ پشتیبانی آنلاین و لحظه‌ای\n' +
-    '🔹 محیطی امن برای تمامی تراکنش‌ها\n\n' +
-    '👇🏼 جهت ادامه، گزینه مورد نظر را انتخاب کنید:';
-  ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
+  bot.launch();
+  console.log('✅ ربات با موفقیت به Supabase متصل و روشن شد');
 }
 
-async function sendMessageToUser(bot, userId, text, extra = {}) {
-  try {
-    const sent = await bot.telegram.sendMessage(userId, text, extra);
-    return { success: true, messageId: sent.message_id };
-  } catch (error) {
-    console.log('❌ ارسال پیام به ' + userId + ' ناموفق: ' + error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-async function sendMessageToUserWithPhoto(bot, userId, photo, caption, extra = {}) {
-  try {
-    const sent = await bot.telegram.sendPhoto(userId, photo, { caption: caption, ...extra });
-    return { success: true, messageId: sent.message_id };
-  } catch (error) {
-    console.log('❌ ارسال عکس به ' + userId + ' ناموفق: ' + error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-async function sendBroadcast(bot, userIds, text, extra = {}, isFake = false) {
-  const results = [];
-  let targetUsers = [];
-  
-  if (isFake) {
-    targetUsers = userIds.slice(0, 1);
-  } else {
-    targetUsers = userIds;
-  }
-  
-  for (const userId of targetUsers) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const result = await sendMessageToUser(bot, userId, text, extra);
-    results.push({ userId, ...result });
-  }
-  
-  return results;
-}
-
-async function sendBroadcastWithPhoto(bot, userIds, photo, caption, extra = {}, isFake = false) {
-  const results = [];
-  let targetUsers = [];
-  
-  if (isFake) {
-    targetUsers = userIds.slice(0, 1);
-  } else {
-    targetUsers = userIds;
-  }
-  
-  for (const userId of targetUsers) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const result = await sendMessageToUserWithPhoto(bot, userId, photo, caption, extra);
-    results.push({ userId, ...result });
-  }
-  
-  return results;
-}
-
-module.exports = {
-  sessions,
-  generateTrackingCode,
-  generateVoucherTrackingCode,
-  fillTemplate,
-  sendTracked,
-  showMainMenu,
-  sendMessageToUser,
-  sendMessageToUserWithPhoto,
-  sendBroadcast,
-  sendBroadcastWithPhoto
-};
+init().catch(function (e) {
+  console.log('INIT ERROR: ' + e.message);
+  console.log('INIT ERROR STACK: ' + e.stack);
+});
