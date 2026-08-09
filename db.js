@@ -180,13 +180,12 @@ async function deleteApiSource(id) {
 
 // ===== توابع محصولات =====
 async function getProducts(activeOnly = true) {
-  let query = 'SELECT * FROM products WHERE hidden = $1';
-  const params = ['FALSE'];
+  let query = "SELECT * FROM products WHERE hidden = 'FALSE'";
   if (activeOnly) {
     query += " AND active = 'TRUE'";
   }
   query += ' ORDER BY id ASC';
-  const res = await pool.query(query, params);
+  const res = await pool.query(query);
   return res.rows;
 }
 
@@ -198,8 +197,8 @@ async function getProductByKey(key) {
 async function addProduct(data) {
   const { key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id } = data;
   const res = await pool.query(
-    'INSERT INTO products (key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id, active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) RETURNING *',
-    [key, name, min_amount, max_amount || 0, price_type, commission_type || 'none', commission_value || 0, manual_delivery !== undefined ? manual_delivery : true, api_source_id || null, 'TRUE']
+    'INSERT INTO products (key, name, min_amount, max_amount, price_type, commission_type, commission_value, manual_delivery, api_source_id, active, hidden, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING *',
+    [key, name, min_amount, max_amount || 0, price_type, commission_type || 'none', commission_value || 0, manual_delivery !== undefined ? manual_delivery : true, api_source_id || null, 'TRUE', 'FALSE']
   );
   return res.rows[0];
 }
@@ -287,7 +286,7 @@ async function getUserStats() {
 
 // ===== توابع کوپن =====
 async function getCoupon(code) {
-  const res = await pool.query('SELECT * FROM coupons WHERE code = $1 AND active = $2 AND (expires_at IS NULL OR expires_at > NOW())', [code, 'TRUE']);
+  const res = await pool.query("SELECT * FROM coupons WHERE code = $1 AND active = 'TRUE' AND (expires_at IS NULL OR expires_at > NOW())", [code]);
   return res.rows[0] || null;
 }
 
