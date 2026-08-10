@@ -1,91 +1,146 @@
-const { Telegraf } = require('telegraf');
-const express = require('express');
-const https = require('https');
-
-const { pool, initDb, sendRatesToChannel } = require('./db');
-const { ADMIN_IDS } = require('./constants');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => { res.send('Bot is alive and connected to Supabase!'); });
-
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'alive', uptime: process.uptime() });
-});
-
-app.get('/ping', (req, res) => {
-  res.status(200).send('pong');
-});
-
-setInterval(() => {
-  const url = 'https://vochino-telegram-bot.onrender.com';
-  https.get(url, (res) => {
-    console.log('[Layer 1 - Web] Status: ' + res.statusCode);
-  }).on('error', (err) => {});
-}, 2 * 60 * 1000);
-
-setInterval(async () => {
-  try {
-    await pool.query('SELECT 1');
-    console.log('[Layer 2 - DB] Supabase pinged!');
-  } catch (err) {}
-}, 3 * 60 * 1000);
+// index.js
+require('dotenv').config();
+const { Telegraf, Markup, session } = require('telegraf');
+const database = require('./database');
+const startHandler = require('./handlers/start');
+const mainMenuHandler = require('./handlers/mainMenu');
+const walletHandler = require('./handlers/wallet');
+const verificationHandler = require('./handlers/verification');
+const gamesHandler = require('./handlers/games');
+const adminHandler = require('./handlers/admin');
+const referralHandler = require('./handlers/referral');
+const server = require('./server');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-require('./handlers/registration')(bot);
-require('./handlers/wallet')(bot);
-require('./handlers/buy')(bot);
-require('./handlers/sell')(bot);
-require('./handlers/game')(bot);
-require('./handlers/admin')(bot);
-require('./handlers/misc')(bot);
-require('./handlers/profile')(bot);
-require('./handlers/vpn')(bot);
-require('./handlers/currencyFeed')(bot);
+// Session middleware
+bot.use(session());
 
-process.on('unhandledRejection', (err) => {
-  console.log('UNHANDLED REJECTION: ' + (err && err.message ? err.message : err));
-});
-process.on('uncaughtException', (err) => {
-  console.log('UNCAUGHT EXCEPTION: ' + err.message);
-  console.log(err.stack);
-});
+// Connect to database
+database.connect();
 
-bot.catch((err, ctx) => {
-  console.log('BOT ERROR: ' + err.message);
-  console.log(err.stack);
-  try {
-    ctx.reply('⚠️ یه خطای موقت رخ داد، لطفاً دوباره تلاش کن.');
-  } catch (e) {}
-  try {
-    const adminId = ADMIN_IDS[0];
-    ctx.telegram.sendMessage(adminId, '🧨 گزارش خطای واقعی ربات:\n' + err.message + '\n\n👤 کاربر: ' + (ctx.from ? ctx.from.id : '-'));
-  } catch (e) {}
-});
-
-async function init() {
-  await initDb();
-  
-  try {
-    const isFeedActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
-    if (isFeedActive.rows.length > 0 && isFeedActive.rows[0].value === 'true') {
-        await sendRatesToChannel(bot);
-    }
-  } catch (e) {
-    console.log('خطا در ارسال نرخ: ' + e.message);
+// =====================
+// COMMANDS
+// =====================
+bot.command('start', startHandler.start);
+bot.command('admin', async (ctx) => {
+  // Only show admin panel if user is admin
+  const { isAdmin } = require('./utils');
+  if (isAdmin(ctx.from.id)) {
+    await adminHandler.adminPanel(ctx);
+  } else {
+    await ctx.reply('⛔️ شما دسترسی ندارید.');
   }
-  
-  bot.launch();
-  console.log('✅ ربات با موفقیت به Supabase متصل و روشن شد');
-}
+});
+bot.command('invite', referralHandler.inviteLink);
 
-init().catch(function (e) {
-  console.log('INIT ERROR: ' + e.message);
-  console.log('INIT ERROR STACK: ' + e.stack);
+// =====================
+// ACTIONS
+// =====================
+// Language selection
+bot.action(/^lang_(fa|en|tr)$/, startHandler.languageAction);
+
+// Onboarding
+bot.action('accept_rules', startHandler.acceptRulesAction);
+bot.action('check_join', startHandler.checkJoinAction);
+bot.action('member_joined', startHandler.memberJoinedAction);
+
+// Main menu navigation
+bot.action('wallet', walletHandler.walletMenu);
+bot.action('increase_balance', walletHandler.increaseBalance);
+bot.action('withdraw', walletHandler.withdrawRequest);
+bot.action('verify_gold', verificationHandler.verifyGoldRequest);
+bot.action('add_card', walletHandler.addCard);
+bot.action('transaction_report', walletHandler.transactionReport);
+bot.action('referral_earning', referralHandler.referralMenu);
+bot.action('back_to_main', mainMenuHandler.backToMain);
+
+// Wallet sub‑actions (admin confirmations)
+bot.action(/^confirm_withdraw_(.+)$/, walletHandler.confirmWithdraw);
+bot.action(/^reject_withdraw_(.+)$/, walletHandler.rejectWithdraw);
+bot.action(/^confirm_verification_(.+)$/, verificationHandler.confirmVerification);
+bot.action(/^reject_verification_(.+)$/, verificationHandler.rejectVerification);
+
+// Games
+bot.action('games_menu', gamesHandler.gamesMenu);
+bot.action(/^game_(.+)$/, gamesHandler.startGame);
+bot.action(/^play_(.+)_(bonus|balance)$/, gamesHandler.playGame);
+bot.action('back_to_games', gamesHandler.gamesMenu);
+
+// Admin callbacks
+bot.action('admin_panel', adminHandler.adminPanel);
+bot.action('send_message_all', adminHandler.sendAll);
+bot.action('edit_texts', adminHandler.editTexts);
+bot.action('manage_products', adminHandler.manageProducts);
+bot.action('settings', adminHandler.settings);
+bot.action('gift_user', adminHandler.giftUser);
+bot.action('admin_back', adminHandler.adminPanel); // simplified back to main admin
+
+// Support / Gift (from main menu)
+bot.action('support', async (ctx) => {
+  ctx.session.step = 'support_ticket';
+  await ctx.reply('📝 لطفاً پیام خود را برای پشتیبانی بنویسید:');
+  await ctx.answerCbQuery();
+});
+bot.action('gift', async (ctx) => {
+  // Show VPN gift info
+  const user = await require('./models/User').findOne({ telegramId: ctx.from.id });
+  if (!user) return;
+  await ctx.reply(
+    `🎁 هدیه ووچینو⁰¹ (فیلترشکن رایگان)\n` +
+    `🔗 لینک اختصاصی شما:\n${process.env.DOMAIN}/sub/${user.telegramId}\n` +
+    `📊 حجم: ۵ گیگابایت – مدت: ۳۰ روز`
+  );
+  await ctx.answerCbQuery();
 });
 
-app.listen(PORT, () => {
-  console.log('🌐 Web server running on port ' + PORT);
+// Referral inline
+bot.action('invite', referralHandler.inviteLink);
+
+// =====================
+// INPUT HANDLING MIDDLEWARE
+// =====================
+bot.use(async (ctx, next) => {
+  if (!ctx.session) ctx.session = {};
+
+  // Handle text messages only when a step is set
+  if (ctx.message && ctx.message.text) {
+    const step = ctx.session.step;
+    if (step === 'add_card') {
+      return walletHandler.processCardNumber(ctx);
+    } else if (step === 'support_ticket') {
+      return walletHandler.processSupportTicket(ctx);
+    } else if (step === 'main_menu') {
+      // Ignore other texts when in main menu – just show menu again
+      return mainMenuHandler.showMainMenu(ctx);
+    }
+  }
+
+  // Handle photo messages for gold verification
+  if (ctx.message && ctx.message.photo && ctx.session.step === 'upload_gold_docs') {
+    return verificationHandler.processGoldDocuments(ctx);
+  }
+
+  // If no step matches, just continue
+  return next();
 });
+
+// =====================
+// ERROR HANDLING
+// =====================
+bot.catch((err, ctx) => {
+  console.error(`Ooops, encountered an error for ${ctx.updateType}`, err);
+});
+
+// =====================
+// LAUNCH SERVER & BOT
+// =====================
+server.launch(bot);
+
+bot.launch().then(() => {
+  console.log('🤖 Vochino bot is running...');
+});
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
