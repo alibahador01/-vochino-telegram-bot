@@ -588,7 +588,7 @@ module.exports = function registerAdminHandlers(bot) {
   });
 
   // ============================================
-  // تنظیمات کلی (نرخ دلار، ایموجی، سود پیش‌فرض - در صورت نبود کارمزد محصول)
+  // تنظیمات کلی (نرخ دلار، ایموجی)
   // ============================================
   bot.action('admin_settings', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
@@ -966,7 +966,146 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // اگر هیچ کدام نبود، عبور کن
+    // ============================================
+    // تحویل کد و سایر موارد (بخش دوم)
+    // ============================================
+    // تحویل کد
+    if (session.flow === 'admin_deliver_code' && session.step === 'waiting_code') {
+      const deliveredCode = ctx.message.text.trim();
+      const { orderId, telegramId, trackingCode } = session.data;
+      const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+      const order = orderRes.rows[0];
+      if (!order || order.status !== 'pending_delivery') {
+        delete sessions[ctx.from.id];
+        ctx.reply('این سفارش قبلاً تحویل داده شده است.');
+        return;
+      }
+      await pool.query("UPDATE orders SET status = 'completed', delivered_code = $1 WHERE id = $2", [deliveredCode, orderId]);
+      ctx.telegram.sendMessage(telegramId,
+        '🎉 سفارش خرید شما تحویل داده شد!\n\n🆔 کد پیگیری: ' + trackingCode + '\n\n📦 کد/محتوای سفارش:\n' + deliveredCode + '\n\nبا تشکر از اعتماد شما 🙏'
+      );
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ کد تحویل برای کاربر ارسال شد و سفارش تکمیل شد.');
+      return;
+    }
+
+    // رد با توضیح (کیف پول)
+    if (session.flow === 'admin_reject_reason' && session.step === 'waiting_reason') {
+      const reason = ctx.message.text;
+      const requestId = session.data.requestId;
+      const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+      const request = reqRes.rows[0];
+      if (!request || request.status !== 'pending') {
+        delete sessions[ctx.from.id];
+        ctx.reply('این درخواست قبلاً بررسی شده است.');
+        return;
+      }
+      await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [requestId]);
+      const codeText = request.tracking_code ? ('\n🆔 کد پیگیری: ' + request.tracking_code) : '';
+      ctx.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.' + codeText + '\n📝 دلیل:\n' + reason);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ درخواست شماره ' + requestId + ' با توضیح رد شد.');
+      return;
+    }
+
+    // رد با توضیح (فروش)
+    if (session.flow === 'admin_sell_reject_reason' && session.step === 'waiting_reason') {
+      const reason = ctx.message.text;
+      const requestId = session.data.requestId;
+      const reqRes = await pool.query('SELECT * FROM sell_orders WHERE id = $1', [requestId]);
+      const request = reqRes.rows[0];
+      if (!request || request.status !== 'pending_review') {
+        delete sessions[ctx.from.id];
+        ctx.reply('این درخواست قبلاً بررسی شده است.');
+        return;
+      }
+      await pool.query("UPDATE sell_orders SET status = 'rejected' WHERE id = $1", [requestId]);
+      ctx.telegram.sendMessage(request.telegram_id, '❌ درخواست فروش شما رد شد.\n🆔 کد پیگیری: ' + request.tracking_code + '\n📝 دلیل:\n' + reason);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ درخواست فروش شماره ' + requestId + ' با توضیح رد شد.');
+      return;
+    }
+
+    // وارد کردن مبلغ فروش
+    if (session.flow === 'admin_sell_amount' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
+      const requestId = session.data.requestId;
+      if (!amount || amount <= 0) return ctx.reply('⚠️ عدد واردشده معتبر نیست. دوباره مبلغ را وارد کنید:');
+      const reqRes = await pool.query('SELECT * FROM sell_orders WHERE id = $1', [requestId]);
+      const request = reqRes.rows[0];
+      if (!request || request.status !== 'pending_review') {
+        delete sessions[ctx.from.id];
+        ctx.reply('این درخواست قبلاً بررسی شده است.');
+        return;
+      }
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, request.telegram_id]);
+      await pool.query("UPDATE sell_orders SET status = 'approved', amount = $1 WHERE id = $2", [amount, requestId]);
+      ctx.telegram.sendMessage(
+        request.telegram_id,
+        fillTemplate(texts.fa.sellApprovedUser, {
+          trackingCode: request.tracking_code,
+          amount: amount.toLocaleString()
+        })
+      );
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ فروش تایید شد و ' + amount.toLocaleString() + ' تومان به کیف پول کاربر اضافه شد.');
+      return;
+    }
+
+    // ---------- جستجوی کد پیگیری ----------
+    if (session.flow === 'admin_find' && session.step === 'waiting_code') {
+      const code = ctx.message.text.trim().toUpperCase();
+      const orderRes = await pool.query('SELECT * FROM orders WHERE tracking_code = $1 OR tracking_code = $2', [code, code]);
+      const walletRes = await pool.query('SELECT * FROM wallet_requests WHERE tracking_code = $1', [code]);
+      const sellRes = await pool.query('SELECT * FROM sell_orders WHERE tracking_code = $1', [code]);
+      if (orderRes.rows.length === 0 && walletRes.rows.length === 0 && sellRes.rows.length === 0) {
+        ctx.reply('❌ هیچ رکوردی با این کد پیگیری پیدا نشد.');
+        delete sessions[ctx.from.id];
+        return;
+      }
+      if (orderRes.rows.length > 0) {
+        const o = orderRes.rows[0];
+        const user = await getUser(o.telegram_id);
+        ctx.reply('📦 سفارش خرید\n\n🆔 کد پیگیری: ' + o.tracking_code + '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') + '\n📱 شماره: ' + (user ? user.phone : '-') + '\n📦 محصول: ' + o.product_type + '\n💰 مبلغ: ' + Number(o.amount).toLocaleString() + ' تومان\n📌 وضعیت: ' + o.status + '\n📅 تاریخ: ' + o.created_at);
+      }
+      if (walletRes.rows.length > 0) {
+        const w = walletRes.rows[0];
+        const user = await getUser(w.telegram_id);
+        ctx.reply('💰 درخواست کیف پول\n\n🆔 کد پیگیری: ' + w.tracking_code + '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') + '\n📱 شماره: ' + (user ? user.phone : '-') + '\n💰 مبلغ: ' + Number(w.amount).toLocaleString() + ' تومان\n📌 وضعیت: ' + w.status + '\n📅 تاریخ: ' + w.created_at);
+      }
+      if (sellRes.rows.length > 0) {
+        const s = sellRes.rows[0];
+        const user = await getUser(s.telegram_id);
+        ctx.reply('🎟 سفارش فروش\n\n🆔 کد پیگیری: ' + s.tracking_code + '\n👤 نام: ' + (user ? user.full_name : 'نامشخص') + '\n📱 شماره: ' + (user ? user.phone : '-') + '\n📦 محصول: ' + s.product_type + '\n💰 مبلغ: ' + (s.amount ? Number(s.amount).toLocaleString() + ' تومان' : 'هنوز تعیین نشده') + '\n📌 وضعیت: ' + s.status + '\n📅 تاریخ: ' + s.created_at);
+      }
+      delete sessions[ctx.from.id];
+      return;
+    }
+
+    // ---------- اطلاعات یک کاربر ----------
+    if (session.flow === 'admin_userinfo' && session.step === 'waiting_id') {
+      const targetId = ctx.message.text.trim();
+      const user = await getUserById(targetId);
+      if (!user) {
+        ctx.reply('❌ کاربری با آیدی ' + targetId + ' پیدا نشد.');
+        delete sessions[ctx.from.id];
+        return;
+      }
+      const isFullyRegistered = user.full_name && user.phone && user.card_number;
+      let infoText =
+        '👤 **اطلاعات کاربر**\n\n' +
+        '🆔 **آیدی:** ' + user.telegram_id + '\n' +
+        '👤 **نام:** ' + (user.full_name || '❌ ثبت‌نام ناقص') + '\n' +
+        '📱 **شماره:** ' + (user.phone || '❌ ثبت نشده') + '\n' +
+        '💳 **کارت:** ' + (user.card_number || '❌ ثبت نشده') + '\n' +
+        '💰 **موجودی:** ' + Number(user.balance).toLocaleString() + ' تومان\n' +
+        '📅 **تاریخ ثبت:** ' + (user.registered_at || 'نامشخص') + '\n' +
+        '📌 **وضعیت ثبت‌نام:** ' + (isFullyRegistered ? '✅ کامل' : '⚠️ ناقص') + '\n';
+      ctx.reply(infoText, { parse_mode: 'Markdown' });
+      delete sessions[ctx.from.id];
+      return;
+    }
+
     return next();
   });
 
@@ -1000,7 +1139,7 @@ module.exports = function registerAdminHandlers(bot) {
   });
 
   // ============================================
-  // هندلرهای callback اضافی (نوع کوپن، انتخاب نوع پیام مخفی)
+  // هندلرهای callback اضافی
   // ============================================
   bot.action('coupon_type_gift', async (ctx) => {
     const s = sessions[ctx.from.id];
@@ -1019,7 +1158,6 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('💰 **تخفیف**\n\nمبلغ تخفیف را به تومان وارد کنید:');
   });
 
-  // انتخاب نوع پیام در ارسال مخفی
   bot.action('fake_text_only', async (ctx) => {
     const s = sessions[ctx.from.id];
     if (!s || s.flow !== 'admin_fake_broadcast') return;
@@ -1035,7 +1173,6 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('🖼 عکس را ارسال کنید:');
   });
 
-  // انتخاب نوع قیمت برای افزودن محصول خرید
   bot.action('buy_price_usd', async (ctx) => {
     const s = sessions[ctx.from.id];
     if (!s || s.flow !== 'admin_add_product_buy') return;
@@ -1082,13 +1219,406 @@ module.exports = function registerAdminHandlers(bot) {
   });
 
   // ============================================
-  // سایر بخش‌های پنل (پردازش درخواست‌ها، آمار، جستجو و ...) از admin.js قدیمی کپی می‌شوند
+  // سفارشات خرید در انتظار
   // ============================================
-  // (باقی handlerهای اصلی مثل admin_buy_pending, admin_sell_pending, admin_pending, admin_approve, admin_reject,
-  //  admin_deliver, admin_stats, admin_find, admin_userinfo و ...)
-  // به دلیل محدودیت فضا، این قسمت‌ها عیناً از admin.js قبلی که ارسال کردی صحیح هستند و نیازی به تغییر ندارند.
-  // من آن‌ها را در اینجا دوباره نمی‌نویسم تا فایل طولانی نشود. اما توجه داشته باش که آن بخش‌ها نیز کاملاً کاربردی هستند
-  // و باید در انتهای همین فایل قرار بگیرند.
+  bot.action('admin_buy_pending', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
 
-  // در صورت نیاز به فایل کامل، لطفاً بگو تا ادامه آن را نیز ارسال کنم.
+    const pendingRes = await pool.query("SELECT * FROM orders WHERE status = 'pending_delivery' ORDER BY id ASC");
+    const pendingRequests = pendingRes.rows;
+
+    if (pendingRequests.length === 0) {
+      ctx.reply('✅ هیچ سفارش خریدی در انتظار تحویل نیست.');
+      return;
+    }
+
+    for (const req of pendingRequests) {
+      const user = await getUser(req.telegram_id);
+      const userName = user ? user.full_name : 'نامشخص';
+      const productRes = await pool.query('SELECT name FROM products WHERE key = $1', [req.product_type]);
+      const productName = productRes.rows[0] ? productRes.rows[0].name : req.product_type;
+
+      let message = '📦 **سفارش خرید در انتظار تحویل**\n\n';
+      message += '🆔 کد پیگیری: `' + req.tracking_code + '`\n';
+      message += '👤 کاربر: ' + userName + ' (`' + req.telegram_id + '`)\n';
+      message += '📦 محصول: ' + productName + '\n';
+      message += '💰 مبلغ: ' + Number(req.amount).toLocaleString() + ' تومان\n';
+      message += '💰 کارمزد: ' + Number(req.commission || 0).toLocaleString() + ' تومان\n';
+      message += '📅 تاریخ: ' + req.created_at + '\n\n';
+      message += '⚠️ کد/متن تحویل را با دکمه زیر وارد کنید:';
+
+      const buttons = [
+        [{ text: '📤 ارسال کد تحویل', callback_data: 'admin_deliver_' + req.id }],
+        [
+          { text: '✅ تکمیل دستی', callback_data: 'admin_buy_complete_' + req.id },
+          { text: '❌ لغو و بازگشت وجه', callback_data: 'admin_buy_cancel_' + req.id }
+        ]
+      ];
+
+      await ctx.reply(message, { reply_markup: { inline_keyboard: buttons }, parse_mode: 'Markdown' });
+    }
+  });
+
+  // ============================================
+  // سفارشات فروش در انتظار
+  // ============================================
+  bot.action('admin_sell_pending', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const pendingRes = await pool.query("SELECT * FROM sell_orders WHERE status = 'pending_review' ORDER BY id ASC");
+    const pendingRequests = pendingRes.rows;
+
+    if (pendingRequests.length === 0) {
+      ctx.reply('✅ هیچ درخواست فروشی در انتظار نیست.');
+      return;
+    }
+
+    for (const req of pendingRequests) {
+      const user = await getUser(req.telegram_id);
+      const userName = user ? user.full_name : 'نامشخص';
+      const productRes = await pool.query('SELECT name FROM sell_products WHERE key = $1', [req.product_type]);
+      const productName = productRes.rows[0] ? productRes.rows[0].name : req.product_type;
+
+      let message = '🎟 **درخواست فروش**\n\n';
+      message += '🆔 کد پیگیری: `' + req.tracking_code + '`\n';
+      message += '👤 کاربر: ' + userName + ' (`' + req.telegram_id + '`)\n';
+      message += '📦 محصول: ' + productName + '\n';
+      message += '🎫 کد ووچر: `' + req.voucher_code + '`\n';
+
+      const buttons = [
+        [{ text: '✅ تایید و وارد کردن مبلغ', callback_data: 'admin_sell_approve_' + req.id }],
+        [
+          { text: '❌ رد', callback_data: 'admin_sell_reject_' + req.id },
+          { text: '✉️ رد با توضیح', callback_data: 'admin_sell_reject_reason_' + req.id }
+        ]
+      ];
+
+      await ctx.reply(message, { reply_markup: { inline_keyboard: buttons }, parse_mode: 'Markdown' });
+    }
+  });
+
+  // ============================================
+  // درخواست‌های کیف پول در انتظار
+  // ============================================
+  bot.action('admin_pending', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const pendingRes = await pool.query("SELECT * FROM wallet_requests WHERE status = 'pending' ORDER BY id ASC");
+    const pendingRequests = pendingRes.rows;
+
+    if (pendingRequests.length === 0) {
+      ctx.reply('✅ هیچ درخواست کیف پولی در انتظار نیست.');
+      return;
+    }
+
+    for (const req of pendingRequests) {
+      const user = await getUser(req.telegram_id);
+      const userName = user ? user.full_name : 'نامشخص';
+      const typeLabel = req.type === 'deposit' ? '➕ افزایش موجودی' : '💳 برداشت موجودی';
+
+      let message = '💰 **' + typeLabel + '**\n\n';
+      message += '🆔 کد پیگیری: `' + (req.tracking_code || '-') + '`\n';
+      message += '👤 کاربر: ' + userName + ' (`' + req.telegram_id + '`)\n';
+      message += '💰 مبلغ: ' + Number(req.amount).toLocaleString() + ' تومان\n';
+      if (req.type === 'withdraw') {
+        message += '💳 شماره کارت مقصد: `' + req.card_number + '`\n';
+      }
+
+      const buttons = [
+        [
+          { text: '✅ تایید', callback_data: 'admin_approve_' + req.id },
+          { text: '❌ رد', callback_data: 'admin_reject_' + req.id }
+        ],
+        [{ text: '✉️ رد با توضیح', callback_data: 'admin_reject_reason_' + req.id }]
+      ];
+
+      if (req.type === 'deposit' && req.receipt_file_id) {
+        await ctx.replyWithPhoto(req.receipt_file_id, { caption: message, reply_markup: { inline_keyboard: buttons }, parse_mode: 'Markdown' });
+      } else {
+        await ctx.reply(message, { reply_markup: { inline_keyboard: buttons }, parse_mode: 'Markdown' });
+      }
+    }
+  });
+
+  // ============================================
+  // دکمه‌های تایید/رد و تحویل
+  // ============================================
+  bot.action(/^admin_deliver_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const orderId = ctx.match[1];
+    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+    const order = orderRes.rows[0];
+
+    if (!order || order.status !== 'pending_delivery') {
+      ctx.reply('این سفارش قبلاً تحویل داده شده یا وجود ندارد.');
+      return;
+    }
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_deliver_code',
+      step: 'waiting_code',
+      lang: 'fa',
+      data: { orderId: orderId, telegramId: order.telegram_id, trackingCode: order.tracking_code }
+    };
+
+    ctx.reply('✍️ کد/متن تحویل را بنویسید (مستقیم برای کاربر ارسال می‌شود):');
+  });
+
+  bot.action(/^admin_buy_complete_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const orderId = ctx.match[1];
+    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+    const order = orderRes.rows[0];
+
+    if (!order || order.status !== 'pending_delivery') {
+      ctx.reply('این سفارش قبلاً بررسی شده است.');
+      return;
+    }
+
+    await pool.query("UPDATE orders SET status = 'completed' WHERE id = $1", [orderId]);
+    ctx.telegram.sendMessage(
+      order.telegram_id,
+      '✅ سفارش خرید شما تکمیل شد.\n🆔 کد پیگیری: ' + order.tracking_code + '\n\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.'
+    );
+    ctx.reply('✅ سفارش شماره ' + orderId + ' تکمیل شد.');
+  });
+
+  bot.action(/^admin_buy_cancel_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const orderId = ctx.match[1];
+    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+    const order = orderRes.rows[0];
+
+    if (!order || order.status !== 'pending_delivery') {
+      ctx.reply('این سفارش قبلاً بررسی شده است.');
+      return;
+    }
+
+    const totalRefund = Number(order.amount) + Number(order.commission || 0);
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [totalRefund, order.telegram_id]);
+    await pool.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [orderId]);
+
+    ctx.telegram.sendMessage(
+      order.telegram_id,
+      '❌ سفارش خرید شما لغو شد.\n🆔 کد پیگیری: ' + order.tracking_code + '\n💰 مبلغ ' + totalRefund.toLocaleString() + ' تومان به کیف پول شما بازگشت داده شد.'
+    );
+    ctx.reply('❌ سفارش شماره ' + orderId + ' لغو شد و مبلغ به کاربر بازگشت داده شد.');
+  });
+
+  bot.action(/^admin_sell_approve_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const requestId = ctx.match[1];
+    const reqRes = await pool.query('SELECT * FROM sell_orders WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending_review') {
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
+    }
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_sell_amount',
+      step: 'waiting_amount',
+      lang: 'fa',
+      data: { requestId: requestId }
+    };
+
+    ctx.reply(texts.fa.sellAskFinalAmount);
+  });
+
+  bot.action(/^admin_sell_reject_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const requestId = ctx.match[1];
+    const reqRes = await pool.query('SELECT * FROM sell_orders WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending_review') {
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
+    }
+
+    await pool.query("UPDATE sell_orders SET status = 'rejected' WHERE id = $1", [requestId]);
+    ctx.telegram.sendMessage(
+      request.telegram_id,
+      fillTemplate(texts.fa.sellRejectedUser, { trackingCode: request.tracking_code })
+    );
+    ctx.reply('❌ درخواست فروش شماره ' + requestId + ' رد شد.');
+  });
+
+  bot.action(/^admin_sell_reject_reason_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const requestId = ctx.match[1];
+    const reqRes = await pool.query('SELECT * FROM sell_orders WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending_review') {
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
+    }
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_sell_reject_reason',
+      step: 'waiting_reason',
+      lang: 'fa',
+      data: { requestId: requestId }
+    };
+
+    ctx.reply('✍️ لطفاً دلیل رد این درخواست فروش را بنویسید (همین متن مستقیم برای کاربر ارسال می‌شود):');
+  });
+
+  bot.action(/^admin_approve_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const requestId = ctx.match[1];
+    const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending') {
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
+    }
+
+    const codeText = request.tracking_code ? ('\n🆔 کد پیگیری: ' + request.tracking_code) : '';
+
+    if (request.type === 'deposit') {
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [request.amount, request.telegram_id]);
+      ctx.telegram.sendMessage(request.telegram_id, '✅ شارژ کیف پول شما تایید شد.' + codeText + '\nمبلغ ' + Number(request.amount).toLocaleString() + ' تومان به موجودی شما اضافه شد.');
+    } else {
+      await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [request.amount, request.telegram_id]);
+      ctx.telegram.sendMessage(request.telegram_id, '✅ درخواست برداشت شما تایید شد.' + codeText + '\nمبلغ ' + Number(request.amount).toLocaleString() + ' تومان به کارت شما واریز شد.');
+    }
+
+    await pool.query("UPDATE wallet_requests SET status = 'approved' WHERE id = $1", [requestId]);
+    ctx.reply('✅ درخواست شماره ' + requestId + ' تایید شد.');
+  });
+
+  bot.action(/^admin_reject_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const requestId = ctx.match[1];
+    const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending') {
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
+    }
+
+    await pool.query("UPDATE wallet_requests SET status = 'rejected' WHERE id = $1", [requestId]);
+    const codeText = request.tracking_code ? ('\n🆔 کد پیگیری: ' + request.tracking_code) : '';
+    ctx.telegram.sendMessage(request.telegram_id, '❌ درخواست شما رد شد.' + codeText + '\nدر صورت هرگونه سؤال با پشتیبانی در تماس باشید.');
+    ctx.reply('❌ درخواست شماره ' + requestId + ' رد شد.');
+  });
+
+  bot.action(/^admin_reject_reason_([0-9]+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const requestId = ctx.match[1];
+    const reqRes = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [requestId]);
+    const request = reqRes.rows[0];
+
+    if (!request || request.status !== 'pending') {
+      ctx.reply('این درخواست قبلاً بررسی شده است.');
+      return;
+    }
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_reject_reason',
+      step: 'waiting_reason',
+      lang: 'fa',
+      data: { requestId: requestId }
+    };
+
+    ctx.reply('✍️ لطفاً دلیل رد این درخواست را بنویسید (همین متن مستقیم برای کاربر ارسال می‌شود):');
+  });
+
+  // ============================================
+  // آمار کاربران
+  // ============================================
+  bot.action('admin_stats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    const totalUsers = await pool.query('SELECT COUNT(*)::int AS c FROM users');
+    const registeredUsers = await pool.query("SELECT COUNT(*)::int AS c FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
+    const totalBalance = await pool.query('SELECT COALESCE(SUM(balance), 0) AS total FROM users');
+    const todayOrders = await pool.query("SELECT COUNT(*)::int AS c FROM orders WHERE created_at::date >= CURRENT_DATE");
+    const todaySells = await pool.query("SELECT COUNT(*)::int AS c FROM sell_orders WHERE created_at::date >= CURRENT_DATE");
+
+    ctx.reply(
+      '📊 **آمار کاربران ووچینو**\n\n' +
+      '👥 **کل کاربران:** ' + totalUsers.rows[0].c + '\n' +
+      '✅ **ثبت‌نام کامل:** ' + registeredUsers.rows[0].c + '\n' +
+      '💰 **مجموع موجودی:** ' + Number(totalBalance.rows[0].total).toLocaleString() + ' تومان\n' +
+      '🛒 **سفارشات امروز:** ' + todayOrders.rows[0].c + '\n' +
+      '🎟 **فروش امروز:** ' + todaySells.rows[0].c,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  // ============================================
+  // جستجوی کد پیگیری
+  // ============================================
+  bot.action('admin_find', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_find',
+      step: 'waiting_code',
+      lang: 'fa'
+    };
+
+    ctx.reply('🔎 **جستجوی کد پیگیری**\n\nلطفاً کد پیگیری را وارد کنید:\nمثال: `VOC-847392` یا `#VCH_1024`', { parse_mode: 'Markdown' });
+  });
+
+  // ============================================
+  // اطلاعات یک کاربر
+  // ============================================
+  bot.action('admin_userinfo', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    sessions[ctx.from.id] = {
+      flow: 'admin_userinfo',
+      step: 'waiting_id',
+      lang: 'fa'
+    };
+
+    ctx.reply('👤 **اطلاعات یک کاربر**\n\nلطفاً آیدی عددی کاربر را وارد کنید:\nمثال: `8231962200`', { parse_mode: 'Markdown' });
+  });
+
 };
