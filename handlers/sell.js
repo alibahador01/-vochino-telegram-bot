@@ -1,9 +1,10 @@
+// handlers/sell.js
 const texts = require('../texts');
 const { sessions, fillTemplate, generateTrackingCode } = require('../utils');
 const { pool, getUser } = require('../db');
-const PricingEngine = require('../pricingEngine');
 
 module.exports = function registerSellHandlers(bot) {
+
   bot.action('menu_sell', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -22,6 +23,13 @@ module.exports = function registerSellHandlers(bot) {
     ctx.reply(t.sellMenuTitle, { reply_markup: { inline_keyboard: buttons } });
   });
 
+  bot.action('sell_cancel', async (ctx) => {
+    ctx.answerCbQuery();
+    delete sessions[ctx.from.id];
+    try { await ctx.deleteMessage(); } catch (e) {}
+    ctx.reply('فروش لغو شد.');
+  });
+
   bot.action(/^sell_(.+)/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
@@ -35,88 +43,74 @@ module.exports = function registerSellHandlers(bot) {
       return;
     }
 
-    // دریافت درصد سود فروش از دیتابیس برای نمایش
-    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'sell_margin'");
-    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
-
-    const messageText = fillTemplate(t.sellAskCode, {
+    // نمایش اطلاعات محصول و درخواست کد ووچر
+    let messageText = fillTemplate(t.sellAskCode, {
       product: product.name,
-      price: Number(product.unit_price).toLocaleString('en-US'),
+      price: Number(product.unit_price).toLocaleString(),
       sample: product.sample_code
-    }) + '\n\n💰 کارمزد (سود ما): ' + marginPercentage + '%';
+    });
 
-    const session = {
+    // نمایش کارمزد
+    if (product.commission_type === 'percentage') {
+      messageText += '\n\n💰 کارمزد فروش: ' + product.commission_value + '%';
+    } else if (product.commission_type === 'fixed') {
+      messageText += '\n\n💰 کارمزد فروش: ' + Number(product.commission_value).toLocaleString() + ' تومان';
+    } else {
+      messageText += '\n\n💰 بدون کارمزد';
+    }
+
+    sessions[ctx.from.id] = {
       flow: 'sell',
       step: 'waiting_code',
       lang: 'fa',
-      data: { productType: product.key, productLabel: product.name }
+      data: {
+        productType: product.key,
+        productLabel: product.name,
+        unitPrice: Number(product.unit_price),
+        commissionType: product.commission_type,
+        commissionValue: Number(product.commission_value || 0)
+      }
     };
-    sessions[ctx.from.id] = session;
-
-    const extra = { reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] } };
 
     try {
-      await ctx.editMessageText(messageText, extra);
-      session.lastBotMsgId = ctx.callbackQuery.message.message_id;
+      await ctx.editMessageText(messageText);
     } catch (e) {
       try { await ctx.deleteMessage(); } catch (err) {}
-      const sent = await ctx.reply(messageText, extra);
-      session.lastBotMsgId = sent.message_id;
+      ctx.reply(messageText);
     }
   });
 
+  // دریافت کد ووچر از کاربر
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'sell' || session.step !== 'waiting_code') return next();
 
-    const t = texts.fa;
     const voucherCode = ctx.message.text.trim();
-    const trackingCode = generateTrackingCode();
-
-    // دریافت درصد سود فروش از دیتابیس
-    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'sell_margin'");
-    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
-
-    // دریافت قیمت پایه از محصول فروش
-    const productRes = await pool.query('SELECT unit_price FROM sell_products WHERE key = $1', [session.data.productType]);
-    const baseAmount = productRes.rows[0] ? Number(productRes.rows[0].unit_price) : 0;
-
-    // دریافت حالت فروش
-    const modeRes = await pool.query("SELECT value FROM settings WHERE key = 'sell_mode'");
-    const mode = modeRes.rows[0] ? modeRes.rows[0].value : 'MANUAL';
-
-    // محاسبه با PricingEngine (فروش - SELL)
-    const pricingResult = PricingEngine.calculate({
-      actionType: 'SELL',
-      baseAmount: baseAmount,
-      marginPercentage: marginPercentage,
-      minAmount: 0,
-      mode: mode
-    });
-
-    const finalAmount = pricingResult.finalAmount;
-
-    // اگه حالت AUTO باشه، مستقیم واریز میکنه
-    if (mode === 'AUTO') {
-      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
-      await pool.query(
-        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [String(ctx.from.id), session.data.productType, voucherCode, finalAmount, 'approved', new Date().toISOString(), trackingCode]
-      );
-      ctx.reply(fillTemplate(t.sellApprovedUser, {
-        trackingCode: trackingCode,
-        amount: finalAmount.toLocaleString('en-US')
-      }));
-    } else {
-      // حالت MANUAL: ثبت سفارش برای تایید ادمین
-      await pool.query(
-        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [String(ctx.from.id), session.data.productType, voucherCode, finalAmount, 'pending_review', new Date().toISOString(), trackingCode]
-      );
-      ctx.reply(fillTemplate(t.sellCodeReceived, { trackingCode: trackingCode }));
+    if (voucherCode.length < 5) {
+      return ctx.reply('❌ کد ووچر نامعتبر است. لطفاً یک کد صحیح وارد کنید.');
     }
 
-    try { await ctx.telegram.deleteMessage(ctx.chat.id, session.lastBotMsgId); } catch (e) {}
-    delete sessions[ctx.from.id];
+    // ذخیره کد و ایجاد سفارش فروش
+    const trackingCode = generateTrackingCode();
+    
+    try {
+      await pool.query(
+        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, NOW(), $5)',
+        [String(ctx.from.id), session.data.productType, voucherCode, 'pending_review', trackingCode]
+      );
+
+      delete sessions[ctx.from.id];
+      
+      ctx.reply(
+        fillTemplate(texts.fa.sellCodeReceived, {
+          trackingCode: trackingCode
+        })
+      );
+    } catch (err) {
+      console.error('خطا در ثبت سفارش فروش:', err);
+      ctx.reply('❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+      delete sessions[ctx.from.id];
+    }
   });
+
 };
