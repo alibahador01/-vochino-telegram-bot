@@ -162,6 +162,18 @@ CREATE TABLE IF NOT EXISTS api_sources (
 );
 
 -- ============================================
+-- جدول واسط جدید: اتصال محصولات به صرافی‌ها
+-- ============================================
+CREATE TABLE IF NOT EXISTS product_api_links (
+    id SERIAL PRIMARY KEY,
+    product_type TEXT CHECK (product_type IN ('buy', 'sell')) NOT NULL,
+    product_key TEXT NOT NULL,
+    api_source_id INTEGER REFERENCES api_sources(id),
+    priority INTEGER DEFAULT 1,
+    active INTEGER DEFAULT 1
+);
+
+-- ============================================
 -- جدول کدهای تخفیف و هدیه
 -- ============================================
 CREATE TABLE IF NOT EXISTS coupons (
@@ -219,7 +231,13 @@ INSERT INTO settings (key, value) VALUES
     ('referral_enabled', 'true'),
     ('game_rtp', '50'),
     ('game_require_purchase', 'true'),
-    ('force_join_enabled', 'true')
+    ('force_join_enabled', 'true'),
+    ('disableBalanceGame', 'false'),
+    ('disableBonusGame', 'false'),
+    ('winRateBalance', '50'),
+    ('winRateBonus', '50'),
+    ('gameMultiplier', '2'),
+    ('minPurchaseForGame', '0')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
@@ -230,18 +248,46 @@ VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی
 ON CONFLICT (chat_id) DO NOTHING;
 
 -- ============================================
--- محصولات پیش‌فرض خرید
+-- محصولات خرید (شامل محصولات جدید مخفی)
 -- ============================================
-INSERT INTO products (key, name, min_amount, price_type, active, created_at) VALUES 
-    ('voucher', '🎟 یوووچر', 1, 'usd', 1, NOW()),
-    ('hotvoucher', '🎟 هات ووچر', 50000, 'toman', 1, NOW())
+
+-- محصولات قدیمی و فعال
+INSERT INTO products (key, name, min_amount, price_type, active, hidden, created_at) VALUES 
+    ('voucher', '🎟 یوووچر', 1, 'usd', 1, 0, NOW()),
+    ('hotvoucher', '🎟 هات ووچر', 50000, 'toman', 1, 0, NOW())
+ON CONFLICT (key) DO NOTHING;
+
+-- محصولات جدید (غیرفعال/مخفی)
+INSERT INTO products (key, name, min_amount, price_type, active, hidden, created_at) VALUES 
+    ('premium_voucher', '🎟 پرمیوم ووچر', 100000, 'toman', 0, 1, NOW()),
+    ('ps_voucher', '🔵 پی‌اس ووچر', 185081, 'toman', 0, 1, NOW()),
+    ('perfect_money', '💵 پرفکت مانی', 1, 'usd', 0, 1, NOW()),
+    ('crypto_dollar', '💲 دلار (کریپتو)', 10, 'usd', 0, 1, NOW()),
+    ('crypto_tron', '🪙 ترون (TRX)', 100, 'toman', 0, 1, NOW()),
+    ('crypto_ton', '💎 تون (TON)', 100, 'toman', 0, 1, NOW()),
+    ('telegram_stars', '⭐️ استارز تلگرام', 50, 'toman', 0, 1, NOW()),
+    ('telegram_gift_stars', '🎁 گیفت استارزی', 100, 'toman', 0, 1, NOW()),
+    ('telegram_gift_collection', '🎁 گیفت کلکسیونی', 100, 'toman', 0, 1, NOW()),
+    ('telegram_premium', '💎 پرمیوم تلگرام', 50000, 'toman', 0, 1, NOW()),
+    ('channel_boost', '🚀 بوست کانال', 100000, 'toman', 0, 1, NOW()),
+    ('post_reaction', '❤️ ری‌اکشن پست', 500, 'toman', 0, 1, NOW()),
+    ('post_view', '👁 بازدید پست', 500, 'toman', 0, 1, NOW()),
+    ('virtual_number', '📱 شماره مجازی', 50000, 'toman', 0, 1, NOW())
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
--- محصولات پیش‌فرض فروش
+-- محصولات فروش (شامل موارد جدید مخفی)
 -- ============================================
+
+-- محصولات فروش قدیمی و فعال
 INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES 
     ('uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', 1, NOW()),
     ('premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', 1, NOW()),
-    ('psvoucher', '🎟 پی اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', 1, NOW())
+    ('psvoucher', '🔵 پی‌اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', 1, NOW())
+ON CONFLICT (key) DO NOTHING;
+
+-- محصولات فروش جدید (غیرفعال)
+INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES 
+    ('hotvoucher_sell', '🎟 هات ووچر', 50000, 'HOT-XXXX-XXXX', 0, NOW()),
+    ('perfect_money_sell', '💵 پرفکت مانی', 60000, 'PM-XXXX', 0, NOW())
 ON CONFLICT (key) DO NOTHING;
