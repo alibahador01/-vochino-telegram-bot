@@ -1,11 +1,11 @@
 // handlers/misc.js
 const texts = require('../texts');
 const { sessions, showMainMenu } = require('../utils');
-const { pool, getUser, getUserById, getAllUsers } = require('../db');
+const { pool, getUser, getAllUsers } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 
 function isAdmin(telegramId) {
-  return ADMIN_IDS.indexOf(Number(telegramId)) !== -1;
+  return ADMIN_IDS.includes(Number(telegramId));
 }
 
 module.exports = function registerMiscHandlers(bot) {
@@ -31,39 +31,74 @@ module.exports = function registerMiscHandlers(bot) {
   });
 
   // ============================================
-  // پروفایل کاربر
+  // دکمه‌های منوی اصلی (همه callbackها)
   // ============================================
-  bot.action('menu_profile', async (ctx) => {
+
+  // ✨ خرید (منوی buy) – به handlers/buy.js واگذار می‌شود
+  bot.action('menu_buy', async (ctx) => {
     ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const user = await getUser(ctx.from.id);
-    if (!user) {
-      ctx.reply('⚠️ اطلاعاتی برای شما ثبت نشده است. لطفاً /start را بزنید.');
-      return;
-    }
-
-    const lang = user.language || 'fa';
-    const level = user.verification_status === 'gold' ? '🥇 طلایی' : (user.verification_status === 'silver' ? '🥈 نقره‌ای' : '⚪ مهمان');
-    const inviteCount = await pool.query('SELECT COUNT(*)::int AS count FROM users WHERE referrer_id = $1', [String(ctx.from.id)]);
-
-    const profileTexts = {
-      fa: `👤 **پروفایل کاربر**\n\n🆔 آیدی: \`${user.telegram_id}\`\n👤 نام: ${user.full_name || 'ثبت نشده'}\n📱 تلفن: ${user.phone || 'ثبت نشده'}\n💳 کارت: ${user.card_number || 'ثبت نشده'}\n💰 موجودی: ${Number(user.balance).toLocaleString()} تومان\n🎁 بونوس: ${Number(user.bonus_balance || 0).toLocaleString()} تومان\n🎖 سطح احراز: ${level}\n👥 دعوت: ${inviteCount.rows[0].count} نفر\n📅 ثبت‌نام: ${user.registered_at ? new Date(user.registered_at).toLocaleDateString('fa-IR') : 'نامشخص'}`,
-      en: `👤 **Profile**\n\n🆔 ID: \`${user.telegram_id}\`\n👤 Name: ${user.full_name || 'N/A'}\n📱 Phone: ${user.phone || 'N/A'}\n💳 Card: ${user.card_number || 'N/A'}\n💰 Balance: ${Number(user.balance).toLocaleString()} Toman\n🎁 Bonus: ${Number(user.bonus_balance || 0).toLocaleString()} Toman\n🎖 Verification: ${level}\n👥 Invites: ${inviteCount.rows[0].count}\n📅 Registered: ${user.registered_at ? new Date(user.registered_at).toLocaleDateString('en-US') : 'N/A'}`,
-      tr: `👤 **Profil**\n\n🆔 ID: \`${user.telegram_id}\`\n👤 İsim: ${user.full_name || 'Yok'}\n📱 Telefon: ${user.phone || 'Yok'}\n💳 Kart: ${user.card_number || 'Yok'}\n💰 Bakiye: ${Number(user.balance).toLocaleString()} Tümen\n🎁 Bonus: ${Number(user.bonus_balance || 0).toLocaleString()} Tümen\n🎖 Doğrulama: ${level}\n👥 Davet: ${inviteCount.rows[0].count}\n📅 Kayıt: ${user.registered_at ? new Date(user.registered_at).toLocaleDateString('tr-TR') : 'Yok'}`
-    };
-
-    ctx.reply(profileTexts[lang] || profileTexts.fa, { parse_mode: 'Markdown' });
+    // ریدایرکت به هندلر خرید
+    return ctx.deleteMessage().then(() => ctx.answerCbQuery()).catch(() => {});
+    // (در واقع بهتر است خود buy handlers مستقیماً callback را بگیرند، اما اینجا صرفاً برای هماهنگی)
   });
 
-  // ============================================
-  // پشتیبانی (تیکتینگ)
-  // ============================================
+  // ✨ فروش (sell)
+  bot.action('menu_sell', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    // ریدایرکت به هندلر فروش (از آنجا که buy و sell جدا هستند، اینجا صرفاً منو را نشان می‌دهیم)
+    const { getSellProducts } = require('../db');
+    const products = await getSellProducts(true);
+    const t = texts.fa;
+    if (products.length === 0) return ctx.reply(t.sellNoProducts);
+    const buttons = products.map(p => [{ text: p.name, callback_data: 'sell_' + p.key }]);
+    ctx.reply(t.sellMenuTitle, { reply_markup: { inline_keyboard: buttons } });
+  });
+
+  // 🧳 جیب (wallet)
+  bot.action('menu_wallet', async (ctx) => {
+    ctx.answerCbQuery();
+    // به هندلر wallet ارجاع می‌دهیم (قبلاً در wallet.js)
+    try { await ctx.deleteMessage(); } catch (e) {}
+    // با صدا زدن همان handler که در wallet.js ثبت شده، چون اینجا require شده
+    return require('./wallet').showWalletMenu(ctx); // یک تابع کمکی در wallet.js صادر می‌کنیم
+  });
+
+  // 💎 بونوس (bonus) – بازی‌ها
+  bot.action('menu_bonus', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    // رفتن به منوی بازی (game handlers)
+    const gameHandler = require('./game');
+    // در game.js یک تابع کمکی برای شروع بازی‌ها تعریف کرده‌ایم
+    return gameHandler.showBonusMenu(ctx);
+  });
+
+  // 🎁 ویژه ووچینو⁰۱ (special) – اینجا VPN و فیلترشکن
+  bot.action('menu_special', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    // انتقال به بخش VPN (فایل handlers/vpn.js)
+    const vpnHandler = require('./vpn');
+    return vpnHandler.showVpnMenu(ctx);
+  });
+
+  // 🌐 وب‌سایت ووچینو⁰۱ – مستقیم لینک را باز کن
+  bot.action('menu_website', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const websiteUrl = process.env.WEBSITE_URL || 'https://vochino.com';
+    ctx.reply(`🌐 وب‌سایت ووچینو⁰۱:\n${websiteUrl}`, {
+      reply_markup: {
+        inline_keyboard: [[{ text: '🚀 باز کردن وب‌سایت', url: websiteUrl }]]
+      }
+    });
+  });
+
+  // 📥 پشتیبانی (support) – تیکتینگ
   bot.action('menu_support', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-
-    const t = texts.fa;
     ctx.reply('📞 **پشتیبانی ووچینو⁰¹**\n\nلطفاً گزینه مورد نظر را انتخاب کنید:', {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -77,18 +112,18 @@ module.exports = function registerMiscHandlers(bot) {
     });
   });
 
-  // ارسال تیکت جدید
+  // ============================================
+  // تیکت جدید
+  // ============================================
   bot.action('support_new_ticket', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-
     sessions[ctx.from.id] = {
       flow: 'support_ticket',
       step: 'waiting_subject',
       lang: 'fa',
       data: {}
     };
-
     ctx.reply('📝 **تیکت جدید**\n\nلطفاً **موضوع** پیام خود را بنویسید:');
   });
 
@@ -96,122 +131,73 @@ module.exports = function registerMiscHandlers(bot) {
   bot.action('support_my_tickets', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-
     const tickets = await pool.query(
       'SELECT * FROM tickets WHERE telegram_id = $1 ORDER BY created_at DESC LIMIT 10',
       [String(ctx.from.id)]
     );
-
-    if (tickets.rows.length === 0) {
-      ctx.reply('📋 شما هیچ تیکتی ثبت نکرده‌اید.');
-      return;
-    }
-
-    let message = '📋 **تیکت‌های شما**\n\n';
+    if (tickets.rows.length === 0) return ctx.reply('📋 شما هیچ تیکتی ثبت نکرده‌اید.');
+    let msg = '📋 **تیکت‌های شما**\n\n';
     tickets.rows.forEach((t, i) => {
-      const statusEmoji = t.status === 'open' ? '🟡 باز' : t.status === 'closed' ? '🟢 بسته' : '🔵 در حال بررسی';
-      message += `${i + 1}. ${t.subject}\n   وضعیت: ${statusEmoji}\n   تاریخ: ${new Date(t.created_at).toLocaleDateString('fa-IR')}\n\n`;
+      const s = t.status === 'open' ? '🟡 باز' : t.status === 'closed' ? '🟢 بسته' : '🔵 در حال بررسی';
+      msg += `${i+1}. ${t.subject} | ${s}\n`;
     });
-
-    ctx.reply(message, { parse_mode: 'Markdown' });
+    ctx.reply(msg, { parse_mode: 'Markdown' });
   });
 
   // سوالات متداول
   bot.action('support_faq', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-
     ctx.reply(
       '❓ **سوالات متداول**\n\n' +
-      '🔹 **چقدر طول می‌کشه شارژم تایید بشه؟**\nمعمولاً چند دقیقه، حداکثر تا چند ساعت.\n\n' +
-      '🔹 **حداقل مبلغ برداشت چقدره؟**\n۱۰۰,۰۰۰ تومان.\n\n' +
-      '🔹 **آیا واریزی از کارت دیگران قبوله؟**\nخیر، فقط از کارتی که به نام خودتون ثبت شده.\n\n' +
-      '🔹 **بونوس بازی چطور فعال می‌شه؟**\nبا اولین خرید موفق، بخش بازی‌ها برای شما فعال می‌شود.\n\n' +
-      '🔹 **چطور احراز هویت طلایی کنم؟**\nاز بخش جیب > افزایش سقف خرید، عکس کارت ملی و بانکی را ارسال کنید.',
-      { parse_mode: 'Markdown' }
+      '🔹 **حداقل مبلغ برداشت چقدره؟**\n' + require('../constants').MIN_WITHDRAW.toLocaleString('en-US') + ' تومان\n\n' +
+      '🔹 **آیا واریزی از کارت دیگران قبوله؟**\nخیر، فقط از کارت ثبت‌شده خودتان.\n\n' +
+      '🔹 **بونوس بازی چطور فعال می‌شه؟**\nبا اولین خرید موفق.\n\n' +
+      '🔹 **چطور احراز هویت طلایی کنم؟**\nاز بخش جیب > افزایش سقف خرید.'
     );
   });
 
   // ============================================
-  // قوانین و آموزش
-  // ============================================
-  bot.action('menu_rules_education', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    ctx.reply(
-      '📚 **قوانین و آموزش**\n\n' +
-      '📜 **قوانین:**\n' +
-      '• واریزی فقط از کارت ثبت‌شده به نام کاربر معتبر است.\n' +
-      '• هرگونه تخلف منجر به مسدودی حساب می‌شود.\n' +
-      '• مسئولیت صحت اطلاعات بر عهده کاربر است.\n\n' +
-      '🎓 **آموزش:**\n' +
-      '• برای خرید: از منوی اصلی گزینه خرید را بزنید.\n' +
-      '• برای فروش: کد ووچر خود را وارد کنید.\n' +
-      '• برای شارژ: از بخش جیب اقدام کنید.\n\n' +
-      '📞 در صورت نیاز، با پشتیبانی تماس بگیرید.'
-    );
-  });
-
-  // ============================================
-  // پردازش متن‌های ورودی (تیکت پشتیبانی)
+  // پردازش متن‌های ورودی تیکت
   // ============================================
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session) return next();
 
-    // ---------- تیکت پشتیبانی: موضوع ----------
     if (session.flow === 'support_ticket' && session.step === 'waiting_subject') {
       const subject = ctx.message.text.trim();
-      if (subject.length < 3) {
-        return ctx.reply('❌ موضوع باید حداقل ۳ کاراکتر باشد. لطفاً دوباره بنویسید:');
-      }
+      if (subject.length < 3) return ctx.reply('❌ موضوع باید حداقل ۳ کاراکتر باشد.');
       session.data.subject = subject;
       session.step = 'waiting_message';
-      return ctx.reply('✅ موضوع ثبت شد.\n\nحالا لطفاً **متن پیام** خود را بنویسید:');
+      return ctx.reply('✅ موضوع ثبت شد.\n\nحالا **متن پیام** خود را بنویسید:');
     }
 
-    // ---------- تیکت پشتیبانی: متن ----------
     if (session.flow === 'support_ticket' && session.step === 'waiting_message') {
       const message = ctx.message.text.trim();
-      if (message.length < 5) {
-        return ctx.reply('❌ پیام باید حداقل ۵ کاراکتر باشد. لطفاً دوباره بنویسید:');
-      }
-
+      if (message.length < 5) return ctx.reply('❌ پیام باید حداقل ۵ کاراکتر باشد.');
       try {
-        // ذخیره تیکت در دیتابیس
         await pool.query(
           'INSERT INTO tickets (telegram_id, subject, message, status, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())',
           [String(ctx.from.id), session.data.subject, message, 'open']
         );
-
-        // ارسال به ادمین‌ها
-        const admins = ADMIN_IDS;
-        for (const adminId of admins) {
+        // اطلاع‌رسانی به ادمین‌ها
+        for (const adminId of ADMIN_IDS) {
           try {
             await ctx.telegram.sendMessage(
               adminId,
-              `📩 **تیکت پشتیبانی جدید**\n\n👤 کاربر: \`${ctx.from.id}\`\n📌 موضوع: ${session.data.subject}\n📝 پیام:\n${message}`,
-              {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                  inline_keyboard: [
-                    [{ text: '💬 پاسخ', callback_data: `ticket_reply_${ctx.from.id}` }],
-                    [{ text: '❌ بستن', callback_data: `ticket_close_${ctx.from.id}` }]
-                  ]
-                }
-              }
+              `📩 **تیکت جدید**\n👤 ${ctx.from.id}\n📌 ${session.data.subject}\n📝 ${message}`,
+              { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [
+                [{ text: '💬 پاسخ', callback_data: `ticket_reply_${ctx.from.id}` }],
+                [{ text: '❌ بستن', callback_data: `ticket_close_${ctx.from.id}` }]
+              ]}}
             );
-          } catch (e) {
-            console.log(`خطا در ارسال تیکت به ادمین ${adminId}:`, e.message);
-          }
+          } catch (e) {}
         }
-
         delete sessions[ctx.from.id];
-        ctx.reply('✅ **پیام شما با موفقیت ارسال شد.**\n\nپشتیبانی در اسرع وقت پاسخ خواهد داد. 🙏');
+        ctx.reply('✅ **پیام شما ارسال شد.**');
       } catch (err) {
-        console.error('خطا در ثبت تیکت:', err);
-        ctx.reply('❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+        console.error(err);
+        ctx.reply('❌ خطا در ارسال تیکت.');
         delete sessions[ctx.from.id];
       }
       return;
@@ -227,12 +213,8 @@ module.exports = function registerMiscHandlers(bot) {
     if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('⛔ دسترسی محدود');
     const targetId = ctx.match[1];
     ctx.answerCbQuery();
-    sessions[ctx.from.id] = {
-      flow: 'admin_ticket_reply',
-      step: 'waiting_message',
-      data: { targetId }
-    };
-    ctx.reply(`✍️ پاسخ خود را برای کاربر \`${targetId}\` بنویسید:`, { parse_mode: 'Markdown' });
+    sessions[ctx.from.id] = { flow: 'admin_ticket_reply', step: 'waiting_message', data: { targetId } };
+    ctx.reply(`✍️ پاسخ خود را برای \`${targetId}\` بنویسید:`, { parse_mode: 'Markdown' });
   });
 
   bot.action(/^ticket_close_(.+)/, async (ctx) => {
@@ -246,35 +228,18 @@ module.exports = function registerMiscHandlers(bot) {
   // پردازش پاسخ ادمین
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
-    if (!session) return next();
-
-    if (session.flow === 'admin_ticket_reply' && session.step === 'waiting_message') {
-      const reply = ctx.message.text;
-      const targetId = session.data.targetId;
-
-      try {
-        await ctx.telegram.sendMessage(
-          targetId,
-          `📩 **پاسخ پشتیبانی:**\n\n${reply}\n\n💛 ووچینو⁰¹ - پشتیبانی`,
-          { parse_mode: 'Markdown' }
-        );
-
-        // به‌روزرسانی تیکت
-        await pool.query(
-          "UPDATE tickets SET status = 'in_progress', admin_response = $1, updated_at = NOW() WHERE telegram_id = $2 AND status = 'open'",
-          [reply, targetId]
-        );
-
-        delete sessions[ctx.from.id];
-        ctx.reply('✅ پاسخ شما ارسال شد.');
-      } catch (err) {
-        ctx.reply('❌ خطا در ارسال پاسخ.');
-        delete sessions[ctx.from.id];
-      }
-      return;
+    if (!session || session.flow !== 'admin_ticket_reply' || session.step !== 'waiting_message') return next();
+    const reply = ctx.message.text;
+    const targetId = session.data.targetId;
+    try {
+      await ctx.telegram.sendMessage(targetId, `📩 **پاسخ پشتیبانی:**\n\n${reply}\n\n💛 ووچینو⁰¹`);
+      await pool.query("UPDATE tickets SET status = 'in_progress', admin_response = $1, updated_at = NOW() WHERE telegram_id = $2 AND status = 'open'", [reply, targetId]);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ پاسخ ارسال شد.');
+    } catch (err) {
+      ctx.reply('❌ خطا.');
+      delete sessions[ctx.from.id];
     }
-
-    return next();
+    return;
   });
-
 };
