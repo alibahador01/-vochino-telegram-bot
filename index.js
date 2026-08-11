@@ -5,6 +5,7 @@ const https = require('https');
 
 const { pool, initDb, sendRatesToChannel } = require('./db');
 const { ADMIN_IDS } = require('./constants');
+const { loadTextsCache } = require('./textManager');
 
 // ===== Express Server =====
 const app = express();
@@ -30,15 +31,15 @@ setInterval(async () => {
 // ===== ربات =====
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ===== میدلور session (برای احراز، بازی، و مراحل مختلف) =====
+// ===== میدلور session =====
 bot.use(session());
 
-// ===== هندلرهای اصلی (مبتنی بر کدهای خودت) =====
+// ===== هندلرهای اصلی =====
 require('./handlers/registration')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
 require('./handlers/sell')(bot);
-require('./handlers/game')(bot);      // game.js (بدون s)
+require('./handlers/game')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/misc')(bot);
 
@@ -66,6 +67,12 @@ bot.catch((err, ctx) => {
 // ===== شروع =====
 async function init() {
   await initDb();
+  
+  // لود کش متن‌ها
+  const cacheLoaded = await loadTextsCache();
+  if (!cacheLoaded) {
+    console.log('⚠️ کش متن‌ها بارگذاری نشد، از مقادیر پیش‌فرض استفاده می‌شود');
+  }
   
   try {
     await sendRatesToChannel(bot);
