@@ -1,7 +1,7 @@
+// handlers/buy.js
 const texts = require('../texts');
 const { sessions, sendTracked, fillTemplate, generateTrackingCode, generateVoucherTrackingCode } = require('../utils');
-const { pool, getUser, getUsdRate, grantBonusIfEligible } = require('../db');
-const { BONUS_THRESHOLD, BONUS_AMOUNT } = require('../constants');
+const { pool, getUser, getUsdRate } = require('../db');
 const PricingEngine = require('../pricingEngine');
 
 module.exports = function registerBuyHandlers(bot) {
@@ -44,31 +44,32 @@ module.exports = function registerBuyHandlers(bot) {
 
     const user = await getUser(ctx.from.id);
     const amount = session.data.amount;
+    const productKey = session.data.productType;
+
+    // دریافت اطلاعات محصول برای کارمزد
+    const productRes = await pool.query('SELECT * FROM products WHERE key = $1', [productKey]);
+    if (productRes.rows.length === 0) {
+      delete sessions[ctx.from.id];
+      return ctx.reply('❌ محصول نامعتبر است.');
+    }
+    const product = productRes.rows[0];
 
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
-    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
-    
-    const modeRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'");
-    const mode = modeRes.rows[0] ? modeRes.rows[0].value : 'MANUAL';
+    // محاسبه قیمت نهایی با کارمزد محصول
+    let finalAmount = amount;
+    let commissionAmount = 0;
 
-    const pricingResult = PricingEngine.calculate({
-      actionType: 'BUY',
-      baseAmount: amount,
-      marginPercentage: marginPercentage,
-      minAmount: session.data.minAmount || 0,
-      mode: mode
-    });
-
-    if (!pricingResult.success) {
-      ctx.reply('⚠️ خطا در محاسبه مبلغ. لطفاً دوباره تلاش کنید.');
-      delete sessions[ctx.from.id];
-      return;
+    if (product.commission_type === 'percentage') {
+      commissionAmount = Math.round(amount * (parseFloat(product.commission_value) / 100));
+      finalAmount = amount + commissionAmount;
+    } else if (product.commission_type === 'fixed') {
+      commissionAmount = parseInt(product.commission_value, 10) || 0;
+      finalAmount = amount + commissionAmount;
+    } else {
+      // 'none' یا هر چیز دیگر: بدون کارمزد
+      finalAmount = amount;
     }
-
-    const finalAmount = pricingResult.finalAmount;
-    const marginAmount = pricingResult.marginAmount;
 
     if (!user || Number(user.balance) < finalAmount) {
       delete sessions[ctx.from.id];
@@ -81,16 +82,18 @@ module.exports = function registerBuyHandlers(bot) {
       return;
     }
 
+    // کسر مبلغ نهایی از موجودی
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = generateTrackingCode();
     const voucherTrackingCode = generateVoucherTrackingCode();
-    
-    // کد مرجع ساختگی از صرافی (در آینده از API واقعی میاد)
     const providerTxId = 'TX_' + Math.floor(10000000 + Math.random() * 90000000);
 
     let orderStatus;
-    if (mode === 'MANUAL' || session.data.manualDelivery === 1) {
+    const mode = await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'");
+    const buyMode = mode.rows[0] ? mode.rows[0].value : 'MANUAL';
+
+    if (buyMode === 'MANUAL' || product.manual_delivery) {
       orderStatus = 'pending_delivery';
     } else {
       orderStatus = 'completed';
@@ -98,26 +101,23 @@ module.exports = function registerBuyHandlers(bot) {
 
     await pool.query(
       'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code, provider_tx_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [String(ctx.from.id), session.data.productType, finalAmount, marginAmount, orderStatus, new Date().toISOString(), trackingCode, providerTxId]
+      [String(ctx.from.id), productKey, finalAmount, commissionAmount, orderStatus, new Date().toISOString(), trackingCode, providerTxId]
     );
 
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
     const newBalance = newBalanceRes.rows[0].balance;
 
-    // محاسبه مقدار ووچر بر اساس نرخ دلار
     const rate = await getUsdRate();
-    const voucherAmount = (finalAmount / rate).toFixed(2);
+    const voucherAmount = product.price_type === 'usd' ? (amount / rate).toFixed(2) : amount;
 
-    // کد ووچر ساختگی (در آینده از API واقعی میاد)
     const voucherCode = 'VCH-' + Math.random().toString(36).substring(2, 10).toUpperCase();
 
-    // ===== رسید نهایی =====
     const receiptText = 
       '🧾 **رسید تراکنش موفق - ربات ووچینو⁰¹**\n\n' +
       'با تشکر، سفارش شما با موفقیت انجام شد!\n\n' +
-      '📌 **نوع تراکنش:** خرید ووچر دلار\n' +
+      '📌 **نوع تراکنش:** خرید ' + product.name + '\n' +
       '💰 **مبلغ پرداختی:** ' + finalAmount.toLocaleString('en-US') + ' تومان\n' +
-      '💵 **مقدار ووچر:** ' + voucherAmount + ' دلار\n\n' +
+      (product.price_type === 'usd' ? '💵 **مقدار ووچر:** ' + voucherAmount + ' دلار\n\n' : '') +
       '🔢 **کد پیگیری ووچینو:** #VCH_' + voucherTrackingCode + '\n' +
       '🏛 **کد مرجع شبکه (صرافی):** ' + providerTxId + '\n\n' +
       '🎟 **کد ووچر شما:**\n`' + voucherCode + '`\n\n' +
@@ -129,25 +129,22 @@ module.exports = function registerBuyHandlers(bot) {
 
     if (orderStatus === 'pending_delivery') {
       ctx.reply(fillTemplate(t.buySuccessPending, {
-        product: session.data.productLabel,
+        product: product.name,
         amount: finalAmount.toLocaleString('en-US'),
-        commission: marginAmount.toLocaleString('en-US'),
+        commission: commissionAmount.toLocaleString('en-US'),
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
-      // رسید رو هم جدا میفرستیم
       ctx.reply(receiptText, { parse_mode: 'Markdown' });
     } else {
       ctx.reply(fillTemplate(t.buySuccess, {
-        product: session.data.productLabel,
+        product: product.name,
         amount: finalAmount.toLocaleString('en-US'),
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
       ctx.reply(receiptText, { parse_mode: 'Markdown' });
     }
-
-    await grantBonusIfEligible(ctx.from.id, BONUS_THRESHOLD, BONUS_AMOUNT);
   });
 
   bot.action(/^buy_(.+)/, async (ctx) => {
@@ -195,10 +192,14 @@ module.exports = function registerBuyHandlers(bot) {
       messageText = fillTemplate(t.buyAskAmountToman, { min: minToman.toLocaleString('en-US') }) + maxText;
     }
 
-    // دریافت درصد سود از دیتابیس برای نمایش
-    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
-    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
-    messageText += '\n\n💰 کارمزد (سود ما): ' + marginPercentage + '%';
+    // نمایش نوع و مقدار کارمزد
+    if (product.commission_type === 'percentage') {
+      messageText += '\n\n💰 کارمزد: ' + product.commission_value + '%';
+    } else if (product.commission_type === 'fixed') {
+      messageText += '\n\n💰 کارمزد: ' + Number(product.commission_value).toLocaleString('en-US') + ' تومان';
+    } else {
+      messageText += '\n\n💰 بدون کارمزد';
+    }
 
     const session = {
       flow: 'buy',
@@ -248,26 +249,28 @@ module.exports = function registerBuyHandlers(bot) {
     session.data.amount = amount;
     session.step = 'waiting_confirm';
 
-    const marginRes = await pool.query("SELECT value FROM settings WHERE key = 'buy_margin'");
-    const marginPercentage = marginRes.rows[0] ? Number(marginRes.rows[0].value) : 10;
+    // محاسبه مجدد کارمزد برای نمایش در تأییدیه
+    const productRes = await pool.query('SELECT * FROM products WHERE key = $1', [session.data.productType]);
+    const product = productRes.rows[0];
+    let finalAmount = amount;
+    let commissionAmount = 0;
 
-    const pricingResult = PricingEngine.calculate({
-      actionType: 'BUY',
-      baseAmount: amount,
-      marginPercentage: marginPercentage,
-      minAmount: minAmount,
-      mode: 'MANUAL'
-    });
-
-    const finalAmount = pricingResult.finalAmount;
-    const marginAmount = pricingResult.marginAmount;
+    if (product && product.commission_type === 'percentage') {
+      commissionAmount = Math.round(amount * (parseFloat(product.commission_value) / 100));
+      finalAmount = amount + commissionAmount;
+    } else if (product && product.commission_type === 'fixed') {
+      commissionAmount = parseInt(product.commission_value, 10) || 0;
+      finalAmount = amount + commissionAmount;
+    }
 
     let summaryText = fillTemplate(t.buyConfirmSummary, {
       product: session.data.productLabel,
       amount: amount.toLocaleString('en-US')
     });
 
-    summaryText += '\n💰 کارمزد (سود ما): ' + marginAmount.toLocaleString('en-US') + ' تومان';
+    if (commissionAmount > 0) {
+      summaryText += '\n💰 کارمزد: ' + commissionAmount.toLocaleString('en-US') + ' تومان';
+    }
     summaryText += '\n💳 مبلغ قابل پرداخت: ' + finalAmount.toLocaleString('en-US') + ' تومان';
 
     await sendTracked(ctx, session, summaryText, {
