@@ -1,3 +1,4 @@
+// db.js
 const { Pool } = require('pg');
 const { DEFAULT_USD_RATE, HOT_VOUCHER_MIN } = require('./constants');
 
@@ -144,6 +145,16 @@ async function getApiSources() {
   return res.rows;
 }
 
+async function getAllApiSources(includeInactive = false) {
+  let query = 'SELECT * FROM api_sources';
+  if (!includeInactive) {
+    query += ' WHERE is_active = 1';
+  }
+  query += ' ORDER BY priority ASC';
+  const res = await pool.query(query);
+  return res.rows;
+}
+
 async function getApiSourceById(id) {
   const res = await pool.query('SELECT * FROM api_sources WHERE id = $1', [id]);
   return res.rows[0] || null;
@@ -170,6 +181,79 @@ async function updateApiSource(id, data) {
 
 async function deleteApiSource(id) {
   await pool.query('UPDATE api_sources SET is_active = 0 WHERE id = $1', [id]);
+}
+
+// ============================================
+// توابع جدید برای product_api_links
+// ============================================
+async function getProductApiLinks(productType, productKey) {
+  const res = await pool.query(
+    'SELECT pal.*, apis.name AS api_name, apis.type AS api_type FROM product_api_links pal JOIN api_sources apis ON pal.api_source_id = apis.id WHERE pal.product_type = $1 AND pal.product_key = $2 AND pal.active = 1 ORDER BY pal.priority ASC',
+    [productType, productKey]
+  );
+  return res.rows;
+}
+
+async function getAllProductApiLinks(productType = null) {
+  let query = 'SELECT pal.*, apis.name AS api_name, apis.type AS api_type FROM product_api_links pal JOIN api_sources apis ON pal.api_source_id = apis.id WHERE pal.active = 1';
+  const params = [];
+  if (productType) {
+    query += ' AND pal.product_type = $1';
+    params.push(productType);
+  }
+  query += ' ORDER BY pal.product_type, pal.product_key, pal.priority ASC';
+  const res = await pool.query(query, params);
+  return res.rows;
+}
+
+async function addProductApiLink(productType, productKey, apiSourceId, priority = 1) {
+  // بررسی عدم تکراری بودن ترکیب
+  const existing = await pool.query(
+    'SELECT id FROM product_api_links WHERE product_type = $1 AND product_key = $2 AND api_source_id = $3',
+    [productType, productKey, apiSourceId]
+  );
+  if (existing.rows.length > 0) {
+    // اگر وجود داشت، فقط active و priority را به‌روز کن
+    await pool.query(
+      'UPDATE product_api_links SET active = 1, priority = $4 WHERE id = $5',
+      [productType, productKey, apiSourceId, priority, existing.rows[0].id]
+    );
+    const updated = await pool.query('SELECT * FROM product_api_links WHERE id = $1', [existing.rows[0].id]);
+    return updated.rows[0];
+  }
+  
+  const res = await pool.query(
+    'INSERT INTO product_api_links (product_type, product_key, api_source_id, priority, active) VALUES ($1, $2, $3, $4, 1) RETURNING *',
+    [productType, productKey, apiSourceId, priority]
+  );
+  return res.rows[0];
+}
+
+async function updateProductApiLink(id, data) {
+  const fields = Object.keys(data).map((key, i) => `${key} = $${i + 2}`);
+  const values = Object.values(data);
+  const res = await pool.query(
+    `UPDATE product_api_links SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+    [id, ...values]
+  );
+  return res.rows[0] || null;
+}
+
+async function removeProductApiLink(id) {
+  await pool.query('UPDATE product_api_links SET active = 0 WHERE id = $1', [id]);
+}
+
+async function getActiveApiForProduct(productType, productKey) {
+  // بالاترین اولویت (کمترین عدد) که هم link active و هم api_source is_active باشد
+  const res = await pool.query(
+    `SELECT pal.*, apis.* 
+     FROM product_api_links pal 
+     JOIN api_sources apis ON pal.api_source_id = apis.id 
+     WHERE pal.product_type = $1 AND pal.product_key = $2 AND pal.active = 1 AND apis.is_active = 1 
+     ORDER BY pal.priority ASC LIMIT 1`,
+    [productType, productKey]
+  );
+  return res.rows[0] || null;
 }
 
 async function getProducts(activeOnly = true) {
@@ -258,13 +342,13 @@ async function getAllUsers(includeUnregistered = true) {
 }
 
 async function getReferrals(telegramId) {
-  const res = await pool.query('SELECT COUNT(*) AS count FROM users WHERE referrer_id = $1', [String(telegramId)]);
+  const res = await pool.query('SELECT COUNT(*)::int AS count FROM users WHERE referrer_id = $1', [String(telegramId)]);
   return Number(res.rows[0].count);
 }
 
 async function getUserStats() {
-  const total = await pool.query('SELECT COUNT(*) AS count FROM users');
-  const registered = await pool.query("SELECT COUNT(*) AS count FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
+  const total = await pool.query('SELECT COUNT(*)::int AS count FROM users');
+  const registered = await pool.query("SELECT COUNT(*)::int AS count FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
   const balance = await pool.query('SELECT COALESCE(SUM(balance), 0) AS total FROM users');
   const bonus = await pool.query('SELECT COALESCE(SUM(bonus_balance), 0) AS total FROM users');
   return {
@@ -356,7 +440,6 @@ async function sendRatesToChannel(bot) {
   if (channels.length === 0) return;
   
   const products = await getProducts(true);
-  const sellProducts = await getSellProducts(true);
   const rate = await getUsdRate();
   
   let message = '📊 **نرخ‌های امروز ووچینو⁰¹**\n\n';
@@ -371,6 +454,7 @@ async function sendRatesToChannel(bot) {
   }
   
   message += '\n🔄 **محصولات قابل فروش:**\n';
+  const sellProducts = await getSellProducts(true);
   for (const product of sellProducts) {
     message += '• ' + product.name + ': ' + Number(product.unit_price).toLocaleString('en-US') + ' تومان\n';
   }
@@ -387,6 +471,23 @@ async function sendRatesToChannel(bot) {
 }
 
 async function initDb() {
+  // جدول جدید product_api_links را اضافه کن اگر وجود ندارد
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS product_api_links (
+        id SERIAL PRIMARY KEY,
+        product_type TEXT CHECK (product_type IN ('buy', 'sell')) NOT NULL,
+        product_key TEXT NOT NULL,
+        api_source_id INTEGER REFERENCES api_sources(id),
+        priority INTEGER DEFAULT 1,
+        active INTEGER DEFAULT 1
+      );
+    `);
+    console.log('✅ جدول product_api_links بررسی/ایجاد شد');
+  } catch (e) {
+    console.log('خطا در ایجاد جدول product_api_links: ' + e.message);
+  }
+  
   console.log('✅ دیتابیس با موفقیت مقداردهی اولیه شد');
 }
 
@@ -418,10 +519,19 @@ module.exports = {
   getUsdRate,
   
   getApiSources,
+  getAllApiSources,
   getApiSourceById,
   addApiSource,
   updateApiSource,
   deleteApiSource,
+  
+  // توابع جدید
+  getProductApiLinks,
+  getAllProductApiLinks,
+  addProductApiLink,
+  updateProductApiLink,
+  removeProductApiLink,
+  getActiveApiForProduct,
   
   getProducts,
   getProductByKey,
