@@ -1,0 +1,355 @@
+-- ============================================
+-- جدول کاربران
+-- ============================================
+CREATE TABLE IF NOT EXISTS users (
+    telegram_id TEXT PRIMARY KEY,
+    phone TEXT,
+    full_name TEXT,
+    card_number TEXT,
+    language TEXT DEFAULT 'fa',
+    balance INTEGER DEFAULT 0,
+    bonus_balance INTEGER DEFAULT 0,
+    registered_at TIMESTAMP DEFAULT NOW(),
+    referrer_id TEXT,
+    verification_status TEXT DEFAULT 'none',
+    card_photo_id TEXT,
+    national_card_photo_id TEXT,
+    is_blocked BOOLEAN DEFAULT FALSE
+);
+
+-- ============================================
+-- جدول کارت‌های بانکی
+-- ============================================
+CREATE TABLE IF NOT EXISTS cards (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    card_number TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول درخواست‌های کیف پول
+-- ============================================
+CREATE TABLE IF NOT EXISTS wallet_requests (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    type TEXT CHECK (type IN ('deposit', 'withdraw', 'internal_transfer')),
+    amount INTEGER,
+    card_number TEXT,
+    receipt_file_id TEXT,
+    target_user_id TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW(),
+    tracking_code TEXT UNIQUE
+);
+
+-- ============================================
+-- جدول کانال‌های اجباری
+-- ============================================
+CREATE TABLE IF NOT EXISTS required_channels (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT UNIQUE,
+    invite_link TEXT,
+    title TEXT,
+    active INTEGER DEFAULT 1,
+    force_join_enabled INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول تنظیمات
+-- ============================================
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول بونوس‌ها
+-- ============================================
+CREATE TABLE IF NOT EXISTS bonuses (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    status TEXT CHECK (status IN ('available', 'in_progress', 'used_won', 'used_lost')),
+    amount INTEGER,
+    game_type TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول سفارشات خرید
+-- ============================================
+CREATE TABLE IF NOT EXISTS orders (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    product_type TEXT,
+    amount INTEGER,
+    commission INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending_delivery',
+    created_at TIMESTAMP DEFAULT NOW(),
+    tracking_code TEXT UNIQUE,
+    delivered_code TEXT,
+    provider_tx_id TEXT,
+    voucher_code TEXT
+);
+
+-- ============================================
+-- جدول محصولات خرید
+-- ============================================
+CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    key TEXT UNIQUE,
+    name TEXT,
+    min_amount NUMERIC,
+    max_amount NUMERIC DEFAULT 0,
+    price_type TEXT CHECK (price_type IN ('usd', 'toman', 'crypto')),
+    commission_type TEXT DEFAULT 'none',
+    commission_value NUMERIC DEFAULT 0,
+    manual_delivery INTEGER DEFAULT 1,
+    active INTEGER DEFAULT 1,
+    hidden INTEGER DEFAULT 0,
+    api_source_id INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول محصولات فروش
+-- ============================================
+CREATE TABLE IF NOT EXISTS sell_products (
+    id SERIAL PRIMARY KEY,
+    key TEXT UNIQUE,
+    name TEXT,
+    unit_price NUMERIC,
+    sample_code TEXT,
+    commission_type TEXT DEFAULT 'none',
+    commission_value NUMERIC DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    api_source_id INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول سفارشات فروش
+-- ============================================
+CREATE TABLE IF NOT EXISTS sell_orders (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    product_type TEXT,
+    voucher_code TEXT,
+    amount INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending_review',
+    created_at TIMESTAMP DEFAULT NOW(),
+    tracking_code TEXT UNIQUE
+);
+
+-- ============================================
+-- جدول منابع API (صرافی‌ها)
+-- ============================================
+CREATE TABLE IF NOT EXISTS api_sources (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    type TEXT CHECK (type IN ('voucher', 'crypto', 'star', 'gift', 'filter', 'multi')),
+    base_url TEXT,
+    api_key TEXT,
+    secret_key TEXT,
+    supports_products TEXT[],
+    is_active INTEGER DEFAULT 1,
+    is_multi INTEGER DEFAULT 0,
+    priority INTEGER DEFAULT 1,
+    ip_slot TEXT DEFAULT 'default',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول واسط: اتصال محصولات به صرافی‌ها
+-- ============================================
+CREATE TABLE IF NOT EXISTS product_api_links (
+    id SERIAL PRIMARY KEY,
+    product_type TEXT CHECK (product_type IN ('buy', 'sell')) NOT NULL,
+    product_key TEXT NOT NULL,
+    api_source_id INTEGER REFERENCES api_sources(id),
+    priority INTEGER DEFAULT 1,
+    active INTEGER DEFAULT 1
+);
+
+-- ============================================
+-- جدول کدهای تخفیف و هدیه
+-- ============================================
+CREATE TABLE IF NOT EXISTS coupons (
+    id SERIAL PRIMARY KEY,
+    code TEXT UNIQUE,
+    type TEXT CHECK (type IN ('discount', 'gift')),
+    amount INTEGER,
+    usage_limit INTEGER DEFAULT 1,
+    used_count INTEGER DEFAULT 0,
+    expires_at TIMESTAMP,
+    active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول تیکت‌های پشتیبانی
+-- ============================================
+CREATE TABLE IF NOT EXISTS tickets (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    subject TEXT,
+    message TEXT,
+    status TEXT DEFAULT 'open',
+    admin_response TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول لاگ تراکنش‌ها
+-- ============================================
+CREATE TABLE IF NOT EXISTS transaction_logs (
+    id SERIAL PRIMARY KEY,
+    telegram_id TEXT REFERENCES users(telegram_id),
+    type TEXT CHECK (type IN ('buy', 'sell', 'deposit', 'withdraw', 'transfer', 'bonus', 'gift', 'refund')),
+    amount INTEGER,
+    balance_before INTEGER,
+    balance_after INTEGER,
+    tracking_code TEXT,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- جدول متون ربات (جدید)
+-- ============================================
+CREATE TABLE IF NOT EXISTS bot_texts (
+    id SERIAL PRIMARY KEY,
+    key TEXT UNIQUE NOT NULL,
+    category TEXT NOT NULL,
+    value TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- تنظیمات اولیه
+-- ============================================
+INSERT INTO settings (key, value) VALUES 
+    ('usd_rate', '60000'),
+    ('start_reaction', '🎉'),
+    ('buy_margin', '10'),
+    ('sell_margin', '10'),
+    ('buy_mode', 'MANUAL'),
+    ('sell_mode', 'MANUAL'),
+    ('referral_bonus', '5000'),
+    ('referral_enabled', 'true'),
+    ('game_rtp', '50'),
+    ('game_require_purchase', 'true'),
+    ('force_join_enabled', 'true'),
+    ('disableBalanceGame', 'false'),
+    ('disableBonusGame', 'false'),
+    ('winRateBalance', '50'),
+    ('winRateBonus', '50'),
+    ('gameMultiplier', '2'),
+    ('minPurchaseForGame', '0')
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================
+-- کانال پیش‌فرض
+-- ============================================
+INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
+VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)
+ON CONFLICT (chat_id) DO NOTHING;
+
+-- ============================================
+-- محصولات خرید (شامل محصولات جدید مخفی)
+-- ============================================
+INSERT INTO products (key, name, min_amount, price_type, active, hidden, created_at) VALUES 
+    ('voucher', '🎟 یوووچر', 1, 'usd', 1, 0, NOW()),
+    ('hotvoucher', '🎟 هات ووچر', 50000, 'toman', 1, 0, NOW())
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO products (key, name, min_amount, price_type, active, hidden, created_at) VALUES 
+    ('premium_voucher', '🎟 پرمیوم ووچر', 100000, 'toman', 0, 1, NOW()),
+    ('ps_voucher', '🔵 پی‌اس ووچر', 185081, 'toman', 0, 1, NOW()),
+    ('perfect_money', '💵 پرفکت مانی', 1, 'usd', 0, 1, NOW()),
+    ('crypto_dollar', '💲 دلار (کریپتو)', 10, 'usd', 0, 1, NOW()),
+    ('crypto_tron', '🪙 ترون (TRX)', 100, 'toman', 0, 1, NOW()),
+    ('crypto_ton', '💎 تون (TON)', 100, 'toman', 0, 1, NOW()),
+    ('telegram_stars', '⭐️ استارز تلگرام', 50, 'toman', 0, 1, NOW()),
+    ('telegram_gift_stars', '🎁 گیفت استارزی', 100, 'toman', 0, 1, NOW()),
+    ('telegram_gift_collection', '🎁 گیفت کلکسیونی', 100, 'toman', 0, 1, NOW()),
+    ('telegram_premium', '💎 پرمیوم تلگرام', 50000, 'toman', 0, 1, NOW()),
+    ('channel_boost', '🚀 بوست کانال', 100000, 'toman', 0, 1, NOW()),
+    ('post_reaction', '❤️ ری‌اکشن پست', 500, 'toman', 0, 1, NOW()),
+    ('post_view', '👁 بازدید پست', 500, 'toman', 0, 1, NOW()),
+    ('virtual_number', '📱 شماره مجازی', 50000, 'toman', 0, 1, NOW())
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================
+-- محصولات فروش (شامل موارد جدید مخفی)
+-- ============================================
+INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES 
+    ('uvoucher', '🎟 یوووچر', 173031, 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', 1, NOW()),
+    ('premiumvoucher', '🎟 پرمیوم ووچر', 100000, 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', 1, NOW()),
+    ('psvoucher', '🔵 پی‌اس ووچر', 100000, 'PS-4KF8-92AD-7QPW-XM2L', 1, NOW())
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES 
+    ('hotvoucher_sell', '🎟 هات ووچر', 50000, 'HOT-XXXX-XXXX', 0, NOW()),
+    ('perfect_money_sell', '💵 پرفکت مانی', 60000, 'PM-XXXX', 0, NOW())
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================
+-- متون پیش‌فرض ربات
+-- ============================================
+INSERT INTO bot_texts (key, category, value, description) VALUES 
+    ('chooseLanguage', 'register', '🌐 زبان خود را انتخاب کنید / Please choose your language:', 'پیام انتخاب زبان'),
+    ('rulesText', 'register', 'قوانین و شرایط استفاده:\n\nواریزی فقط از کارتی که به نام شما ثبت شده معتبر است.', 'متن قوانین'),
+    ('confirmRulesButton', 'register', '✅ قوانین را می‌پذیرم', 'دکمه پذیرش قوانین'),
+    ('registrationSuccess', 'register', '🎉 ثبت‌نام شما با موفقیت انجام شد!\nسقف خرید روزانه: {daily_limit} تومان', 'پیام موفقیت ثبت‌نام'),
+    ('welcomeBack', 'register', 'خوش برگشتی 👋', 'پیام خوش‌آمد برگشتی'),
+    ('mustJoinTitle', 'force_join', 'برای استفاده از ربات، ابتدا عضو کانال شوید:', 'عنوان عضویت اجباری'),
+    ('joinChannelButton', 'force_join', '📢 عضویت در کانال', 'دکمه عضویت'),
+    ('checkMembershipButton', 'force_join', '✅ عضو شدم', 'دکمه تأیید عضویت'),
+    ('stillNotMember', 'force_join', 'هنوز عضو نشده‌اید. لطفاً عضو شوید سپس تلاش کنید.', 'خطای عدم عضویت'),
+    ('walletTitle', 'wallet', '🎒 جیب', 'عنوان کیف پول'),
+    ('walletBalance', 'wallet', '💰 موجودی: {balance} تومان', 'نمایش موجودی'),
+    ('walletIncrease', 'wallet', '➕ افزایش موجودی', 'دکمه افزایش'),
+    ('walletWithdraw', 'wallet', '💳 برداشت موجودی', 'دکمه برداشت'),
+    ('walletAddCard', 'wallet', '➕ افزودن کارت جدید', 'دکمه افزودن کارت'),
+    ('backButton', 'wallet', '🔙 بازگشت', 'دکمه بازگشت'),
+    ('depositMethodTitle', 'wallet', 'روش افزایش موجودی:', 'عنوان روش شارژ'),
+    ('depositCard2Card', 'wallet', '💳 کارت به کارت', 'گزینه کارت به کارت'),
+    ('depositAskAmount', 'wallet', 'مبلغ واریزی را به تومان وارد کنید:', 'درخواست مبلغ'),
+    ('depositAskReceipt', 'wallet', 'رسید پرداخت را ارسال کنید 📎', 'درخواست رسید'),
+    ('depositSubmitted', 'wallet', '✅ درخواست شارژ ثبت شد.', 'تأیید ثبت شارژ'),
+    ('withdrawAskAmount', 'wallet', 'مبلغ برداشت (حداقل {min} تومان):', 'درخواست مبلغ برداشت'),
+    ('withdrawMinError', 'wallet', 'حداقل مبلغ برداشت {min} تومان است.', 'خطای حداقل برداشت'),
+    ('withdrawSubmitted', 'wallet', '✅ درخواست برداشت ثبت شد.', 'تأیید ثبت برداشت'),
+    ('addCardAsk', 'wallet', 'شماره کارت ۱۶ رقمی را وارد کنید:', 'درخواست شماره کارت'),
+    ('addCardInvalid', 'wallet', 'شماره کارت نامعتبر است.', 'خطای کارت'),
+    ('addCardSuccess', 'wallet', '✅ کارت ثبت شد.', 'موفقیت ثبت کارت'),
+    ('buyMenuTitle', 'buy', '✨ محصول مورد نظر را انتخاب کنید:', 'عنوان منوی خرید'),
+    ('buyNoProducts', 'buy', 'محصولی برای فروش موجود نیست.', 'نبود محصول'),
+    ('buyAskAmountToman', 'buy', '💰 حداقل خرید: {min} تومان\nمبلغ را وارد کنید:', 'درخواست مبلغ خرید'),
+    ('buyMinError', 'buy', 'مبلغ کمتر از حداقل ({min} تومان) است.', 'خطای حداقل خرید'),
+    ('buyMaxError', 'buy', 'مبلغ بیشتر از حداکثر ({max} تومان) است.', 'خطای حداکثر خرید'),
+    ('buyConfirmSummary', 'buy', '📦 محصول: {product}\n💰 مبلغ: {amount} تومان\nتأیید می‌کنید؟', 'خلاصه سفارش'),
+    ('buyConfirmButton', 'buy', '✅ تأیید و خرید', 'دکمه تأیید خرید'),
+    ('buyCancelButton', 'buy', '❌ انصراف', 'دکمه انصراف'),
+    ('buySuccess', 'buy', '🎉 خرید موفق!\n🆔 {trackingCode}\n💰 {amount} تومان\nموجودی: {balance} تومان', 'پیام موفقیت خرید'),
+    ('buyInsufficientBalance', 'buy', '❌ موجودی کافی نیست.\nمبلغ: {amount}\nموجودی: {balance}', 'خطای موجودی'),
+    ('buyCancelled', 'buy', 'خرید لغو شد.', 'لغو خرید'),
+    ('sellMenuTitle', 'sell', '✨ محصول برای فروش:', 'عنوان منوی فروش'),
+    ('sellAskCode', 'sell', '💸 فروش {product}\nقیمت واحد: {price} تومان\nنمونه کد: {sample}\n\nکد ووچر را وارد کنید:', 'درخواست کد فروش'),
+    ('sellCodeReceived', 'sell', '✅ کد دریافت شد.\n🆔 {trackingCode}\nدر انتظار بررسی...', 'تأیید دریافت کد'),
+    ('sellApprovedUser', 'sell', '✅ فروش تأیید شد.\n💰 {amount} تومان به کیف پول اضافه شد.', 'تأیید فروش'),
+    ('sellRejectedUser', 'sell', '❌ فروش رد شد.\n🆔 {trackingCode}', 'رد فروش'),
+    ('sellAskFinalAmount', 'sell', '💰 مبلغ نهایی (بعد از کارمزد) را وارد کنید:', 'درخواست مبلغ نهایی'),
+    ('profileTitle', 'profile', '👤 پروفایل شما', 'عنوان پروفایل'),
+    ('gameMenuTitle', 'game', '🎮 بازی و بونوس', 'عنوان منوی بازی'),
+    ('gameWin', 'game', '🎉 بردی! {amount} تومان به موجودی اضافه شد.', 'پیام برد'),
+    ('gameLose', 'game', '😔 باختی!', 'پیام باخت'),
+    ('referralTitle', 'referral', '👥 دعوت دوستان', 'عنوان رفرال'),
+    ('referralLink', 'referral', '🔗 لینک شما:\n{link}\n👥 دعوت: {count}\n💰 پاداش: {bonus} تومان', 'پیام لینک دعوت'),
+    ('errorGeneral', 'errors', '⚠️ خطایی رخ داد. لطفاً دوباره تلاش کنید.', 'خطای عمومی')
+ON CONFLICT (key) DO NOTHING;
