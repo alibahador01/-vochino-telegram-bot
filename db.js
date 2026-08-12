@@ -462,7 +462,7 @@ async function sendRatesToChannel(bot) {
 
 // ==================== مقداردهی اولیه ====================
 async function initDb() {
-  // --- جداول ---
+  // --- ایجاد جداول ---
   const tables = [
     `CREATE TABLE IF NOT EXISTS users (
       telegram_id TEXT PRIMARY KEY,
@@ -653,7 +653,7 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
   }
 
-  // *** اضافه‌کردن ستون‌های missing ***
+  // --- اضافه‌کردن ستون‌های missing ---
   const alterQueries = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT \'none\'',
@@ -705,13 +705,15 @@ async function initDb() {
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
 
-  // --- کانال پیش‌فرض ---
+  // --- کانال پیش‌فرض (با بررسی وجود، بدون ON CONFLICT) ---
   try {
-    await pool.query(`
-      INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
-      VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)
-      ON CONFLICT (chat_id) DO NOTHING;
-    `);
+    const existingChannel = await pool.query('SELECT chat_id FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
+    if (existingChannel.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
+         VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)`
+      );
+    }
   } catch (e) { console.log('خطا در کانال پیش‌فرض:', e.message); }
 
   // --- محصولات پیش‌فرض ---
