@@ -1,26 +1,27 @@
 // handlers/registration.js
 const texts = require('../texts');
-const { sessions } = require('../utils');
+const { sessions, showMainMenu } = require('../utils');
 const { pool, getUser, createUser, updateUser, getSetting, checkMembership, getRequiredChannels } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+const { checkAndGrantBonuses } = require('./game'); // برای اعمال بونوس ثبت‌نام
 
 module.exports = function registerRegistrationHandlers(bot) {
 
   // ============================================
-  // استارت و ورود به ربات (سه‌زبانه)
+  // استارت و ورود به ربات
   // ============================================
   bot.start(async (ctx) => {
     const userId = ctx.from.id;
     let user = await getUser(userId);
 
-    // اگر کاربر جدید است، ایجاد کاربر خام
+    // اگر کاربر جدید است، با زبان پیش‌فرض ایجاد می‌شود
     if (!user) {
       const referrerId = ctx.startPayload || null;
       await createUser(userId, null, null, null, 'fa', referrerId);
       user = await getUser(userId);
     }
 
-    // اگر کاربر زبان انتخاب نکرده، صفحه انتخاب زبان
+    // اگر زبان انتخاب نشده، صفحه انتخاب زبان
     if (!user || !user.language) {
       return ctx.reply(
         '🌐 زبان خود را انتخاب کنید / Please choose your language:\n\n' +
@@ -41,17 +42,14 @@ module.exports = function registerRegistrationHandlers(bot) {
       );
     }
 
-    // اگر زبان دارد ولی هنوز قوانین را نپذیرفته یا جوین را انجام نداده
-    // کاربر جدید: نمایش قوانین و دکمه عضویت
-    // (می‌توانی یک فیلد onboarding_completed در users داشته باشی؛ در حال حاضر با چک زبان پیش می‌رویم)
-    if (user.language && user.phone === null && user.full_name === null) {
-      // کاربر تازه زبان را انتخاب کرده و هنوز ثبت‌نام نکرده
+    // اگر زبان دارد ولی هنوز ثبت‌نام کامل نکرده (شماره تلفن و نام ندارد)
+    // می‌توانیم مستقیماً به صفحه قوانین و عضویت ببریم
+    if (user.language && (user.phone === null || user.full_name === null)) {
       return showRules(ctx, user.language);
     }
 
-    // در غیر این صورت کاربر بازگشته و می‌تواند مستقیماً به منوی اصلی برود
-    const { showMainMenu } = require('../utils');
-    return showMainMenu(ctx);
+    // در غیر این صورت کاربر کامل شده و مستقیم به منوی اصلی
+    showMainMenu(ctx);
   });
 
   // ============================================
@@ -62,7 +60,6 @@ module.exports = function registerRegistrationHandlers(bot) {
     const userId = ctx.from.id;
 
     await pool.query('UPDATE users SET language = $1 WHERE telegram_id = $2', [lang, String(userId)]);
-
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
 
@@ -78,17 +75,35 @@ module.exports = function registerRegistrationHandlers(bot) {
 
     const rulesMessages = {
       fa: {
-        rules: `👑 به صرافی ووچینو⁰¹ خوش آمدید\n🎁 برای کاربران ووچینو⁰¹، یک هدیه ویژه با امکان دریافت مجدد در نظر گرفته‌ایم.\n💳 خرید انواع ووچر در کمتر از ۳۰ ثانیه\n🎁 بهره‌مندی از بونوس‌های ویژه کاربران\n🔐 بدون احراز هویت تا سقف ۲ میلیون تومان در روز\n\n👇 برای ورود، ابتدا در کانال عضو شوید.`,
+        rules: `👑 به صرافی ووچینو⁰¹ خوش آمدید
+🎁 برای کاربران ووچینو⁰¹، یک هدیه ویژه با امکان دریافت مجدد در نظر گرفته‌ایم.
+💳 خرید انواع ووچر در کمتر از ۳۰ ثانیه
+🎁 بهره‌مندی از بونوس‌های ویژه کاربران
+🔐 بدون احراز هویت تا سقف ۲ میلیون تومان در روز
+
+👇 برای ورود، ابتدا در کانال عضو شوید.`,
         joinButton: '📢 عضویت در کانال',
         joinedButton: '✅ عضو شدم',
       },
       en: {
-        rules: `👑 Welcome to Vochino⁰¹ Exchange\n🎁 A special gift with recharge possibility for users.\n💳 Buy all vouchers in under 30 seconds\n🎁 Exclusive bonuses for users\n🔐 No verification up to 2M Tomans per day\n\n👇 Join the channel first to enter.`,
+        rules: `👑 Welcome to Vochino⁰¹ Exchange
+🎁 A special gift with recharge possibility for users.
+💳 Buy all vouchers in under 30 seconds
+🎁 Exclusive bonuses for users
+🔐 No verification up to 2M Tomans per day
+
+👇 Join the channel first to enter.`,
         joinButton: '📢 Join Channel',
         joinedButton: '✅ Joined',
       },
       tr: {
-        rules: `👑 Vochino⁰¹ Borsasına Hoşgeldiniz\n🎁 Özel hediye ve yeniden alım imkanı.\n💳 30 saniyeden kısa sürede voucher alımı\n🎁 Özel bonuslar\n🔐 Günlük 2 milyon Toman'a kadar kimlik doğrulamasız\n\n👇 Giriş için önce kanala katılın.`,
+        rules: `👑 Vochino⁰¹ Borsasına Hoşgeldiniz
+🎁 Özel hediye ve yeniden alım imkanı.
+💳 30 saniyeden kısa sürede voucher alımı
+🎁 Özel bonuslar
+🔐 Günlük 2 milyon Toman'a kadar kimlik doğrulamasız
+
+👇 Giriş için önce kanala katılın.`,
         joinButton: '📢 Kanala Katıl',
         joinedButton: '✅ Katıldım',
       }
@@ -96,9 +111,8 @@ module.exports = function registerRegistrationHandlers(bot) {
 
     const m = rulesMessages[lang] || rulesMessages.fa;
 
-    // اگر جوین اجباری فعال است و حداقل یک کانال وجود دارد، دکمه‌ها را نشان بده
     if (forceJoinEnabled === 'true' && channels.length > 0) {
-      const channel = channels[0]; // ساده‌سازی: اولین کانال را نشان بده (می‌توانی همه را بررسی کنی)
+      const channel = channels[0];
       return ctx.reply(m.rules, {
         reply_markup: {
           inline_keyboard: [
@@ -109,7 +123,7 @@ module.exports = function registerRegistrationHandlers(bot) {
       });
     }
 
-    // اگر جوین اجباری غیرفعال باشد، مستقیم قوانین را نشان بده و دکمه پذیرش
+    // اگر جوین اجباری غیرفعال است، مستقیماً دکمه پذیرش قوانین
     return ctx.reply(m.rules, {
       reply_markup: {
         inline_keyboard: [
@@ -132,7 +146,6 @@ module.exports = function registerRegistrationHandlers(bot) {
       return ctx.answerCbQuery('❌ شما هنوز عضو کانال نشده‌اید!', { show_alert: true });
     }
 
-    // کاربر عضو شده، حالا باید قوانین را بپذیرد
     ctx.answerCbQuery('✅ عضویت تأیید شد');
     try { await ctx.deleteMessage(); } catch (e) {}
 
@@ -152,7 +165,7 @@ module.exports = function registerRegistrationHandlers(bot) {
   });
 
   // ============================================
-  // پذیرش قوانین → ثبت‌نام سریع (ورود روان)
+  // پذیرش قوانین → ورود به ربات
   // ============================================
   bot.action('accept_rules', async (ctx) => {
     const userId = ctx.from.id;
@@ -162,18 +175,16 @@ module.exports = function registerRegistrationHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    // کاربر را به عنوان "ورود کرده" علامت‌گذاری می‌کنیم، بدون درخواست مدارک.
-    // در اینجا ما فعلاً شماره تلفن و غیره را نمی‌گیریم؛ کاربر می‌تواند مستقیماً از منو استفاده کند.
-    // اگر کاربر هنوز نام و شماره ندارد، یک فیلد مخصوص "onboarding_completed" در db موجود نیست،
-    // بنابراین ما از یک قرارداد استفاده می‌کنیم: اگر phone خالی باشد، کاربر "مهمان" است و می‌تواند بعداً تکمیل کند.
-    // برای این کار، در صورت نیاز، رکورد کاربر را به‌روز می‌کنیم تا حداقل زبان تنظیم باشد.
-    if (!user.phone) {
-      await pool.query("UPDATE users SET language = $1 WHERE telegram_id = $2", [lang, String(userId)]);
-    }
+    // اگر کاربر هنوز شماره تلفن ندارد، می‌توانیم در این مرحله درخواست کنیم،
+    // اما طبق سند فعلاً ورود بدون دریافت اطلاعات کامل امکان‌پذیر است (کاربر مهمان).
+    // اگر خواستید شماره را اجباری کنید می‌توانید اینجا فرآیند را اضافه کنید.
+    // فعلاً کاربر را وارد می‌کنیم.
 
-    // نمایش منوی اصلی
-    const { showMainMenu } = require('../utils');
-    return showMainMenu(ctx);
+    // فراخوانی بونوس ثبت‌نام (اگر واجد شرایط باشد)
+    await checkAndGrantBonuses(ctx, userId, 'registration');
+
+    // نمایش منوی اصلی جدید
+    showMainMenu(ctx);
   });
 
 };
