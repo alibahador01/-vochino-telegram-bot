@@ -104,13 +104,17 @@ async function checkMembership(ctx) {
   if (forceJoinEnabled !== 'true') return true;
   const channels = await getRequiredChannels();
   if (channels.length === 0) return true;
+
   for (const channel of channels) {
     try {
       const member = await ctx.telegram.getChatMember(channel.chat_id, ctx.from.id);
-      if (member.status === 'left' || member.status === 'kicked') return false;
+      if (member.status === 'left' || member.status === 'kicked') {
+        return false;
+      }
     } catch (e) {
-      console.log('خطا در بررسی عضویت: ' + e.message);
-      return false;
+      // اگر ربات دسترسی به کانال نداشته باشد، برای اینکه کاربر گیر نکند، عبور می‌دهیم
+      console.log('⚠️ خطا در بررسی عضویت، به‌عنوان عضو تأیید شد: ' + e.message);
+      return true;
     }
   }
   return true;
@@ -481,7 +485,8 @@ async function initDb() {
       reg_bonus_received BOOLEAN DEFAULT FALSE,
       first_purchase_bonus_received BOOLEAN DEFAULT FALSE,
       ref_bonus_count INTEGER DEFAULT 0,
-      bonus_gift_received BOOLEAN DEFAULT FALSE
+      bonus_gift_received BOOLEAN DEFAULT FALSE,
+      onboarding_completed BOOLEAN DEFAULT FALSE
     );`,
     `CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
@@ -653,7 +658,7 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
   }
 
-  // --- اضافه‌کردن ستون‌های missing ---
+  // *** اضافه‌کردن ستون‌های missing ***
   const alterQueries = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT \'none\'',
@@ -664,6 +669,7 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS first_purchase_bonus_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
     'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS force_join_enabled INTEGER DEFAULT 1'
   ];
   for (const sql of alterQueries) {
