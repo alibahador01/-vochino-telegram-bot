@@ -3,6 +3,7 @@ const texts = require('../texts');
 const { sessions, showMainMenu } = require('../utils');
 const { pool, getUser, createUser, updateUser, getSetting, checkMembership, getRequiredChannels } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+const { checkAndGrantBonuses } = require('./bonusEngine');
 
 module.exports = function registerRegistrationHandlers(bot) {
 
@@ -15,12 +16,8 @@ module.exports = function registerRegistrationHandlers(bot) {
       await createUser(userId, null, null, null, 'fa', referrerId);
       user = await getUser(userId);
 
-      // بونوس دعوت برای دعوت‌کننده (در صورت وجود)
       if (referrerId) {
-        try {
-          const { checkAndGrantBonuses } = require('./game');
-          await checkAndGrantBonuses(ctx, referrerId, 'referral');
-        } catch (e) { console.log('خطا در بونوس دعوت:', e.message); }
+        await checkAndGrantBonuses(ctx, referrerId, 'referral');
       }
     }
 
@@ -153,10 +150,7 @@ module.exports = function registerRegistrationHandlers(bot) {
     try { await ctx.deleteMessage(); } catch (e) {}
 
     // بونوس ثبت‌نام
-    try {
-      const { checkAndGrantBonuses } = require('./game');
-      await checkAndGrantBonuses(ctx, userId, 'registration');
-    } catch (e) { console.log('خطا در بونوس ثبت‌نام:', e.message); }
+    await checkAndGrantBonuses(ctx, userId, 'registration');
 
     showMainMenu(ctx);
   });
