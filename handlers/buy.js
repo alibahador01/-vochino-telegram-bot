@@ -2,6 +2,7 @@
 const texts = require('../texts');
 const { sessions, fillTemplate, generateTrackingCode, generateVoucherTrackingCode } = require('../utils');
 const { pool, getUser, getUsdRate, getSetting } = require('../db');
+const { checkAndGrantBonuses } = require('./bonusEngine');
 
 module.exports = function registerBuyHandlers(bot) {
 
@@ -10,7 +11,6 @@ module.exports = function registerBuyHandlers(bot) {
     try { await ctx.deleteMessage(); } catch (e) {}
     const t = texts.fa;
     const productsRes = await pool.query('SELECT * FROM products WHERE active = 1 ORDER BY id ASC');
-
     if (productsRes.rows.length === 0) return ctx.reply(t.buyNoProducts);
     const buttons = productsRes.rows.map(p => [{ text: p.name, callback_data: 'buy_' + p.key }]);
     ctx.reply(t.buyMenuTitle, { reply_markup: { inline_keyboard: buttons } });
@@ -38,10 +38,7 @@ module.exports = function registerBuyHandlers(bot) {
     const productKey = session.data.productType;
 
     const productRes = await pool.query('SELECT * FROM products WHERE key = $1', [productKey]);
-    if (productRes.rows.length === 0) {
-      delete sessions[ctx.from.id];
-      return ctx.reply('❌ محصول نامعتبر است.');
-    }
+    if (productRes.rows.length === 0) { delete sessions[ctx.from.id]; return ctx.reply('❌ محصول نامعتبر است.'); }
     const product = productRes.rows[0];
 
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -61,9 +58,7 @@ module.exports = function registerBuyHandlers(bot) {
       return ctx.reply(fillTemplate(t.buyInsufficientBalance, {
         amount: finalAmount.toLocaleString('en-US'),
         balance: user ? Number(user.balance).toLocaleString('en-US') : '0'
-      }), {
-        reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
-      });
+      }), { reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] } });
     }
 
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
@@ -81,11 +76,8 @@ module.exports = function registerBuyHandlers(bot) {
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
     const newBalance = newBalanceRes.rows[0].balance;
 
-    // فراخوانی بونوس اولین خرید (با require در لحظه برای جلوگیری از خطای چرخه‌ای)
-    try {
-      const { checkAndGrantBonuses } = require('./game');
-      await checkAndGrantBonuses(ctx, String(ctx.from.id), 'purchase');
-    } catch (e) { console.log('خطا در بونوس خرید:', e.message); }
+    // بونوس اولین خرید
+    await checkAndGrantBonuses(ctx, String(ctx.from.id), 'purchase');
 
     const receiptText =
       '🧾 **رسید تراکنش موفق - ربات ووچینو⁰¹**\n\n' +
@@ -126,10 +118,7 @@ module.exports = function registerBuyHandlers(bot) {
 
     const productRes = await pool.query('SELECT * FROM products WHERE key = $1 AND active = 1', [key]);
     const product = productRes.rows[0];
-    if (!product) {
-      try { await ctx.deleteMessage(); } catch (e) {}
-      return ctx.reply(t.buyNoProducts);
-    }
+    if (!product) { try { await ctx.deleteMessage(); } catch (e) {} return ctx.reply(t.buyNoProducts); }
 
     const rate = await getUsdRate();
     let minToman, maxToman = 0;
@@ -200,9 +189,8 @@ module.exports = function registerBuyHandlers(bot) {
     const confirmText = fillTemplate(t.buyConfirmSummary, { product: session.data.productLabel, amount: previewAmount.toLocaleString('en-US') });
     const extra = { reply_markup: { inline_keyboard: [[{ text: t.buyConfirmButton, callback_data: 'buy_confirm' }, { text: t.buyCancelButton, callback_data: 'buy_cancel' }]] } };
 
-    try {
-      await ctx.editMessageText(confirmText, extra);
-    } catch (e) {
+    try { await ctx.editMessageText(confirmText, extra); }
+    catch (e) {
       try { await ctx.deleteMessage(); } catch (err) {}
       const sent = await ctx.reply(confirmText, extra);
       session.lastBotMsgId = sent.message_id;
