@@ -3,13 +3,10 @@
 // تمام متن‌های هاردکدشده به این فایل منتقل شده‌اند
 
 const { getText } = require('./textManager');
-const { DAILY_LIMIT_TEXT, MIN_WITHDRAW, BONUS_THRESHOLD, BONUS_AMOUNT } = require('./constants');
+const { DAILY_LIMIT_TEXT, MIN_WITHDRAW } = require('./constants');
 
 /**
  * دریافت یک متن از کش با مقدار پیش‌فرض
- * @param {string} key 
- * @param {string} defaultValue 
- * @returns {string}
  */
 function t(key, defaultValue = '') {
   return getText(key, defaultValue);
@@ -17,7 +14,6 @@ function t(key, defaultValue = '') {
 
 /**
  * شیء نهایی texts که همه‌جای پروژه استفاده می‌شود
- * هر کلید از کش خوانده می‌شود، اما اگر در کش نباشد، مقدار پیش‌فرض (قدیمی) استفاده می‌شود
  */
 const texts = {
   fa: {
@@ -107,20 +103,20 @@ const texts = {
       '🔹 آیا واریزی از کارت دیگران قبوله؟\n' +
       'نه، فقط از کارتی که به نام خودتون ثبت شده.\n\n' +
       '🔹 بونوس بازی چطور فعال می‌شه؟\n' +
-      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس بازی برات فعال می‌شه.'),
+      'با اولین خرید موفق، بخش بازی‌ها برای شما فعال می‌شود.'),
 
     // ==================== بازی / بونوس ====================
     gameMenuTitle: t('gameMenuTitle', '🎮 بازی و بونوس'),
     gameNotEligible: t('gameNotEligible', '🔒 هنوز بونوس بازی برات فعال نشده.\n\n' +
-      'با رسیدن مجموع خریدت به ' + BONUS_THRESHOLD.toLocaleString('en-US') + ' تومان، یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی می‌گیری که می‌تونی باهاش بازی کنی و ببری! 🎁'),
-    gameEligibleIntro: t('gameEligibleIntro', '🎁 تبریک! یه بونوس ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومنی داری.\n' +
+      'با اولین خرید موفق، بخش بازی‌ها و بونوس‌های ویژه برایت فعال می‌شود.'),
+    gameEligibleIntro: t('gameEligibleIntro', '🎁 تبریک! حالا می‌تونی با بونوس بازی کنی.\n' +
       'یکی از بازی‌های زیر رو انتخاب کن و شانستو امتحان کن. اگه ببری، مبلغ مستقیم میاد تو موجودیت و می‌تونی همون لحظه برداشت بزنی 💸'),
     gameAlreadyUsed: t('gameAlreadyUsed', 'بونوس بازیت رو قبلاً استفاده کردی. با رسیدن به سقف خرید بعدی، دوباره یه بونوس جدید فعال می‌شه.'),
     gameDiceButton: t('gameDiceButton', '🎲 بازی تاس'),
     gameBasketballButton: t('gameBasketballButton', '🏀 بازی بسکتبال'),
     gamePlaying: t('gamePlaying', '🎲 در حال بازی... منتظر بمون تا نتیجه مشخص بشه...'),
-    gameWin: t('gameWin', '🎉🎉 تبریک، بردی!!\nمبلغ ' + BONUS_AMOUNT.toLocaleString('en-US') + ' تومان به موجودیت اضافه شد. می‌تونی همین الان برداشت بزنی 💸'),
-    gameLose: t('gameLose', '😔 این بار نبردی، بونوست مصرف شد.\nنگران نباش، با خرید بعدیت دوباره شانس داری!'),
+    gameWin: t('gameWin', '🎉🎉 تبریک، بردی!!\nمبلغ {amount} تومان به موجودیت اضافه شد.'),
+    gameLose: t('gameLose', '😔 این بار نبردی. نگران نباش، شانس دوباره هست!'),
 
     // ==================== رفرال / معرفی ====================
     referralTitle: t('referralTitle', '👥 دعوت دوستان'),
