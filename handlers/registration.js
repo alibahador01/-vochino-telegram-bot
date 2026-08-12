@@ -3,25 +3,27 @@ const texts = require('../texts');
 const { sessions, showMainMenu } = require('../utils');
 const { pool, getUser, createUser, updateUser, getSetting, checkMembership, getRequiredChannels } = require('../db');
 const { ADMIN_IDS } = require('../constants');
-const { checkAndGrantBonuses } = require('./game'); // برای اعمال بونوس ثبت‌نام
+const { checkAndGrantBonuses } = require('./game');
 
 module.exports = function registerRegistrationHandlers(bot) {
 
-  // ============================================
-  // استارت و ورود به ربات
-  // ============================================
   bot.start(async (ctx) => {
     const userId = ctx.from.id;
     let user = await getUser(userId);
+    const referrerId = ctx.startPayload || null;
 
-    // اگر کاربر جدید است، با زبان پیش‌فرض ایجاد می‌شود
     if (!user) {
-      const referrerId = ctx.startPayload || null;
       await createUser(userId, null, null, null, 'fa', referrerId);
       user = await getUser(userId);
+
+      // *** اگر با لینک دعوت آمده، بونوس دعوت برای دعوت‌کننده ***
+      if (referrerId) {
+        try {
+          await checkAndGrantBonuses(ctx, referrerId, 'referral');
+        } catch (e) { console.log('خطا در بونوس دعوت:', e.message); }
+      }
     }
 
-    // اگر زبان انتخاب نشده، صفحه انتخاب زبان
     if (!user || !user.language) {
       return ctx.reply(
         '🌐 زبان خود را انتخاب کنید / Please choose your language:\n\n' +
@@ -29,46 +31,30 @@ module.exports = function registerRegistrationHandlers(bot) {
         {
           reply_markup: {
             inline_keyboard: [
-              [
-                { text: '🇮🇷 فارسی', callback_data: 'lang_fa' },
-                { text: '🇬🇧 English', callback_data: 'lang_en' }
-              ],
-              [
-                { text: '🇹🇷 Türkçe', callback_data: 'lang_tr' }
-              ]
+              [{ text: '🇮🇷 فارسی', callback_data: 'lang_fa' }, { text: '🇬🇧 English', callback_data: 'lang_en' }],
+              [{ text: '🇹🇷 Türkçe', callback_data: 'lang_tr' }]
             ]
           }
         }
       );
     }
 
-    // اگر زبان دارد ولی هنوز ثبت‌نام کامل نکرده (شماره تلفن و نام ندارد)
-    // می‌توانیم مستقیماً به صفحه قوانین و عضویت ببریم
     if (user.language && (user.phone === null || user.full_name === null)) {
       return showRules(ctx, user.language);
     }
 
-    // در غیر این صورت کاربر کامل شده و مستقیم به منوی اصلی
     showMainMenu(ctx);
   });
 
-  // ============================================
-  // انتخاب زبان
-  // ============================================
   bot.action(/^lang_(fa|en|tr)$/, async (ctx) => {
     const lang = ctx.match[1];
     const userId = ctx.from.id;
-
     await pool.query('UPDATE users SET language = $1 WHERE telegram_id = $2', [lang, String(userId)]);
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-
     return showRules(ctx, lang);
   });
 
-  // ============================================
-  // نمایش قوانین و درخواست عضویت در کانال
-  // ============================================
   async function showRules(ctx, lang) {
     const forceJoinEnabled = await getSetting('force_join_enabled', 'true');
     const channels = await getRequiredChannels();
@@ -123,7 +109,6 @@ module.exports = function registerRegistrationHandlers(bot) {
       });
     }
 
-    // اگر جوین اجباری غیرفعال است، مستقیماً دکمه پذیرش قوانین
     return ctx.reply(m.rules, {
       reply_markup: {
         inline_keyboard: [
@@ -133,18 +118,13 @@ module.exports = function registerRegistrationHandlers(bot) {
     });
   }
 
-  // ============================================
-  // دکمه "عضو شدم" – بررسی عضویت
-  // ============================================
   bot.action('check_join', async (ctx) => {
     const userId = ctx.from.id;
     const user = await getUser(userId);
     const lang = user?.language || 'fa';
 
     const isMember = await checkMembership(ctx);
-    if (!isMember) {
-      return ctx.answerCbQuery('❌ شما هنوز عضو کانال نشده‌اید!', { show_alert: true });
-    }
+    if (!isMember) return ctx.answerCbQuery('❌ شما هنوز عضو کانال نشده‌اید!', { show_alert: true });
 
     ctx.answerCbQuery('✅ عضویت تأیید شد');
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -164,9 +144,6 @@ module.exports = function registerRegistrationHandlers(bot) {
     });
   });
 
-  // ============================================
-  // پذیرش قوانین → ورود به ربات
-  // ============================================
   bot.action('accept_rules', async (ctx) => {
     const userId = ctx.from.id;
     const user = await getUser(userId);
@@ -175,15 +152,9 @@ module.exports = function registerRegistrationHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    // اگر کاربر هنوز شماره تلفن ندارد، می‌توانیم در این مرحله درخواست کنیم،
-    // اما طبق سند فعلاً ورود بدون دریافت اطلاعات کامل امکان‌پذیر است (کاربر مهمان).
-    // اگر خواستید شماره را اجباری کنید می‌توانید اینجا فرآیند را اضافه کنید.
-    // فعلاً کاربر را وارد می‌کنیم.
-
-    // فراخوانی بونوس ثبت‌نام (اگر واجد شرایط باشد)
+    // *** بونوس ثبت‌نام ***
     await checkAndGrantBonuses(ctx, userId, 'registration');
 
-    // نمایش منوی اصلی جدید
     showMainMenu(ctx);
   });
 
