@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// ===== مسیرهای حیاتی برای جلوگیری از 404 =====
+// مسیرهای سلامت برای جلوگیری از 404
 app.get('/', (req, res) => res.send('Bot is alive and connected to Supabase!'));
 app.get('/health', (req, res) => res.send('OK'));
 app.get('/ping', (req, res) => res.send('PONG'));
@@ -56,16 +56,16 @@ app.get('/sub/:userId', async (req, res) => {
   }
 });
 
-// ===== راهنمای catch-all برای هر مسیر ناشناخته → 200 =====
+// Catch-all برای اینکه هیچ مسیری 404 نده
 app.get('*', (req, res) => res.send('Vochino Bot Active'));
 
 app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
-// ===== ضدخواب =====
+// ضدخواب با آدرس درست
 if (process.env.NODE_ENV !== 'development') {
-  const antiSleep = new AntiSleepBot(process.env.APP_URL || 'https://your-app.onrender.com');
+  const antiSleep = new AntiSleepBot(process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com');
   antiSleep.startAll();
 } else {
   setInterval(() => {
@@ -73,11 +73,9 @@ if (process.env.NODE_ENV !== 'development') {
   }, 14 * 60 * 1000);
 }
 
-// ===== ربات تلگرام =====
 const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
-// هندلرها
 require('./handlers/registration')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
@@ -90,7 +88,6 @@ require('./handlers/profile')(bot);
 require('./handlers/vpn')(bot);
 require('./handlers/currencyFeed')(bot);
 
-// مدیریت خطا
 process.on('unhandledRejection', (err) => console.log('UNHANDLED REJECTION:', err.message));
 process.on('uncaughtException', (err) => {
   console.log('UNCAUGHT EXCEPTION:', err.message);
