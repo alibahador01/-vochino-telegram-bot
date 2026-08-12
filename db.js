@@ -462,8 +462,181 @@ async function sendRatesToChannel(bot) {
 
 // ==================== مقداردهی اولیه ====================
 async function initDb() {
-  // جداول اصلی
+  // --- جداول ---
   const tables = [
+    `CREATE TABLE IF NOT EXISTS users (
+      telegram_id TEXT PRIMARY KEY,
+      phone TEXT,
+      full_name TEXT,
+      card_number TEXT,
+      language TEXT DEFAULT 'fa',
+      balance INTEGER DEFAULT 0,
+      bonus_balance INTEGER DEFAULT 0,
+      registered_at TIMESTAMP DEFAULT NOW(),
+      referrer_id TEXT,
+      verification_status TEXT DEFAULT 'none',
+      card_photo_id TEXT,
+      national_card_photo_id TEXT,
+      is_blocked BOOLEAN DEFAULT FALSE,
+      reg_bonus_received BOOLEAN DEFAULT FALSE,
+      first_purchase_bonus_received BOOLEAN DEFAULT FALSE,
+      ref_bonus_count INTEGER DEFAULT 0,
+      bonus_gift_received BOOLEAN DEFAULT FALSE
+    );`,
+    `CREATE TABLE IF NOT EXISTS cards (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      card_number TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS wallet_requests (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      type TEXT CHECK (type IN ('deposit', 'withdraw', 'internal_transfer')),
+      amount INTEGER,
+      card_number TEXT,
+      receipt_file_id TEXT,
+      target_user_id TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW(),
+      tracking_code TEXT UNIQUE
+    );`,
+    `CREATE TABLE IF NOT EXISTS required_channels (
+      id SERIAL PRIMARY KEY,
+      chat_id TEXT UNIQUE,
+      invite_link TEXT,
+      title TEXT,
+      active INTEGER DEFAULT 1,
+      force_join_enabled INTEGER DEFAULT 1,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS bonuses (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      status TEXT CHECK (status IN ('available', 'in_progress', 'used_won', 'used_lost')),
+      amount INTEGER,
+      game_type TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      product_type TEXT,
+      amount INTEGER,
+      commission INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending_delivery',
+      created_at TIMESTAMP DEFAULT NOW(),
+      tracking_code TEXT UNIQUE,
+      delivered_code TEXT,
+      provider_tx_id TEXT,
+      voucher_code TEXT
+    );`,
+    `CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      key TEXT UNIQUE,
+      name TEXT,
+      min_amount NUMERIC,
+      max_amount NUMERIC DEFAULT 0,
+      price_type TEXT CHECK (price_type IN ('usd', 'toman', 'crypto')),
+      commission_type TEXT DEFAULT 'none',
+      commission_value NUMERIC DEFAULT 0,
+      manual_delivery INTEGER DEFAULT 1,
+      active INTEGER DEFAULT 1,
+      hidden INTEGER DEFAULT 0,
+      api_source_id INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS sell_products (
+      id SERIAL PRIMARY KEY,
+      key TEXT UNIQUE,
+      name TEXT,
+      unit_price NUMERIC,
+      sample_code TEXT,
+      commission_type TEXT DEFAULT 'none',
+      commission_value NUMERIC DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      api_source_id INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS sell_orders (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      product_type TEXT,
+      voucher_code TEXT,
+      amount INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending_review',
+      created_at TIMESTAMP DEFAULT NOW(),
+      tracking_code TEXT UNIQUE
+    );`,
+    `CREATE TABLE IF NOT EXISTS api_sources (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      type TEXT CHECK (type IN ('voucher', 'crypto', 'star', 'gift', 'filter', 'multi')),
+      base_url TEXT,
+      api_key TEXT,
+      secret_key TEXT,
+      supports_products TEXT[],
+      is_active INTEGER DEFAULT 1,
+      is_multi INTEGER DEFAULT 0,
+      priority INTEGER DEFAULT 1,
+      ip_slot TEXT DEFAULT 'default',
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS product_api_links (
+      id SERIAL PRIMARY KEY,
+      product_type TEXT CHECK (product_type IN ('buy', 'sell')) NOT NULL,
+      product_key TEXT NOT NULL,
+      api_source_id INTEGER REFERENCES api_sources(id),
+      priority INTEGER DEFAULT 1,
+      active INTEGER DEFAULT 1
+    );`,
+    `CREATE TABLE IF NOT EXISTS coupons (
+      id SERIAL PRIMARY KEY,
+      code TEXT UNIQUE,
+      type TEXT CHECK (type IN ('discount', 'gift')),
+      amount INTEGER,
+      usage_limit INTEGER DEFAULT 1,
+      used_count INTEGER DEFAULT 0,
+      expires_at TIMESTAMP,
+      active INTEGER DEFAULT 1,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      subject TEXT,
+      message TEXT,
+      status TEXT DEFAULT 'open',
+      admin_response TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS transaction_logs (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      type TEXT CHECK (type IN ('buy', 'sell', 'deposit', 'withdraw', 'transfer', 'bonus', 'gift', 'refund')),
+      amount INTEGER,
+      balance_before INTEGER,
+      balance_after INTEGER,
+      tracking_code TEXT,
+      description TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS vpn_servers (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      host TEXT,
+      port INTEGER,
+      protocol TEXT,
+      is_active BOOLEAN DEFAULT TRUE,
+      health_status TEXT DEFAULT 'unknown',
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
     `CREATE TABLE IF NOT EXISTS vpn_subscriptions (
       id SERIAL PRIMARY KEY,
       user_id TEXT REFERENCES users(telegram_id),
@@ -473,32 +646,118 @@ async function initDb() {
       data_used BIGINT DEFAULT 0,
       tracking_code TEXT UNIQUE,
       created_at TIMESTAMP DEFAULT NOW()
-    );`,
-    `CREATE TABLE IF NOT EXISTS bot_texts (
-      id SERIAL PRIMARY KEY,
-      key TEXT UNIQUE NOT NULL,
-      category TEXT NOT NULL,
-      value TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      updated_at TIMESTAMP DEFAULT NOW()
     );`
   ];
+
   for (const sql of tables) {
     try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
   }
 
-  // ستون‌های جدید بونوس
-  const bonusColumns = [
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_bonus_received BOOLEAN DEFAULT FALSE`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS first_purchase_bonus_received BOOLEAN DEFAULT FALSE`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE`
+  // *** اضافه‌کردن ستون‌های missing برای جدول‌های موجود ***
+  const alterQueries = [
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT \'none\'',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS card_photo_id TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS national_card_photo_id TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_bonus_received BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS first_purchase_bonus_received BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE'
   ];
-  for (const sql of bonusColumns) {
-    try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون بونوس:', e.message); }
+  for (const sql of alterQueries) {
+    try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون:', e.message); }
   }
 
-  // متون پیش‌فرض bot_texts
+  // --- درج تنظیمات پیش‌فرض ---
+  try {
+    await pool.query(`
+      INSERT INTO settings (key, value) VALUES 
+        ('usd_rate', '60000'),
+        ('start_reaction', '🎉'),
+        ('buy_margin', '10'),
+        ('sell_margin', '10'),
+        ('buy_mode', 'MANUAL'),
+        ('sell_mode', 'MANUAL'),
+        ('referral_bonus', '5000'),
+        ('referral_enabled', 'true'),
+        ('game_rtp', '50'),
+        ('game_require_purchase', 'true'),
+        ('force_join_enabled', 'true'),
+        ('disableBalanceGame', 'false'),
+        ('disableBonusGame', 'false'),
+        ('winRateBalance', '50'),
+        ('winRateBonus', '50'),
+        ('gameMultiplier', '2'),
+        ('minPurchaseForGame', '0'),
+        ('min_withdraw', '100000'),
+        ('vpn_enabled', 'true'),
+        ('vpn_visible', 'true'),
+        ('vpn_max_free_attempts', '1'),
+        ('vpn_invites_for_unlock', '2'),
+        ('vpn_default_volume_gb', '5'),
+        ('vpn_default_days', '30'),
+        ('vpn_health_interval', '300'),
+        ('vpn_failure_threshold', '3'),
+        ('vpn_cooldown', '600')
+      ON CONFLICT (key) DO NOTHING;
+    `);
+  } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
+
+  // --- کانال پیش‌فرض ---
+  try {
+    await pool.query(`
+      INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
+      VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)
+      ON CONFLICT (chat_id) DO NOTHING;
+    `);
+  } catch (e) { console.log('خطا در کانال پیش‌فرض:', e.message); }
+
+  // --- محصولات پیش‌فرض ---
+  const buyProducts = [
+    { key: 'voucher', name: '🎟 یوووچر', min_amount: 1, price_type: 'usd', active: 1, hidden: 0 },
+    { key: 'hotvoucher', name: '🎟 هات ووچر', min_amount: 50000, price_type: 'toman', active: 1, hidden: 0 },
+    { key: 'premium_voucher', name: '🎟 پرمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'ps_voucher', name: '🔵 پی‌اس ووچر', min_amount: 185081, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'perfect_money', name: '💵 پرفکت مانی', min_amount: 1, price_type: 'usd', active: 0, hidden: 1 },
+    { key: 'crypto_dollar', name: '💲 دلار (کریپتو)', min_amount: 10, price_type: 'usd', active: 0, hidden: 1 },
+    { key: 'crypto_tron', name: '🪙 ترون (TRX)', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'crypto_ton', name: '💎 تون (TON)', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'telegram_stars', name: '⭐️ استارز تلگرام', min_amount: 50, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'telegram_gift_stars', name: '🎁 گیفت استارزی', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'telegram_gift_collection', name: '🎁 گیفت کلکسیونی', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'telegram_premium', name: '💎 پرمیوم تلگرام', min_amount: 50000, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'channel_boost', name: '🚀 بوست کانال', min_amount: 100000, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'post_reaction', name: '❤️ ری‌اکشن پست', min_amount: 500, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'post_view', name: '👁 بازدید پست', min_amount: 500, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'virtual_number', name: '📱 شماره مجازی', min_amount: 50000, price_type: 'toman', active: 0, hidden: 1 }
+  ];
+  for (const p of buyProducts) {
+    try {
+      await pool.query(
+        'INSERT INTO products (key, name, min_amount, price_type, active, hidden, created_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT (key) DO NOTHING',
+        [p.key, p.name, p.min_amount, p.price_type, p.active, p.hidden]
+      );
+    } catch (e) {}
+  }
+
+  const sellProducts = [
+    { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
+    { key: 'premiumvoucher', name: '🎟 پرمیوم ووچر', unit_price: 100000, sample_code: 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', active: 1 },
+    { key: 'psvoucher', name: '🔵 پی‌اس ووچر', unit_price: 100000, sample_code: 'PS-4KF8-92AD-7QPW-XM2L', active: 1 },
+    { key: 'hotvoucher_sell', name: '🎟 هات ووچر', unit_price: 50000, sample_code: 'HOT-XXXX-XXXX', active: 0 },
+    { key: 'perfect_money_sell', name: '💵 پرفکت مانی', unit_price: 60000, sample_code: 'PM-XXXX', active: 0 }
+  ];
+  for (const p of sellProducts) {
+    try {
+      await pool.query(
+        'INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES ($1,$2,$3,$4,$5,NOW()) ON CONFLICT (key) DO NOTHING',
+        [p.key, p.name, p.unit_price, p.sample_code, p.active]
+      );
+    } catch (e) {}
+  }
+
+  // --- متون پیش‌فرض bot_texts ---
   try {
     const cnt = await pool.query('SELECT COUNT(*)::int AS c FROM bot_texts');
     if (cnt.rows[0].c === 0) {
