@@ -1,11 +1,13 @@
 // handlers/buy.js
 const texts = require('../texts');
-const { sessions, sendTracked, fillTemplate, generateTrackingCode, generateVoucherTrackingCode } = require('../utils');
-const { pool, getUser, getUsdRate } = require('../db');
-const PricingEngine = require('../pricingEngine');
+const { sessions, fillTemplate, generateTrackingCode, generateVoucherTrackingCode } = require('../utils');
+const { pool, getUser, getUsdRate, getSetting } = require('../db');
 
 module.exports = function registerBuyHandlers(bot) {
 
+  // ============================================
+  // نمایش منوی محصولات خرید
+  // ============================================
   bot.action('menu_buy', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -13,17 +15,16 @@ module.exports = function registerBuyHandlers(bot) {
     const productsRes = await pool.query('SELECT * FROM products WHERE active = 1 ORDER BY id ASC');
 
     if (productsRes.rows.length === 0) {
-      ctx.reply(t.buyNoProducts);
-      return;
+      return ctx.reply(t.buyNoProducts);
     }
 
-    const buttons = productsRes.rows.map(function (p) {
-      return [{ text: p.name, callback_data: 'buy_' + p.key }];
-    });
-
+    const buttons = productsRes.rows.map(p => [{ text: p.name, callback_data: 'buy_' + p.key }]);
     ctx.reply(t.buyMenuTitle, { reply_markup: { inline_keyboard: buttons } });
   });
 
+  // ============================================
+  // لغو خرید
+  // ============================================
   bot.action('buy_cancel', async (ctx) => {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
@@ -31,6 +32,9 @@ module.exports = function registerBuyHandlers(bot) {
     ctx.reply(texts.fa.buyCancelled);
   });
 
+  // ============================================
+  // تأیید نهایی و ثبت خرید
+  // ============================================
   bot.action('buy_confirm', async (ctx) => {
     ctx.answerCbQuery();
     const t = texts.fa;
@@ -38,8 +42,7 @@ module.exports = function registerBuyHandlers(bot) {
 
     if (!session || session.flow !== 'buy' || session.step !== 'waiting_confirm') {
       try { await ctx.deleteMessage(); } catch (e) {}
-      ctx.reply(t.buyCancelled);
-      return;
+      return ctx.reply(t.buyCancelled);
     }
 
     const user = await getUser(ctx.from.id);
@@ -71,62 +74,57 @@ module.exports = function registerBuyHandlers(bot) {
       finalAmount = amount;
     }
 
+    // بررسی موجودی کافی
     if (!user || Number(user.balance) < finalAmount) {
       delete sessions[ctx.from.id];
-      ctx.reply(fillTemplate(t.buyInsufficientBalance, {
+      return ctx.reply(fillTemplate(t.buyInsufficientBalance, {
         amount: finalAmount.toLocaleString('en-US'),
         balance: user ? Number(user.balance).toLocaleString('en-US') : '0'
       }), {
         reply_markup: { inline_keyboard: [[{ text: t.buyChargeWalletButton, callback_data: 'wallet_deposit' }]] }
       });
-      return;
     }
 
     // کسر مبلغ نهایی از موجودی
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = generateTrackingCode();
-    const voucherTrackingCode = generateVoucherTrackingCode();
     const providerTxId = 'TX_' + Math.floor(10000000 + Math.random() * 90000000);
 
+    // تعیین وضعیت سفارش (دستی/اتومات)
+    const buyMode = await getSetting('buy_mode', 'MANUAL');
     let orderStatus;
-    const mode = await pool.query("SELECT value FROM settings WHERE key = 'buy_mode'");
-    const buyMode = mode.rows[0] ? mode.rows[0].value : 'MANUAL';
-
     if (buyMode === 'MANUAL' || product.manual_delivery) {
       orderStatus = 'pending_delivery';
     } else {
       orderStatus = 'completed';
     }
 
+    // ثبت سفارش در دیتابیس
     await pool.query(
-      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code, provider_tx_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [String(ctx.from.id), productKey, finalAmount, commissionAmount, orderStatus, new Date().toISOString(), trackingCode, providerTxId]
+      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code, provider_tx_id) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)',
+      [String(ctx.from.id), productKey, finalAmount, commissionAmount, orderStatus, trackingCode, providerTxId]
     );
 
+    // به‌روزرسانی موجودی کاربر
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
     const newBalance = newBalanceRes.rows[0].balance;
 
-    const rate = await getUsdRate();
-    const voucherAmount = product.price_type === 'usd' ? (amount / rate).toFixed(2) : amount;
-
-    const voucherCode = 'VCH-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    const receiptText = 
+    // ساخت متن رسید
+    const receiptText =
       '🧾 **رسید تراکنش موفق - ربات ووچینو⁰¹**\n\n' +
       'با تشکر، سفارش شما با موفقیت انجام شد!\n\n' +
-      '📌 **نوع تراکنش:** خرید ' + product.name + '\n' +
-      '💰 **مبلغ پرداختی:** ' + finalAmount.toLocaleString('en-US') + ' تومان\n' +
-      (product.price_type === 'usd' ? '💵 **مقدار ووچر:** ' + voucherAmount + ' دلار\n\n' : '') +
-      '🔢 **کد پیگیری ووچینو:** #VCH_' + voucherTrackingCode + '\n' +
-      '🏛 **کد مرجع شبکه (صرافی):** ' + providerTxId + '\n\n' +
-      '🎟 **کد ووچر شما:**\n`' + voucherCode + '`\n\n' +
-      '⏱ **تاریخ و ساعت:** ' + new Date().toLocaleString('fa-IR') + '\n' +
+      `📌 **نوع تراکنش:** خرید ${product.name}\n` +
+      `💰 **مبلغ پرداختی:** ${finalAmount.toLocaleString('en-US')} تومان\n` +
+      `🔢 **کد پیگیری:** ${trackingCode}\n` +
+      `🏛 **کد مرجع شبکه (صرافی):** ${providerTxId}\n\n` +
+      `⏱ **تاریخ و ساعت:** ${new Date().toLocaleString('fa-IR')}\n` +
       '----------------------------------\n' +
       '💡 کد ووچر را در جای امن نگهداری کنید.';
 
     delete sessions[ctx.from.id];
 
+    // ارسال نتیجه به کاربر
     if (orderStatus === 'pending_delivery') {
       ctx.reply(fillTemplate(t.buySuccessPending, {
         product: product.name,
@@ -135,7 +133,6 @@ module.exports = function registerBuyHandlers(bot) {
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
-      ctx.reply(receiptText, { parse_mode: 'Markdown' });
     } else {
       ctx.reply(fillTemplate(t.buySuccess, {
         product: product.name,
@@ -143,10 +140,13 @@ module.exports = function registerBuyHandlers(bot) {
         balance: Number(newBalance).toLocaleString('en-US'),
         trackingCode: trackingCode
       }));
-      ctx.reply(receiptText, { parse_mode: 'Markdown' });
     }
+    ctx.reply(receiptText, { parse_mode: 'Markdown' });
   });
 
+  // ============================================
+  // انتخاب یک محصول برای خرید (شروع فرایند)
+  // ============================================
   bot.action(/^buy_(.+)/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
@@ -156,43 +156,37 @@ module.exports = function registerBuyHandlers(bot) {
     const product = productRes.rows[0];
     if (!product) {
       try { await ctx.deleteMessage(); } catch (e) {}
-      ctx.reply(t.buyNoProducts);
-      return;
+      return ctx.reply(t.buyNoProducts);
     }
 
-    let minToman;
-    let maxToman = 0;
-    let messageText;
-
+    // محاسبه حداقل و حداکثر مبلغ بر اساس نوع قیمت
     const rate = await getUsdRate();
-
+    let minToman, maxToman = 0;
     if (product.price_type === 'usd') {
       minToman = Math.round(Number(product.min_amount) * rate);
-      if (Number(product.max_amount) > 0) {
-        maxToman = Math.round(Number(product.max_amount) * rate);
-      }
-      let maxText = '';
-      if (maxToman > 0) {
-        maxText = '\n🔺 حداکثر خرید: ' + maxToman.toLocaleString('en-US') + ' تومان';
-      }
+      if (Number(product.max_amount) > 0) maxToman = Math.round(Number(product.max_amount) * rate);
+    } else {
+      minToman = Number(product.min_amount);
+      if (Number(product.max_amount) > 0) maxToman = Number(product.max_amount);
+    }
+
+    // ساخت پیام مناسب
+    let messageText;
+    if (product.price_type === 'usd') {
       messageText = fillTemplate(t.buyAskAmountUsd, {
         rate: rate.toLocaleString('en-US'),
         minUsd: Number(product.min_amount).toLocaleString('en-US'),
         minToman: minToman.toLocaleString('en-US')
-      }) + maxText;
+      });
     } else {
-      minToman = Number(product.min_amount);
-      if (Number(product.max_amount) > 0) {
-        maxToman = Number(product.max_amount);
-      }
-      let maxText = '';
-      if (maxToman > 0) {
-        maxText = '\n🔺 حداکثر خرید: ' + maxToman.toLocaleString('en-US') + ' تومان';
-      }
-      messageText = fillTemplate(t.buyAskAmountToman, { min: minToman.toLocaleString('en-US') }) + maxText;
+      messageText = fillTemplate(t.buyAskAmountToman, { min: minToman.toLocaleString('en-US') });
     }
 
-    // نمایش نوع و مقدار کارمزد
+    if (maxToman > 0) {
+      messageText += '\n🔺 حداکثر خرید: ' + maxToman.toLocaleString('en-US') + ' تومان';
+    }
+
+    // نمایش کارمزد محصول
     if (product.commission_type === 'percentage') {
       messageText += '\n\n💰 کارمزد: ' + product.commission_value + '%';
     } else if (product.commission_type === 'fixed') {
@@ -201,7 +195,8 @@ module.exports = function registerBuyHandlers(bot) {
       messageText += '\n\n💰 بدون کارمزد';
     }
 
-    const session = {
+    // ذخیره session
+    sessions[ctx.from.id] = {
       flow: 'buy',
       step: 'waiting_amount',
       lang: 'fa',
@@ -210,23 +205,27 @@ module.exports = function registerBuyHandlers(bot) {
         productLabel: product.name,
         minAmount: minToman,
         maxAmount: maxToman,
-        manualDelivery: product.manual_delivery
+        manualDelivery: product.manual_delivery,
+        commissionType: product.commission_type,
+        commissionValue: product.commission_value
       }
     };
-    sessions[ctx.from.id] = session;
 
-    const extra = { reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow', style: 'danger' }]] } };
+    const extra = { reply_markup: { inline_keyboard: [[{ text: '🔙 بیخیال', callback_data: 'cancel_flow' }]] } };
 
     try {
       await ctx.editMessageText(messageText, extra);
-      session.lastBotMsgId = ctx.callbackQuery.message.message_id;
+      sessions[ctx.from.id].lastBotMsgId = ctx.callbackQuery.message.message_id;
     } catch (e) {
       try { await ctx.deleteMessage(); } catch (err) {}
       const sent = await ctx.reply(messageText, extra);
-      session.lastBotMsgId = sent.message_id;
+      sessions[ctx.from.id].lastBotMsgId = sent.message_id;
     }
   });
 
+  // ============================================
+  // دریافت مبلغ خرید از کاربر
+  // ============================================
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'buy' || session.step !== 'waiting_amount') return next();
@@ -237,49 +236,46 @@ module.exports = function registerBuyHandlers(bot) {
     const maxAmount = session.data.maxAmount;
 
     if (!amount || amount < minAmount) {
-      ctx.reply(fillTemplate(t.buyMinError, { min: minAmount.toLocaleString('en-US') }));
-      return;
+      return ctx.reply(fillTemplate(t.buyMinError, { min: minAmount.toLocaleString('en-US') }));
     }
 
     if (maxAmount > 0 && amount > maxAmount) {
-      ctx.reply(fillTemplate(t.buyMaxError, { max: maxAmount.toLocaleString('en-US') }));
-      return;
+      return ctx.reply(fillTemplate(t.buyMaxError, { max: maxAmount.toLocaleString('en-US') }));
     }
 
+    // ذخیره مبلغ و تغییر مرحله به تأیید
     session.data.amount = amount;
     session.step = 'waiting_confirm';
 
-    // محاسبه مجدد کارمزد برای نمایش در تأییدیه
-    const productRes = await pool.query('SELECT * FROM products WHERE key = $1', [session.data.productType]);
-    const product = productRes.rows[0];
-    let finalAmount = amount;
-    let commissionAmount = 0;
-
-    if (product && product.commission_type === 'percentage') {
-      commissionAmount = Math.round(amount * (parseFloat(product.commission_value) / 100));
-      finalAmount = amount + commissionAmount;
-    } else if (product && product.commission_type === 'fixed') {
-      commissionAmount = parseInt(product.commission_value, 10) || 0;
-      finalAmount = amount + commissionAmount;
+    // محاسبه پیش‌نمایش قیمت نهایی با کارمزد
+    let previewAmount = amount;
+    const commType = session.data.commissionType;
+    const commValue = parseFloat(session.data.commissionValue);
+    if (commType === 'percentage') {
+      previewAmount = amount + Math.round(amount * (commValue / 100));
+    } else if (commType === 'fixed') {
+      previewAmount = amount + (parseInt(commValue, 10) || 0);
     }
 
-    let summaryText = fillTemplate(t.buyConfirmSummary, {
+    const confirmText = fillTemplate(t.buyConfirmSummary, {
       product: session.data.productLabel,
-      amount: amount.toLocaleString('en-US')
+      amount: previewAmount.toLocaleString('en-US')
     });
 
-    if (commissionAmount > 0) {
-      summaryText += '\n💰 کارمزد: ' + commissionAmount.toLocaleString('en-US') + ' تومان';
-    }
-    summaryText += '\n💳 مبلغ قابل پرداخت: ' + finalAmount.toLocaleString('en-US') + ' تومان';
-
-    await sendTracked(ctx, session, summaryText, {
+    const extra = {
       reply_markup: {
         inline_keyboard: [
-          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm', style: 'success' }],
-          [{ text: t.buyCancelButton, callback_data: 'buy_cancel', style: 'danger' }]
+          [{ text: t.buyConfirmButton, callback_data: 'buy_confirm' }, { text: t.buyCancelButton, callback_data: 'buy_cancel' }]
         ]
       }
-    });
+    };
+
+    try {
+      await ctx.editMessageText(confirmText, extra);
+    } catch (e) {
+      try { await ctx.deleteMessage(); } catch (err) {}
+      const sent = await ctx.reply(confirmText, extra);
+      session.lastBotMsgId = sent.message_id;
+    }
   });
 };
