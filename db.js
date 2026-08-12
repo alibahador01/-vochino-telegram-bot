@@ -13,6 +13,11 @@ async function getUser(telegramId) {
   return res.rows[0] || null;
 }
 
+async function getUserById(telegramId) {
+  const res = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
+  return res.rows[0] || null;
+}
+
 async function createUser(telegramId, phone, fullName, cardNumber, language = 'fa', referrerId = null) {
   const res = await pool.query(
     'INSERT INTO users (telegram_id, phone, full_name, card_number, language, referrer_id, registered_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *',
@@ -128,7 +133,7 @@ async function getUsdRate() {
   return Number(await getSetting('usd_rate', DEFAULT_USD_RATE));
 }
 
-// ==================== محصولات (خرید) ====================
+// ==================== محصولات خرید ====================
 async function getProducts(activeOnly = true) {
   let query = 'SELECT * FROM products WHERE hidden = 0';
   if (activeOnly) query += ' AND active = 1';
@@ -201,12 +206,6 @@ async function updateSellProduct(key, data) {
 async function deleteSellProduct(key) {
   await pool.query('UPDATE sell_products SET active = 0 WHERE key = $1', [key]);
 }
-
-// ==================== سفارشات خرید ====================
-// ...
-
-// ==================== سفارشات فروش ====================
-// ...
 
 // ==================== کوپن‌ها ====================
 async function getCoupon(code) {
@@ -281,7 +280,7 @@ async function getTransactionLogs(telegramId, limit = 10) {
   return res.rows;
 }
 
-// ==================== API و صرافی‌ها ====================
+// ==================== API / صرافی‌ها ====================
 async function getApiSources() {
   const res = await pool.query('SELECT * FROM api_sources WHERE is_active = 1 ORDER BY priority ASC');
   return res.rows;
@@ -416,6 +415,14 @@ async function getBotTextByKey(key) {
   return res.rows[0] || null;
 }
 
+async function searchBotTexts(searchTerm) {
+  const res = await pool.query(
+    "SELECT * FROM bot_texts WHERE key ILIKE $1 OR value ILIKE $1 ORDER BY category, key ASC",
+    [`%${searchTerm}%`]
+  );
+  return res.rows;
+}
+
 async function updateBotText(key, value) {
   const res = await pool.query(
     'UPDATE bot_texts SET value = $2, updated_at = NOW() WHERE key = $1 RETURNING *',
@@ -455,43 +462,47 @@ async function sendRatesToChannel(bot) {
 
 // ==================== مقداردهی اولیه ====================
 async function initDb() {
-  // جدول VPN
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS vpn_subscriptions (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT REFERENCES users(telegram_id),
-        status TEXT DEFAULT 'active',
-        expires_at TIMESTAMP,
-        data_limit BIGINT DEFAULT 5368709120,
-        data_used BIGINT DEFAULT 0,
-        tracking_code TEXT UNIQUE,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('✅ جدول vpn_subscriptions آماده است');
-  } catch (e) { console.log('خطا در ایجاد vpn_subscriptions:', e.message); }
+  // جداول اصلی
+  const tables = [
+    `CREATE TABLE IF NOT EXISTS vpn_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT REFERENCES users(telegram_id),
+      status TEXT DEFAULT 'active',
+      expires_at TIMESTAMP,
+      data_limit BIGINT DEFAULT 5368709120,
+      data_used BIGINT DEFAULT 0,
+      tracking_code TEXT UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS bot_texts (
+      id SERIAL PRIMARY KEY,
+      key TEXT UNIQUE NOT NULL,
+      category TEXT NOT NULL,
+      value TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      updated_at TIMESTAMP DEFAULT NOW()
+    );`
+  ];
+  for (const sql of tables) {
+    try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
+  }
 
-  // جدول bot_texts
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS bot_texts (
-        id SERIAL PRIMARY KEY,
-        key TEXT UNIQUE NOT NULL,
-        category TEXT NOT NULL,
-        value TEXT NOT NULL,
-        description TEXT DEFAULT '',
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('✅ جدول bot_texts آماده است');
-  } catch (e) { console.log('خطا در bot_texts:', e.message); }
+  // ستون‌های جدید بونوس
+  const bonusColumns = [
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_bonus_received BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS first_purchase_bonus_received BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE`
+  ];
+  for (const sql of bonusColumns) {
+    try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون بونوس:', e.message); }
+  }
 
-  // درج متون پیش‌فرض اگر خالی است
+  // متون پیش‌فرض bot_texts
   try {
     const cnt = await pool.query('SELECT COUNT(*)::int AS c FROM bot_texts');
     if (cnt.rows[0].c === 0) {
-      const defaults = require('./textDefaults'); // فایل کمکی (می‌توانی inline هم بذاری)
+      const defaults = require('./textDefaults');
       for (const t of defaults) {
         await pool.query(
           'INSERT INTO bot_texts (key, category, value, description) VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING',
@@ -508,6 +519,7 @@ async function initDb() {
 module.exports = {
   pool,
   getUser,
+  getUserById,
   createUser,
   updateUser,
   getAllUsers,
@@ -557,6 +569,7 @@ module.exports = {
   createVpnSubscription,
   getAllBotTexts,
   getBotTextByKey,
+  searchBotTexts,
   updateBotText,
   getBotTextCategories,
   sendRatesToChannel,
