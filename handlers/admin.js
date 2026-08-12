@@ -66,6 +66,7 @@ module.exports = function registerAdminHandlers(bot) {
             [{ text: '👥 تنظیمات رفرال', callback_data: 'admin_referral_settings' }],
             [{ text: '💳 حداقل برداشت', callback_data: 'admin_min_withdraw' }],
             [{ text: '🌐 مدیریت فیلترشکن (VPN)', callback_data: 'admin_vpn_panel' }],
+            [{ text: '🎁 مدیریت بونوس‌ها', callback_data: 'admin_bonus_settings' }],
             [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu' }]
           ]
         }
@@ -151,7 +152,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply(message, { parse_mode: 'Markdown' });
   });
 
-  // پردازش متن‌های مدیریت متن (همینجا می‌ماند)
+  // پردازش متن‌های مدیریت متن
   bot.on('text', async (ctx, next) => {
     if (!isAdmin(ctx.from.id)) return next();
     const session = sessions[ctx.from.id];
@@ -778,9 +779,9 @@ module.exports = function registerAdminHandlers(bot) {
     const invitesForUnlock = await getSetting('vpn_invites_for_unlock', '2');
     const defaultVolume = await getSetting('vpn_default_volume_gb', '5');
     const defaultDays = await getSetting('vpn_default_days', '30');
-    const healthInterval = await getSetting('vpn_health_interval', '300'); // ثانیه
+    const healthInterval = await getSetting('vpn_health_interval', '300');
     const failureThreshold = await getSetting('vpn_failure_threshold', '3');
-    const cooldown = await getSetting('vpn_cooldown', '600'); // ثانیه
+    const cooldown = await getSetting('vpn_cooldown', '600');
 
     let msg = '🌐 **مدیریت فیلترشکن**\n\n';
     msg += `✅ سرویس فعال: ${vpnEnabled ? 'بله' : 'خیر'}\n`;
@@ -944,7 +945,7 @@ module.exports = function registerAdminHandlers(bot) {
   });
 
   // ادامه در قسمت دوم (بخش‌های ارسال همگانی، سفارشات، پردازش‌های متنی و...)
-  // ============================================
+    // ============================================
   // ارسال همگانی (اصلاح‌شده)
   // ============================================
   bot.action('admin_broadcast', async (ctx) => {
@@ -1185,14 +1186,14 @@ module.exports = function registerAdminHandlers(bot) {
   });
 
   // ============================================
-  // پردازش‌های متنی (ادمین) – ادامه
+  // پردازش‌های متنی ادمین (باقی session ها)
   // ============================================
   bot.on('text', async (ctx, next) => {
     if (!isAdmin(ctx.from.id)) return next();
     const session = sessions[ctx.from.id];
     if (!session) return next();
 
-    // ----- کانال‌ها -----
+    // افزودن کانال
     if (session.flow === 'admin_add_channel') {
       if (session.step === 'waiting_chat_id') {
         const chatId = ctx.message.text.trim();
@@ -1200,8 +1201,7 @@ module.exports = function registerAdminHandlers(bot) {
         session.chatId = chatId;
         session.step = 'waiting_invite_link';
         return ctx.reply('✅ آیدی ثبت شد.\nلینک دعوت را وارد کنید:');
-      }
-      if (session.step === 'waiting_invite_link') {
+      } else if (session.step === 'waiting_invite_link') {
         try {
           await addChannel(session.chatId, ctx.message.text.trim(), 'کانال ' + session.chatId);
           delete sessions[ctx.from.id];
@@ -1210,12 +1210,16 @@ module.exports = function registerAdminHandlers(bot) {
         return;
       }
     }
+
+    // حذف کانال
     if (session.flow === 'admin_remove_channel' && session.step === 'waiting_chat_id') {
       await deleteChannel(ctx.message.text.trim());
       delete sessions[ctx.from.id];
       ctx.reply('✅ کانال حذف شد.');
       return;
     }
+
+    // تغییر وضعیت کانال
     if (session.flow === 'admin_toggle_channel' && session.step === 'waiting_chat_id') {
       const chatId = ctx.message.text.trim();
       const ch = (await pool.query('SELECT * FROM required_channels WHERE chat_id=$1', [chatId])).rows[0];
@@ -1226,7 +1230,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- محصول خرید جدید -----
+    // افزودن محصول خرید گام‌به‌گام
     if (session.flow === 'admin_add_product_buy') {
       if (session.step === 'waiting_name') {
         session.data.name = ctx.message.text.trim();
@@ -1257,9 +1261,9 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- کارمزد خرید -----
+    // تنظیم کارمزد خرید
     if (session.flow === 'admin_commission_product_buy') {
-      if (session.step === 'waiting_commission_type') return next(); // توسط callback
+      if (session.step === 'waiting_commission_type') return next();
       if (session.step === 'waiting_value') {
         const val = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
         if (isNaN(val) || val < 0) return ctx.reply('❌ عدد معتبر وارد کنید.');
@@ -1270,7 +1274,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- محصول فروش جدید -----
+    // افزودن محصول فروش
     if (session.flow === 'admin_add_product_sell') {
       if (session.step === 'waiting_name') {
         session.data.name = ctx.message.text.trim();
@@ -1300,7 +1304,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- کارمزد فروش -----
+    // تنظیم کارمزد فروش
     if (session.flow === 'admin_commission_product_sell') {
       if (session.step === 'waiting_commission_type') return next();
       if (session.step === 'waiting_value') {
@@ -1313,7 +1317,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- تغییر وضعیت محصول -----
+    // تغییر وضعیت محصول خرید/فروش
     if (session.flow === 'admin_toggle_product_buy' && session.step === 'waiting_key') {
       const key = ctx.message.text.trim();
       const p = await getProductByKey(key);
@@ -1333,7 +1337,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- صرافی جدید -----
+    // افزودن صرافی
     if (session.flow === 'admin_add_api_source') {
       if (session.step === 'waiting_name') { session.data.name = ctx.message.text; session.step = 'waiting_type'; return ctx.reply('نوع صرافی (voucher, crypto, ...):'); }
       if (session.step === 'waiting_type') { session.data.type = ctx.message.text; session.step = 'waiting_base_url'; return ctx.reply('base_url:'); }
@@ -1352,7 +1356,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- ویرایش صرافی -----
+    // ویرایش صرافی
     if (session.flow === 'admin_edit_api_source') {
       if (session.step === 'waiting_field') {
         const field = ctx.message.text.trim().toLowerCase();
@@ -1372,7 +1376,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- اتصال محصول -----
+    // اتصال محصول
     if (session.flow === 'admin_add_product_link') {
       if (session.step === 'waiting_product_type') {
         const type = ctx.message.text.trim();
@@ -1391,6 +1395,8 @@ module.exports = function registerAdminHandlers(bot) {
       }
       return next();
     }
+
+    // تغییر اولویت اتصال
     if (session.flow === 'admin_edit_product_link') {
       if (session.step === 'waiting_link_id') {
         const linkId = parseInt(ctx.message.text);
@@ -1408,6 +1414,8 @@ module.exports = function registerAdminHandlers(bot) {
         return;
       }
     }
+
+    // حذف اتصال
     if (session.flow === 'admin_remove_product_link' && session.step === 'waiting_link_id') {
       const linkId = parseInt(ctx.message.text);
       if (isNaN(linkId)) return ctx.reply('❌ ID نامعتبر.');
@@ -1417,7 +1425,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- ارسال همگانی/مخفی (دریافت متن) -----
+    // ارسال همگانی: دریافت متن
     if (session.flow === 'admin_broadcast' && session.step === 'waiting_text') {
       session.data.text = ctx.message.text;
       const allUsers = await getAllUsers(true);
@@ -1431,6 +1439,8 @@ module.exports = function registerAdminHandlers(bot) {
       delete sessions[ctx.from.id];
       return;
     }
+
+    // ارسال مخفی: آیدی و سپس متن
     if (session.flow === 'admin_fake_broadcast') {
       if (session.step === 'waiting_user_id') {
         const targetId = ctx.message.text.trim();
@@ -1451,7 +1461,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- هدیه -----
+    // هدیه: دریافت آیدی‌ها و مبلغ
     if (session.flow === 'admin_gift') {
       if (session.step === 'waiting_user_ids') {
         const ids = ctx.message.text.split('-').map(s => s.trim()).filter(Boolean);
@@ -1471,14 +1481,17 @@ module.exports = function registerAdminHandlers(bot) {
           try {
             await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, id]);
             success++;
-            const giftMsg = 
-              '✨ یه سورپرایز کوچک برای شما...\n\n' +
-              `🎁 هدیه با موفقیت به کیف پولتان اضافه شد.\n(${amount.toLocaleString()} تومان)\n\n` +
-              '🎗این هدیه از طرف مدیریت ووچینو⁰۱\nبه پاس همراهی شما تقدیم شد.\n\n' +
-              'گاهی برای شروع یک همراهی خوب،\nلازم نیست حرف زیادی بزنیم،،،\nکافیه یک قدم کوچیک برداریم💎\n\n' +
-              '👑امیدواریم وقتی نوبت خرید ووچر رسید،\nووچینو⁰۱ یکی از اولین انتخاب‌های شما باشد.\n\n' +
-              '🩵راستی رفیق جان\nامیدوارم امروز شروعِ شانسای خوبت باشه🤲\nپرسود باشید همیشه...💸';
-            await sendMessageToUser(bot, id, giftMsg);
+            const user = await getUserById(id);
+            if (user) {
+              const giftMsg = 
+                '✨ یه سورپرایز کوچک برای شما...\n\n' +
+                `🎁 هدیه با موفقیت به کیف پولتان اضافه شد.\n(${amount.toLocaleString()} تومان)\n\n` +
+                '🎗این هدیه از طرف مدیریت ووچینو⁰۱\nبه پاس همراهی شما تقدیم شد.\n\n' +
+                'گاهی برای شروع یک همراهی خوب،\nلازم نیست حرف زیادی بزنیم،،،\nکافیه یک قدم کوچیک برداریم💎\n\n' +
+                '👑امیدواریم وقتی نوبت خرید ووچر رسید،\nووچینو⁰۱ یکی از اولین انتخاب‌های شما باشد.\n\n' +
+                '🩵راستی رفیق جان\nامیدوارم امروز شروعِ شانسای خوبت باشه🤲\nپرسود باشید همیشه...💸';
+              await sendMessageToUser(bot, id, giftMsg);
+            }
           } catch (e) { console.log(e); }
         }
         delete sessions[ctx.from.id];
@@ -1487,7 +1500,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- کوپن -----
+    // کوپن
     if (session.flow === 'admin_add_coupon') {
       if (session.step === 'waiting_code') {
         const code = ctx.message.text.trim().toUpperCase();
@@ -1533,7 +1546,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- تحویل کد -----
+    // تحویل کد
     if (session.flow === 'admin_deliver_code' && session.step === 'waiting_code') {
       const deliveredCode = ctx.message.text.trim();
       const { orderId, telegramId, trackingCode } = session.data;
@@ -1544,7 +1557,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- رد با دلیل (کیف پول) -----
+    // رد با دلیل (کیف پول)
     if (session.flow === 'admin_reject_reason' && session.step === 'waiting_reason') {
       const reason = ctx.message.text;
       const requestId = session.data.requestId;
@@ -1557,7 +1570,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- رد با دلیل (فروش) -----
+    // رد با دلیل (فروش)
     if (session.flow === 'admin_sell_reject_reason' && session.step === 'waiting_reason') {
       const reason = ctx.message.text;
       const requestId = session.data.requestId;
@@ -1569,7 +1582,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- فروش – ورود مبلغ -----
+    // فروش - ورود مبلغ
     if (session.flow === 'admin_sell_amount' && session.step === 'waiting_amount') {
       const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
       if (!amount || amount <= 0) return ctx.reply('⚠️ مبلغ نامعتبر.');
@@ -1583,7 +1596,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- تنظیمات (نرخ دلار، ایموجی، بازی، رفرال، برداشت، VPN) -----
+    // تنظیمات (نرخ دلار، ایموجی، بازی، رفرال، برداشت، VPN)
     if (session.flow === 'admin_set_rate' && session.step === 'waiting_value') {
       const value = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
       if (!value || value <= 0) return ctx.reply('❌ عدد معتبر وارد کنید.');
@@ -1649,7 +1662,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- تنظیمات VPN -----
+    // تنظیمات VPN
     if (session.flow === 'admin_vpn_set_max_attempts' && session.step === 'waiting_value') {
       const val = parseInt(ctx.message.text);
       if (isNaN(val) || val < 0) return ctx.reply('❌ عدد نامعتبر.');
@@ -1707,7 +1720,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- سرور VPN جدید -----
+    // افزودن سرور VPN
     if (session.flow === 'admin_vpn_add_server') {
       if (session.step === 'waiting_name') {
         session.data.name = ctx.message.text.trim();
@@ -1728,7 +1741,6 @@ module.exports = function registerAdminHandlers(bot) {
       }
       if (session.step === 'waiting_protocol') {
         session.data.protocol = ctx.message.text.trim();
-        // ذخیره در دیتابیس
         try {
           await pool.query(
             'INSERT INTO vpn_servers (name, host, port, protocol, is_active, health_status, created_at) VALUES ($1,$2,$3,$4,true,\'unknown\',NOW())',
@@ -1741,7 +1753,7 @@ module.exports = function registerAdminHandlers(bot) {
       }
     }
 
-    // ----- جستجوی کد پیگیری -----
+    // جستجوی کد پیگیری
     if (session.flow === 'admin_find' && session.step === 'waiting_code') {
       const code = ctx.message.text.trim().toUpperCase();
       const orderRes = await pool.query('SELECT * FROM orders WHERE tracking_code=$1', [code]);
@@ -1758,7 +1770,7 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // ----- اطلاعات کاربر -----
+    // اطلاعات کاربر
     if (session.flow === 'admin_userinfo' && session.step === 'waiting_id') {
       const targetId = ctx.message.text.trim();
       const user = await getUserById(targetId);
