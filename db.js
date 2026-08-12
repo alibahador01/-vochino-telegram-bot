@@ -112,7 +112,6 @@ async function checkMembership(ctx) {
         return false;
       }
     } catch (e) {
-      // اگر ربات دسترسی به کانال نداشته باشد، برای اینکه کاربر گیر نکند، عبور می‌دهیم
       console.log('⚠️ خطا در بررسی عضویت، به‌عنوان عضو تأیید شد: ' + e.message);
       return true;
     }
@@ -466,7 +465,6 @@ async function sendRatesToChannel(bot) {
 
 // ==================== مقداردهی اولیه ====================
 async function initDb() {
-  // --- ایجاد جداول ---
   const tables = [
     `CREATE TABLE IF NOT EXISTS users (
       telegram_id TEXT PRIMARY KEY,
@@ -658,8 +656,16 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
   }
 
-  // *** اضافه‌کردن ستون‌های missing ***
+  // ==================== اصلاح ستون‌های missing ====================
   const alterQueries = [
+    // users
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS card_number TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT \'fa\'',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS balance INTEGER DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_balance INTEGER DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS registered_at TIMESTAMP DEFAULT NOW()',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT \'none\'',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS card_photo_id TEXT',
@@ -670,8 +676,77 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
-    'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS force_join_enabled INTEGER DEFAULT 1'
+
+    // settings
+    'ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // required_channels
+    'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS force_join_enabled INTEGER DEFAULT 1',
+
+    // products
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS price_type TEXT DEFAULT \'toman\'',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden INTEGER DEFAULT 0',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+
+    // sell_products
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS sample_code TEXT',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+
+    // orders
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS voucher_code TEXT',
+
+    // sell_orders
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+
+    // wallet_requests
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS receipt_file_id TEXT',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS target_user_id TEXT',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+
+    // api_sources
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS supports_products TEXT[]',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_multi INTEGER DEFAULT 0',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS ip_slot TEXT DEFAULT \'default\'',
+
+    // tickets
+    'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
+    'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // transaction_logs
+    'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_before INTEGER',
+    'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_after INTEGER',
+    'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+    'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS description TEXT',
+
+    // vpn_servers
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS port INTEGER',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS protocol TEXT',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS health_status TEXT DEFAULT \'unknown\'',
+
+    // vpn_subscriptions
+    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'active\'',
+    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP',
+    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_limit BIGINT DEFAULT 5368709120',
+    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_used BIGINT DEFAULT 0',
+    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS tracking_code TEXT UNIQUE'
   ];
+
   for (const sql of alterQueries) {
     try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون:', e.message); }
   }
@@ -679,39 +754,39 @@ async function initDb() {
   // --- تنظیمات پیش‌فرض ---
   try {
     await pool.query(`
-      INSERT INTO settings (key, value) VALUES 
-        ('usd_rate', '60000'),
-        ('start_reaction', '🎉'),
-        ('buy_margin', '10'),
-        ('sell_margin', '10'),
-        ('buy_mode', 'MANUAL'),
-        ('sell_mode', 'MANUAL'),
-        ('referral_bonus', '5000'),
-        ('referral_enabled', 'true'),
-        ('game_rtp', '50'),
-        ('game_require_purchase', 'true'),
-        ('force_join_enabled', 'true'),
-        ('disableBalanceGame', 'false'),
-        ('disableBonusGame', 'false'),
-        ('winRateBalance', '50'),
-        ('winRateBonus', '50'),
-        ('gameMultiplier', '2'),
-        ('minPurchaseForGame', '0'),
-        ('min_withdraw', '100000'),
-        ('vpn_enabled', 'true'),
-        ('vpn_visible', 'true'),
-        ('vpn_max_free_attempts', '1'),
-        ('vpn_invites_for_unlock', '2'),
-        ('vpn_default_volume_gb', '5'),
-        ('vpn_default_days', '30'),
-        ('vpn_health_interval', '300'),
-        ('vpn_failure_threshold', '3'),
-        ('vpn_cooldown', '600')
-      ON CONFLICT (key) DO NOTHING;
+      INSERT INTO settings (key, value, updated_at) VALUES 
+        ('usd_rate', '60000', NOW()),
+        ('start_reaction', '🎉', NOW()),
+        ('buy_margin', '10', NOW()),
+        ('sell_margin', '10', NOW()),
+        ('buy_mode', 'MANUAL', NOW()),
+        ('sell_mode', 'MANUAL', NOW()),
+        ('referral_bonus', '5000', NOW()),
+        ('referral_enabled', 'true', NOW()),
+        ('game_rtp', '50', NOW()),
+        ('game_require_purchase', 'true', NOW()),
+        ('force_join_enabled', 'true', NOW()),
+        ('disableBalanceGame', 'false', NOW()),
+        ('disableBonusGame', 'false', NOW()),
+        ('winRateBalance', '50', NOW()),
+        ('winRateBonus', '50', NOW()),
+        ('gameMultiplier', '2', NOW()),
+        ('minPurchaseForGame', '0', NOW()),
+        ('min_withdraw', '100000', NOW()),
+        ('vpn_enabled', 'true', NOW()),
+        ('vpn_visible', 'true', NOW()),
+        ('vpn_max_free_attempts', '1', NOW()),
+        ('vpn_invites_for_unlock', '2', NOW()),
+        ('vpn_default_volume_gb', '5', NOW()),
+        ('vpn_default_days', '30', NOW()),
+        ('vpn_health_interval', '300', NOW()),
+        ('vpn_failure_threshold', '3', NOW()),
+        ('vpn_cooldown', '600', NOW())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
 
-  // --- کانال پیش‌فرض (با بررسی وجود، بدون ON CONFLICT) ---
+  // --- کانال پیش‌فرض ---
   try {
     const existingChannel = await pool.query('SELECT chat_id FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
     if (existingChannel.rows.length === 0) {
