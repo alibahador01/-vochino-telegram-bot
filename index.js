@@ -15,10 +15,12 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// *** مسیر اصلی (باید حتماً 200 بده) ***
-app.get('/', (req, res) => {
-  res.send('Bot is alive and connected to Supabase!');
-});
+// ===== مسیرهای حیاتی برای جلوگیری از 404 =====
+app.get('/', (req, res) => res.send('Bot is alive and connected to Supabase!'));
+app.get('/health', (req, res) => res.send('OK'));
+app.get('/ping', (req, res) => res.send('PONG'));
+app.get('/keep-alive', (req, res) => res.send('ALIVE'));
+app.get('/api/status', (req, res) => res.json({ status: 'ok' }));
 
 // مسیر سابسکرایب VPN
 app.get('/sub/:userId', async (req, res) => {
@@ -54,12 +56,14 @@ app.get('/sub/:userId', async (req, res) => {
   }
 });
 
-// *** گوش دادن روی پورت ***
+// ===== راهنمای catch-all برای هر مسیر ناشناخته → 200 =====
+app.get('*', (req, res) => res.send('Vochino Bot Active'));
+
 app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
-// ضدخواب
+// ===== ضدخواب =====
 if (process.env.NODE_ENV !== 'development') {
   const antiSleep = new AntiSleepBot(process.env.APP_URL || 'https://your-app.onrender.com');
   antiSleep.startAll();
@@ -69,6 +73,7 @@ if (process.env.NODE_ENV !== 'development') {
   }, 14 * 60 * 1000);
 }
 
+// ===== ربات تلگرام =====
 const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
