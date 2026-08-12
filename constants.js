@@ -4,28 +4,26 @@ const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 const DEFAULT_USD_RATE = 60000;
 
-// طبق سند، دیگر هیچ محدودیتی برای انتخاب ایموجی وجود ندارد
-// ادمین می‌تواند هر ایموجی استاندارد تلگرام را از پنل وارد کند.
-// این آرایه صرفاً برای نمایش پیش‌فرض‌ها خالی گذاشته شده است.
-const ALLOWED_REACTIONS = []; 
+// آرایه‌ی ایموجی‌ها – بدون محدودیت (ادمین هر ایموجی استاندارد تلگرام را می‌تواند وارد کند)
+const ALLOWED_REACTIONS = [];
 
 const DEPOSIT_CARDS = [
   { number: '6219861819068106', owner: 'علی بهادر' },
   { number: '5047061669481125', owner: 'علی بهادر' }
 ];
 
-// منوی اصلی جدید – دقیقاً مطابق سند
-// ترتیب نمایش: دو دکمه در هر ردیف، پشتیبانی وسط
+// منوی اصلی جدید (چیدمان دقیق طبق سند)
 const mainMenuButtons = [
-  { key: 'buy',     text: '✨ خرید' },              // چپ
-  { key: 'sell',    text: '✨ فروش' },              // راست
-  { key: 'wallet',  text: '🧳 جیب' },              // چپ
-  { key: 'bonus',   text: '💎 بونوس' },            // راست
-  { key: 'special', text: '🎁 ویژه ووچینو⁰۱' },    // چپ
-  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰۱' }, // راست
-  { key: 'support', text: '📥 پشتیبانی' }           // وسط (تک)
+  { key: 'buy',     text: '✨ خرید' },
+  { key: 'sell',    text: '✨ فروش' },
+  { key: 'wallet',  text: '🧳 جیب' },
+  { key: 'bonus',   text: '💎 بونوس' },
+  { key: 'special', text: '🎁 ویژه ووچینو⁰۱' },
+  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰۱' },
+  { key: 'support', text: '📥 پشتیبانی' }
 ];
 
+// دکمه‌ی پنل مدیریت (فقط برای ادمین‌ها نمایش داده می‌شود)
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
 
 const BROADCAST_SETTINGS = {
