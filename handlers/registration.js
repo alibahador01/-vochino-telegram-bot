@@ -7,20 +7,16 @@ const { checkAndGrantBonuses } = require('./bonusEngine');
 
 module.exports = function registerRegistrationHandlers(bot) {
 
-  // ============================================
-  // استارت و ورود به ربات
-  // ============================================
   bot.start(async (ctx) => {
     const userId = ctx.from.id;
     let user = await getUser(userId);
     const referrerId = ctx.startPayload || null;
 
-    // اگر کاربر جدید است، با زبان null بساز تا صفحه انتخاب زبان بیاد
+    // اگر کاربر جدید است، با زبان null و ورود ناقص بساز
     if (!user) {
-      await createUser(userId, null, null, null, null, referrerId); // زبان = null
+      await createUser(userId, null, null, null, null, referrerId);
       user = await getUser(userId);
 
-      // اگر با لینک دعوت آمده، بونوس دعوت برای دعوت‌کننده
       if (referrerId) {
         try {
           await checkAndGrantBonuses(ctx, referrerId, 'referral');
@@ -28,34 +24,31 @@ module.exports = function registerRegistrationHandlers(bot) {
       }
     }
 
-    // اولویت اول: اگر زبان انتخاب نشده، صفحه انتخاب زبان
-    if (!user || !user.language) {
-      return ctx.reply(
-        '🌐 زبان خود را انتخاب کنید / Please choose your language:\n\n' +
-        '🇮🇷 فارسی | 🇬🇧 English | 🇹🇷 Türkçe',
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🇮🇷 فارسی', callback_data: 'lang_fa' }, { text: '🇬🇧 English', callback_data: 'lang_en' }],
-              [{ text: '🇹🇷 Türkçe', callback_data: 'lang_tr' }]
-            ]
+    // اگر ورود کامل نشده
+    if (!user || !user.onboarding_completed) {
+      // اول زبان
+      if (!user || !user.language) {
+        return ctx.reply(
+          '🌐 زبان خود را انتخاب کنید / Please choose your language:\n\n' +
+          '🇮🇷 فارسی | 🇬🇧 English | 🇹🇷 Türkçe',
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🇮🇷 فارسی', callback_data: 'lang_fa' }, { text: '🇬🇧 English', callback_data: 'lang_en' }],
+                [{ text: '🇹🇷 Türkçe', callback_data: 'lang_tr' }]
+              ]
+            }
           }
-        }
-      );
-    }
-
-    // اگر زبان دارد ولی هنوز قوانین/عضویت کامل نشده (مثلاً phone یا full_name خالی) → قوانین
-    if (user.language && (user.phone === null || user.full_name === null)) {
+        );
+      }
+      // بعد قوانین و عضویت
       return showRules(ctx, user.language);
     }
 
-    // در غیر این صورت کاربر کامل شده و مستقیم به منوی اصلی
+    // اگر ورود کامل شده → منو
     showMainMenu(ctx);
   });
 
-  // ============================================
-  // انتخاب زبان
-  // ============================================
   bot.action(/^lang_(fa|en|tr)$/, async (ctx) => {
     const lang = ctx.match[1];
     const userId = ctx.from.id;
@@ -67,9 +60,6 @@ module.exports = function registerRegistrationHandlers(bot) {
     return showRules(ctx, lang);
   });
 
-  // ============================================
-  // نمایش قوانین و درخواست عضویت در کانال
-  // ============================================
   async function showRules(ctx, lang) {
     const forceJoinEnabled = await getSetting('force_join_enabled', 'true');
     const channels = await getRequiredChannels();
@@ -124,7 +114,6 @@ module.exports = function registerRegistrationHandlers(bot) {
       });
     }
 
-    // اگر جوین اجباری غیرفعال باشد، مستقیم دکمه پذیرش قوانین
     return ctx.reply(m.rules, {
       reply_markup: {
         inline_keyboard: [
@@ -134,9 +123,6 @@ module.exports = function registerRegistrationHandlers(bot) {
     });
   }
 
-  // ============================================
-  // دکمه "عضو شدم" – بررسی عضویت
-  // ============================================
   bot.action('check_join', async (ctx) => {
     const userId = ctx.from.id;
     const user = await getUser(userId);
@@ -165,9 +151,6 @@ module.exports = function registerRegistrationHandlers(bot) {
     });
   });
 
-  // ============================================
-  // پذیرش قوانین → ورود به منوی اصلی (کاربر مهمان)
-  // ============================================
   bot.action('accept_rules', async (ctx) => {
     const userId = ctx.from.id;
     const user = await getUser(userId);
@@ -176,10 +159,12 @@ module.exports = function registerRegistrationHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    // بونوس ثبت‌نام (فقط در صورت فعال بودن تنظیمات)
+    // علامت‌گذاری ورود کامل‌شده
+    await pool.query('UPDATE users SET onboarding_completed = true WHERE telegram_id = $1', [String(userId)]);
+
+    // بونوس ثبت‌نام
     await checkAndGrantBonuses(ctx, userId, 'registration');
 
-    // نمایش منوی اصلی
     showMainMenu(ctx);
   });
 
