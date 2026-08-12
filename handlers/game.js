@@ -26,8 +26,7 @@ const gameMessages = {
 const gameKeys = ['rock_paper_scissors', 'wheel', 'penalty', 'bowling', 'dice', 'dart'];
 
 /**
- * بررسی و اعطای بونوس‌های سه‌گانه (ثبت‌نام، اولین خرید، دعوت)
- * این تابع باید از جاهای مختلف فراخوانی شود.
+ * بررسی و اعطای بونوس‌های سه‌گانه
  */
 async function checkAndGrantBonuses(ctx, userId, eventType) {
   const user = await getUser(userId);
@@ -72,7 +71,7 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
     }
   }
 
-  // --- بونوس دعوت (تکرارشونده) ---
+  // --- بونوس دعوت ---
   if (eventType === 'referral') {
     const refActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
     const refThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10);
@@ -106,13 +105,11 @@ async function showBonusMenu(ctx) {
   const userId = ctx.from.id;
   const user = await getUser(userId);
 
-  // بررسی غیرفعال بودن کل بخش
   const gameDisabled = (await getSetting('disableBonusGame', 'false')) === 'true';
   if (gameDisabled) {
     return ctx.reply(gameMessages.disabled);
   }
 
-  // بررسی وجود حداقل یک خرید موفق (یا شرط minPurchaseForGame)
   const minPurchase = parseInt(await getSetting('minPurchaseForGame', '0'), 10);
   let canPlay = false;
   if (minPurchase === 0) {
@@ -133,7 +130,7 @@ async function showBonusMenu(ctx) {
     return ctx.reply(gameMessages.noPurchase);
   }
 
-  // --- فعال‌سازی هدیه اولین خرید (اگر هنوز دریافت نشده) ---
+  // هدیه اولین خرید
   const giftReceived = user.bonus_gift_received;
   if (!giftReceived) {
     const giftAmount = parseInt(await getSetting('game_bonus_gift', '0'), 10);
@@ -148,7 +145,6 @@ async function showBonusMenu(ctx) {
     }
   }
 
-  // نمایش دکمه‌های بازی
   const buttons = gameKeys.map(key => {
     const name = gameMessages.gameNames[key] || key;
     return [{ text: name, callback_data: 'game_select_' + key }];
@@ -161,16 +157,13 @@ async function showBonusMenu(ctx) {
 // ============================================
 // ثبت هندلرهای بازی
 // ============================================
-module.exports = function registerGameHandlers(bot) {
-
-  // دکمه منوی اصلی (menu_bonus)
+function registerGameHandlers(bot) {
   bot.action('menu_bonus', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     return showBonusMenu(ctx);
   });
 
-  // انتخاب یک بازی
   bot.action(/^game_select_(.+)/, async (ctx) => {
     const gameKey = ctx.match[1];
     const userId = ctx.from.id;
@@ -184,25 +177,22 @@ module.exports = function registerGameHandlers(bot) {
       return ctx.reply(gameMessages.disabled);
     }
 
-    const betAmount = 1000; // مبلغ ثابت شرط
+    const betAmount = 1000;
     const bonusBalance = Number(user.bonus_balance || 0);
     if (bonusBalance < betAmount) {
       ctx.answerCbQuery('❌ موجودی بونوس کافی نیست');
       return ctx.reply(gameMessages.insufficientBonus);
     }
 
-    // درصد برد و ضریب
     const winRate = parseInt(await getSetting('winRateBonus', '50'), 10);
     const multiplier = parseFloat(await getSetting('gameMultiplier', '2'));
 
-    // نتیجه بازی
     const won = Math.random() * 100 < winRate;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
 
     if (won) {
       const gain = betAmount * multiplier;
-      // خالص: بونوس جدید = بونوس قبلی - شرط + جایزه
       await pool.query(
         'UPDATE users SET bonus_balance = bonus_balance + $1 WHERE telegram_id = $2',
         [gain - betAmount, String(userId)]
@@ -216,11 +206,11 @@ module.exports = function registerGameHandlers(bot) {
       await ctx.reply(gameMessages.lose);
     }
 
-    // بازگشت خودکار به منوی بازی بعد از ۲ ثانیه
     setTimeout(() => showBonusMenu(ctx).catch(console.error), 2000);
   });
+}
 
-  // در اختیار قرار دادن توابع به دیگر ماژول‌ها
-  module.exports.showBonusMenu = showBonusMenu;
-  module.exports.checkAndGrantBonuses = checkAndGrantBonuses;
-};
+// صادرات‌ها
+module.exports = registerGameHandlers;
+module.exports.checkAndGrantBonuses = checkAndGrantBonuses;
+module.exports.showBonusMenu = showBonusMenu;
