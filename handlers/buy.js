@@ -2,7 +2,6 @@
 const texts = require('../texts');
 const { sessions, fillTemplate, generateTrackingCode, generateVoucherTrackingCode } = require('../utils');
 const { pool, getUser, getUsdRate, getSetting } = require('../db');
-const { checkAndGrantBonuses } = require('./game'); // افزودن برای بونوس خرید
 
 module.exports = function registerBuyHandlers(bot) {
 
@@ -82,8 +81,11 @@ module.exports = function registerBuyHandlers(bot) {
     const newBalanceRes = await pool.query('SELECT balance FROM users WHERE telegram_id = $1', [String(ctx.from.id)]);
     const newBalance = newBalanceRes.rows[0].balance;
 
-    // *** فراخوانی بونوس اولین خرید ***
-    await checkAndGrantBonuses(ctx, String(ctx.from.id), 'purchase');
+    // فراخوانی بونوس اولین خرید (با require در لحظه برای جلوگیری از خطای چرخه‌ای)
+    try {
+      const { checkAndGrantBonuses } = require('./game');
+      await checkAndGrantBonuses(ctx, String(ctx.from.id), 'purchase');
+    } catch (e) { console.log('خطا در بونوس خرید:', e.message); }
 
     const receiptText =
       '🧾 **رسید تراکنش موفق - ربات ووچینو⁰¹**\n\n' +
