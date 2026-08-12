@@ -653,7 +653,7 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
   }
 
-  // *** اضافه‌کردن ستون‌های missing برای جدول‌های موجود ***
+  // *** اضافه‌کردن ستون‌های missing ***
   const alterQueries = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT \'none\'',
@@ -663,13 +663,14 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_bonus_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS first_purchase_bonus_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0',
-    'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE'
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS force_join_enabled INTEGER DEFAULT 1'
   ];
   for (const sql of alterQueries) {
     try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون:', e.message); }
   }
 
-  // --- درج تنظیمات پیش‌فرض ---
+  // --- تنظیمات پیش‌فرض ---
   try {
     await pool.query(`
       INSERT INTO settings (key, value) VALUES 
