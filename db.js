@@ -445,19 +445,21 @@ async function sendRatesToChannel(bot) {
   if (channels.length === 0) return;
   const products = await getProducts(true);
   const rate = await getUsdRate();
-  let message = '📊 **نرخ‌های امروز ووچینو⁰¹**\n\n';
-  message += '💰 **نرخ دلار:** ' + Number(rate).toLocaleString('en-US') + ' تومان\n\n';
-  message += '🛍 **محصولات قابل خرید:**\n';
+  const sellProducts = await getSellProducts(true);
+  const usdRate = Number(rate).toLocaleString('en-US');
+
+  let message = `📊 **نرخ‌های امروز ووچینو⁰¹**\n\n💰 **نرخ دلار:** ${usdRate.toLocaleString('en-US')} تومان\n\n🛍 **محصولات قابل خرید:**\n`;
   for (const p of products) {
     const price = p.price_type === 'usd' ? Number(p.min_amount) * rate : Number(p.min_amount);
     message += `• ${p.name}: ${price.toLocaleString('en-US')} تومان\n`;
   }
+
   message += '\n🔄 **محصولات قابل فروش:**\n';
-  const sellProducts = await getSellProducts(true);
   for (const p of sellProducts) {
     message += `• ${p.name}: ${Number(p.unit_price).toLocaleString('en-US')} تومان\n`;
   }
-  message += '\n📌 @Vochino01_bot';
+
+  message += `\n📌 @Vochino01_bot`;
   for (const ch of channels) {
     try { await bot.telegram.sendMessage(ch.chat_id, message, { parse_mode: 'Markdown' }); } catch (e) {}
   }
@@ -636,9 +638,15 @@ async function initDb() {
       host TEXT,
       port INTEGER,
       protocol TEXT,
+      ip_slot TEXT DEFAULT 'default',
+      created_at TIMESTAMP DEFAULT NOW(),
+      config_text TEXT,
+      priority INTEGER DEFAULT 1,
+      consecutive_failures INTEGER DEFAULT 0,
+      last_checked_at TIMESTAMP,
+      cool_down_until TIMESTAMP,
       is_active BOOLEAN DEFAULT TRUE,
-      health_status TEXT DEFAULT 'unknown',
-      created_at TIMESTAMP DEFAULT NOW()
+      health_status TEXT DEFAULT 'unknown'
     );`,
     `CREATE TABLE IF NOT EXISTS vpn_subscriptions (
       id SERIAL PRIMARY KEY,
@@ -727,17 +735,24 @@ async function initDb() {
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
 
+
     // transaction_logs
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_before INTEGER',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_after INTEGER',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS tracking_code TEXT',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS description TEXT',
 
+
     // vpn_servers
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS port INTEGER',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS protocol TEXT',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS health_status TEXT DEFAULT \'unknown\'',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS config_text TEXT',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS cool_down_until TIMESTAMP',
 
     // vpn_subscriptions
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'active\'',
@@ -781,7 +796,18 @@ async function initDb() {
         ('vpn_default_days', '30', NOW()),
         ('vpn_health_interval', '300', NOW()),
         ('vpn_failure_threshold', '3', NOW()),
-        ('vpn_cooldown', '600', NOW())
+        ('vpn_cooldown', '600', NOW()),
+        ('bonus_first_purchase_active', 'false', NOW()),
+        ('bonus_first_purchase_min_amount', '0', NOW()),
+        ('bonus_first_purchase_gift', '0', NOW()),
+        ('bonus_first_purchase_activated_at', NULL, NOW()),
+        ('bonus_registration_active', 'false', NOW()),
+        ('bonus_registration_gift', '0', NOW()),
+        ('bonus_registration_activated_at', NULL, NOW()),
+        ('bonus_referral_active', 'false', NOW()),
+        ('bonus_referral_threshold', '1', NOW()),
+        ('bonus_referral_gift', '0', NOW()),
+        ('bonus_referral_activated_at', NULL, NOW())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
@@ -816,6 +842,7 @@ async function initDb() {
     { key: 'post_view', name: '👁 بازدید پست', min_amount: 500, price_type: 'toman', active: 0, hidden: 1 },
     { key: 'virtual_number', name: '📱 شماره مجازی', min_amount: 50000, price_type: 'toman', active: 0, hidden: 1 }
   ];
+
   for (const p of buyProducts) {
     try {
       await pool.query(
@@ -832,6 +859,7 @@ async function initDb() {
     { key: 'hotvoucher_sell', name: '🎟 هات ووچر', unit_price: 50000, sample_code: 'HOT-XXXX-XXXX', active: 0 },
     { key: 'perfect_money_sell', name: '💵 پرفکت مانی', unit_price: 60000, sample_code: 'PM-XXXX', active: 0 }
   ];
+
   for (const p of sellProducts) {
     try {
       await pool.query(
@@ -894,6 +922,7 @@ module.exports = {
   getTickets,
   addTicket,
   updateTicket,
+  initDb,
   logTransaction,
   getTransactionLogs,
   getApiSources,
@@ -915,6 +944,5 @@ module.exports = {
   searchBotTexts,
   updateBotText,
   getBotTextCategories,
-  sendRatesToChannel,
-  initDb
+  sendRatesToChannel
 };
