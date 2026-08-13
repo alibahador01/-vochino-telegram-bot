@@ -15,55 +15,65 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// مسیرهای سلامت برای جلوگیری از 404
+// مسیرهای سلامت
 app.get('/', (req, res) => res.send('Bot is alive and connected to Supabase!'));
 app.get('/health', (req, res) => res.send('OK'));
 app.get('/ping', (req, res) => res.send('PONG'));
 app.get('/keep-alive', (req, res) => res.send('ALIVE'));
 app.get('/api/status', (req, res) => res.json({ status: 'ok' }));
 
-// مسیر سابسکرایب VPN
+// ==================== مسیر سابسکرایب VPN ====================
 app.get('/sub/:userId', async (req, res) => {
   const userId = req.params.userId;
   try {
+    // بررسی کاربر
     const userRes = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [userId]);
     if (!userRes.rows[0]) return res.status(404).send('کاربر یافت نشد.');
-    const user = userRes.rows[0];
 
+    // بررسی اشتراک فعال
     const subRes = await pool.query(
       "SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active' AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [userId]
     );
-    const subscription = subRes.rows[0] || null;
+    if (subRes.rows.length === 0) return res.status(403).send('اشتراک فعالی یافت نشد.');
 
-    let daysLeft = 0, dataUsed = 0, dataLimit = 5 * 1024 * 1024 * 1024;
-    if (subscription) {
-      daysLeft = Math.max(0, Math.ceil((new Date(subscription.expires_at) - new Date()) / (1000 * 60 * 60 * 24)));
-      dataUsed = subscription.data_used || 0;
-      dataLimit = subscription.data_limit || dataLimit;
+    // گرفتن سرورهای فعال و سالم
+    const serversRes = await pool.query(
+      `SELECT * FROM vpn_servers 
+       WHERE is_active = true AND health_status = 'healthy' 
+         AND (cool_down_until IS NULL OR cool_down_until < NOW())
+       ORDER BY priority ASC`
+    );
+
+    if (serversRes.rows.length === 0) return res.status(503).send('سروری در دسترس نیست.');
+
+    const configLines = [];
+    for (const server of serversRes.rows) {
+      if (server.config_text && server.config_text.trim().length > 0) {
+        configLines.push(server.config_text.trim());
+      }
     }
 
-    const baseUrl = process.env.BASE_URL || 'https://yourdomain.com';
-    const totalUsers = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0].c;
-    const activeOrders = (await pool.query(
-      "SELECT COUNT(*)::int AS c FROM orders WHERE status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '7 days'"
-    )).rows[0].c;
+    if (configLines.length === 0) {
+      return res.status(500).send('کانفیگ سرورها تنظیم نشده است.');
+    }
 
-    res.render('subscription', { user, subscription, daysLeft, dataUsed, dataLimit, baseUrl, totalUsers, activeOrders });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(configLines.join('\n'));
   } catch (err) {
-    console.error(err);
+    console.error('خطا در تولید سابسکرایب:', err);
     res.status(500).send('خطای سرور');
   }
 });
 
-// Catch-all برای اینکه هیچ مسیری 404 نده
+// Catch-all
 app.get('*', (req, res) => res.send('Vochino Bot Active'));
 
 app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
-// ضدخواب با آدرس درست
+// ضدخواب
 if (process.env.NODE_ENV !== 'development') {
   const antiSleep = new AntiSleepBot(process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com');
   antiSleep.startAll();
@@ -76,6 +86,7 @@ if (process.env.NODE_ENV !== 'development') {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
+// هندلرها
 require('./handlers/registration')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
@@ -85,9 +96,10 @@ require('./handlers/admin')(bot);
 require('./handlers/adminBonus')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/profile')(bot);
-require('./handlers/vpn')(bot);
+require('./handlers/vpn')(bot);      // ← این فایل vpn.js جدید
 require('./handlers/currencyFeed')(bot);
 
+// مدیریت خطا
 process.on('unhandledRejection', (err) => console.log('UNHANDLED REJECTION:', err.message));
 process.on('uncaughtException', (err) => {
   console.log('UNCAUGHT EXCEPTION:', err.message);
