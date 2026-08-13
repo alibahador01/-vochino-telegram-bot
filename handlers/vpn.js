@@ -1,9 +1,10 @@
 // handlers/vpn.js
-const texts = require('../texts');
-const { sessions, generateTrackingCode } = require('../utils');
-const { pool, checkMembership, getSetting, getUser, getReferrals } = require('../db');
+const net = require('net');
+const { pool, checkMembership, getSetting, setSetting, getUser, getReferrals } = require('../db');
+const { ADMIN_IDS } = require('../constants');
 
-// تابع کمکی برای اضافه‌کردن ستون‌های لازم به vpn_servers (بدون نیاز به تغییر دستی دیتابیس)
+// ======================= helpers =======================
+
 async function ensureVpnSchema() {
   const alterQueries = [
     `ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS config_text TEXT`,
@@ -17,75 +18,82 @@ async function ensureVpnSchema() {
       console.log('خطا در افزودن ستون vpn_servers:', e.message);
     }
   }
+
+  // اضافه‌کردن ستون‌های احتمالی vpn_subscriptions
+  const subAlter = [
+    `ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_used BIGINT DEFAULT 0`
+  ];
+  for (const sql of subAlter) {
+    try { await pool.query(sql); } catch (e) {}
+  }
 }
 
-// تست سلامت یک سرور (تلاش برای برقراری اتصال TCP ساده)
-async function healthCheckServer(server) {
-  const net = require('net');
+function healthCheckServer(server) {
   return new Promise((resolve) => {
+    if (!server.host || !server.port) return resolve(false);
     const socket = net.createConnection({ host: server.host, port: server.port, timeout: 5000 });
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.on('error', () => {
-      resolve(false);
-    });
+    socket.on('connect', () => { socket.destroy(); resolve(true); });
+    socket.on('timeout', () => { socket.destroy(); resolve(false); });
+    socket.on('error', () => { socket.destroy(); resolve(false); });
   });
 }
 
-// اجرای تست سلامت برای همه سرورها و اعمال سوییچ خودکار
 async function runHealthCheck(bot) {
   await ensureVpnSchema();
-  const { rows: servers } = await pool.query('SELECT * FROM vpn_servers');
+  const { rows: servers } = await pool.query('SELECT * FROM vpn_servers ORDER BY priority ASC');
   const now = new Date();
+  const failureThreshold = parseInt(await getSetting('vpn_failure_threshold', '3'), 10);
+  const cooldownSeconds = parseInt(await getSetting('vpn_cooldown', '86400'), 10); // default 24h
 
   for (const server of servers) {
-    // اگر سرور در حالت خنک‌سازی است، بررسی نمی‌کنیم
+    // اگر در حالت خنک‌سازی است، بررسی نمی‌کنیم
     if (server.cool_down_until && new Date(server.cool_down_until) > now) {
       console.log(`⏳ سرور ${server.name} در حالت خنک‌سازی است`);
       continue;
     }
 
-    const isHealthy = await healthCheckServer(server);
+    const healthy = await healthCheckServer(server);
     let newFailures = server.consecutive_failures || 0;
     let newStatus = server.health_status;
 
-    if (isHealthy) {
+    if (healthy) {
       newFailures = 0;
       newStatus = 'healthy';
     } else {
       newFailures++;
-      newStatus = newFailures >= 3 ? 'down' : 'unstable';
+      newStatus = newFailures >= failureThreshold ? 'down' : 'unstable';
     }
 
-    // به‌روزرسانی سرور
     await pool.query(
       `UPDATE vpn_servers SET health_status=$1, consecutive_failures=$2, last_checked_at=NOW(), is_active=$3 WHERE id=$4`,
       [newStatus, newFailures, newStatus === 'down' ? false : server.is_active, server.id]
     );
 
-    // اگر سرور down شد و priority=1، سوییچ به backup
-    if (newStatus === 'down' && server.priority === 1) {
-      // غیرفعال‌کردن primary
-      await pool.query(`UPDATE vpn_servers SET is_active=false, cool_down_until=NOW() + INTERVAL '24 hours' WHERE id=$1`, [server.id]);
-      // فعال‌کردن backup
+    // اگر primary (priority=1) از کار افتاد و هنوز در cooldown نیست
+    if (newStatus === 'down' && server.priority === 1 && (!server.cool_down_until || new Date(server.cool_down_until) <= now)) {
+      // قرار دادن primary در خنک‌سازی
+      const coolUntil = new Date(Date.now() + cooldownSeconds * 1000).toISOString();
+      await pool.query(
+        `UPDATE vpn_servers SET is_active=false, cool_down_until=$1 WHERE id=$2`,
+        [coolUntil, server.id]
+      );
+
+      // پیدا کردن backup (priority=2) که فعال و خنک‌نشده است
       const backup = await pool.query(
         `SELECT * FROM vpn_servers WHERE priority=2 AND is_active=true AND (cool_down_until IS NULL OR cool_down_until < NOW()) ORDER BY id LIMIT 1`
       );
+
       if (backup.rows[0]) {
-        await pool.query(`UPDATE vpn_servers SET is_active=true, priority=1 WHERE id=$1`, [backup.rows[0].id]);
-        // دموت primary قبلی به priority=2
+        // ارتقای backup به primary
+        await pool.query(`UPDATE vpn_servers SET priority=1 WHERE id=$1`, [backup.rows[0].id]);
+        // تنزل primary قبلی به backup
         await pool.query(`UPDATE vpn_servers SET priority=2 WHERE id=$1`, [server.id]);
         console.log(`🔄 سوییچ خودکار: ${backup.rows[0].name} اکنون primary است`);
+
         // اطلاع به ادمین
         try {
           await bot.telegram.sendMessage(
-            process.env.ADMIN_CHAT_ID || (require('../constants').ADMIN_IDS[0]),
+            ADMIN_IDS[0],
             `🔄 سوییچ خودکار VPN\nسرور اصلی (${server.name}) از دسترس خارج شد.\nسرور پشتیبان (${backup.rows[0].name}) فعال شد.`
           );
         } catch (e) {}
@@ -94,15 +102,16 @@ async function runHealthCheck(bot) {
   }
 }
 
-// شروع تایمر سلامت (هر ۳ دقیقه)
 function startHealthCheckTimer(bot) {
-  runHealthCheck(bot); // اجرای اولیه
+  runHealthCheck(bot).catch(err => console.log('خطا در سلامت‌سنجی اولیه:', err.message));
+  const intervalSeconds = 180; // 3 دقیقه
   setInterval(() => {
     runHealthCheck(bot).catch(err => console.log('خطا در سلامت‌سنجی:', err.message));
-  }, 3 * 60 * 1000);
+  }, intervalSeconds * 1000);
 }
 
-// ==================== نمایش منوی VPN برای کاربر ====================
+// ======================= نمایش منوی VPN به کاربر =======================
+
 async function showVpnMenu(ctx) {
   ctx.answerCbQuery();
   try { await ctx.deleteMessage(); } catch (e) {}
@@ -117,6 +126,7 @@ async function showVpnMenu(ctx) {
   const isMember = await checkMembership(ctx);
   if (!isMember) return ctx.reply('⚠️ لطفاً ابتدا در کانال اجباری عضو شوید.');
 
+  // اشتراک فعال
   const activeSub = await pool.query(
     "SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active' AND expires_at > NOW()",
     [String(userId)]
@@ -129,7 +139,7 @@ async function showVpnMenu(ctx) {
     const dataLimit = sub.data_limit || 5 * 1024 * 1024 * 1024;
     const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + userId;
 
-    ctx.reply(
+    return ctx.reply(
       `🌐 **سرویس VPN فعال شما**\n\n` +
       `📅 روزهای باقی‌مانده: ${daysLeft} روز\n` +
       `📊 مصرف داده: ${(dataUsed / (1024 * 1024)).toFixed(2)} مگابایت از ${(dataLimit / (1024 * 1024 * 1024)).toFixed(0)} گیگابایت\n` +
@@ -146,10 +156,9 @@ async function showVpnMenu(ctx) {
         }
       }
     );
-    return;
   }
 
-  // دریافت سرویس رایگان
+  // کاربر اشتراک فعال ندارد – بررسی محدودیت رایگان
   const maxFreeAttempts = parseInt(await getSetting('vpn_max_free_attempts', '1'), 10);
   const invitesForUnlock = parseInt(await getSetting('vpn_invites_for_unlock', '2'), 10);
 
@@ -182,11 +191,10 @@ async function showVpnMenu(ctx) {
     }
   }
 
-  // ایجاد سرویس جدید
-  const defaultVolume = parseInt(await getSetting('vpn_default_volume_gb', '5'), 10);
+  // ایجاد سرویس رایگان جدید
+  const defaultVolumeGB = parseInt(await getSetting('vpn_default_volume_gb', '5'), 10);
   const defaultDays = parseInt(await getSetting('vpn_default_days', '30'), 10);
-  const dataLimit = defaultVolume * 1024 * 1024 * 1024;
-
+  const dataLimit = defaultVolumeGB * 1024 * 1024 * 1024;
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + defaultDays);
   const trackingCode = 'VPN-' + Math.floor(100000 + Math.random() * 900000);
@@ -204,7 +212,7 @@ async function showVpnMenu(ctx) {
     `🆔 آیدی: ${userId}\n` +
     `🔗 **لینک سابسکرایب:**\n\`${subUrl}\`\n\n` +
     `📅 مدت اعتبار: ${defaultDays} روز\n` +
-    `📊 حجم: ${defaultVolume} گیگابایت\n\n` +
+    `📊 حجم: ${defaultVolumeGB} گیگابایت\n\n` +
     `✅ لینک را کپی کنید یا از دکمه‌های مدیریت استفاده کنید.`,
     { parse_mode: 'Markdown' }
   );
@@ -223,9 +231,9 @@ async function showVpnMenu(ctx) {
   );
 }
 
-// هندلرهای تلگرام
-module.exports = function registerVPNHandlers(bot) {
-  // اجرای اولیه schema و سلامت‌سنجی
+// ======================= رجیستر هندلرها =======================
+
+function registerVPNHandlers(bot) {
   ensureVpnSchema().then(() => startHealthCheckTimer(bot)).catch(console.error);
 
   bot.action('menu_special', async (ctx) => {
@@ -260,6 +268,7 @@ module.exports = function registerVPNHandlers(bot) {
       { parse_mode: 'Markdown' }
     );
   });
+}
 
-  module.exports.showVpnMenu = showVpnMenu;
-};
+module.exports = registerVPNHandlers;
+module.exports.showVpnMenu = showVpnMenu;
