@@ -92,11 +92,13 @@ require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
 require('./handlers/sell')(bot);
 require('./handlers/game')(bot);
+// ⚠️ orderAdmin باید قبل از admin ثبت شود تا جریان‌های اصلاح‌شده فعال شوند
+require('./handlers/orderAdmin')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/adminBonus')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/profile')(bot);
-require('./handlers/vpn')(bot);      // ← این فایل vpn.js جدید
+require('./handlers/vpn')(bot);
 require('./handlers/currencyFeed')(bot);
 
 // مدیریت خطا
