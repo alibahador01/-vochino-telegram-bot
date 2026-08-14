@@ -46,6 +46,7 @@ module.exports = function registerWalletHandlers(bot) {
     const inviteCount = inviteRes.rows[0].count;
 
     const profileText =
+      R.HEADER +
       `🧢 پروفایل: \`${user.telegram_id}\`\n` +
       `👤 نام و نام خانوادگی: ${name}\n` +
       `📱 شماره تلفن: ${phone}\n` +
@@ -224,7 +225,7 @@ module.exports = function registerWalletHandlers(bot) {
   bot.action('wallet_deposit', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    return ctx.reply('روش افزایش موجودی را انتخاب کنید:', {
+    return ctx.reply(R.HEADER + 'روش افزایش موجودی را انتخاب کنید:', {
       reply_markup: {
         inline_keyboard: [
           [{ text: '💳 کارت به کارت', callback_data: 'deposit_card' }],
@@ -240,18 +241,15 @@ module.exports = function registerWalletHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const cards = require('../constants').DEPOSIT_CARDS;
-    let msg = '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:\n';
+    let msg = R.HEADER + '💳 کارت به کارت\n\n✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:\n';
     cards.forEach(c => { msg += `💳 ${c.number} (${c.owner})\n`; });
 
     const user = await getUser(ctx.from.id);
     sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_amount', lang: (user && user.language) || 'fa' };
 
     return ctx.reply(msg, { parse_mode: 'Markdown' })
-      .then(sent => {
-        sessions[ctx.from.id].lastBotMsgId = sent.message_id;
-        return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:', {
-          reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'wallet_cancel' }]] }
-        });
+      .then(() => {
+        return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
       })
       .catch(console.error);
   });
@@ -286,9 +284,7 @@ module.exports = function registerWalletHandlers(bot) {
       return ctx.reply('❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی کیف پول گزینه «افزودن کارت جدید» را انتخاب کنید.');
     }
     sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: (user && user.language) || 'fa' };
-    return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`, {
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'wallet_cancel' }]] }
-    });
+    return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`);
   });
 
   // ==================== احراز طلایی / کارت جدید / رفرال ====================
@@ -296,6 +292,7 @@ module.exports = function registerWalletHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const msg =
+      R.HEADER +
       `💎 احراز هویت طلایی | Vochino⁰¹\n` +
       `🔐 یک قدم تا سقف خرید بالاتر\n` +
       `کافیست یک تصویر واضح و شفاف از\n` +
@@ -304,10 +301,7 @@ module.exports = function registerWalletHandlers(bot) {
       `✅ پس از بررسی توسط پشتیبانی و تأیید مدارک، درخواست افزایش سقف خرید شما انجام خواهد شد.\n\n` +
       `💛 Vochino⁰¹ | تجربه‌ای متفاوت`;
     sessions[ctx.from.id] = { flow: 'gold_verify', step: 'waiting_photo', lang: 'fa' };
-    return ctx.reply(msg, {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'wallet_cancel' }]] }
-    });
+    return ctx.reply(msg, { parse_mode: 'Markdown' });
   });
 
   bot.action('wallet_add_card', async (ctx) => {
@@ -315,9 +309,7 @@ module.exports = function registerWalletHandlers(bot) {
     try { await ctx.deleteMessage(); } catch (e) {}
     const user = await getUser(ctx.from.id);
     sessions[ctx.from.id] = { flow: 'add_card', step: 'waiting_number', lang: (user && user.language) || 'fa' };
-    return ctx.reply('شماره کارت جدید را وارد کنید (۱۶ رقم):', {
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'wallet_cancel' }]] }
-    });
+    return ctx.reply('شماره کارت جدید را وارد کنید (۱۶ رقم):');
   });
 
   bot.action('wallet_referral', async (ctx) => {
@@ -396,7 +388,6 @@ module.exports = function registerWalletHandlers(bot) {
       }
       session.amount = amount;
       session.step = 'waiting_receipt';
-      try { await ctx.deleteMessage(); } catch (e) {}
       return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
     }
 
@@ -422,7 +413,7 @@ module.exports = function registerWalletHandlers(bot) {
       ctx.reply(`درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.\n\n📍 کد پیگیری: \`${trackCode}\``, { parse_mode: 'Markdown' });
 
       const ids = await adminIdsList();
-      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n💰 ${amount.toLocaleString()} تومان\n💳 ${user.card_number}\n📍 کد: ${trackCode}`).catch(console.error));
+      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n📱 ${user.phone || '---'}\n💳 ${user.card_number}\n💰 ${amount.toLocaleString()} تومان\n📍 کد: ${trackCode}`).catch(console.error));
     }
 
     if (session.flow === 'add_card' && session.step === 'waiting_number') {
@@ -450,6 +441,7 @@ module.exports = function registerWalletHandlers(bot) {
 
       if (session.flow === 'deposit_card') {
         const amount = session.amount;
+        const user = await getUser(ctx.from.id);
         const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
         const ins = await pool.query(
           `INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code)
@@ -459,12 +451,28 @@ module.exports = function registerWalletHandlers(bot) {
         const reqId = ins.rows[0].id;
 
         delete sessions[ctx.from.id];
-        ctx.reply(`درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، موجودی شما به‌روزرسانی خواهد شد.\n\n📍 کد پیگیری: \`${trackCode}\``, { parse_mode: 'Markdown' });
 
+        // پیام تأیید دریافت رسید برای مشتری (طبق طرح تأییدشده)
+        ctx.reply(
+          R.HEADER +
+          `📋 تأیید دریافت رسید\n\n` +
+          `💰 مبلغ شارژ: ${amount.toLocaleString('en-US')} تومان\n` +
+          `👤 نام و نام خانوادگی: ${user ? (user.full_name || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `💳 شماره کارت: ${user ? (user.card_number || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `🔖 کد پیگیری: ${trackCode}\n\n` +
+          `✅ رسید شما ثبت و به واحد مالی ارسال شد.\n` +
+          `⏳ پس از بررسی، نتیجه در همین ربات اعلام می‌شود.`,
+          { parse_mode: 'Markdown' }
+        );
+
+        // ارسال رسید به همه ادمین‌ها همراه دکمه‌های تأیید/ردِ همین درخواست
         const ids = await adminIdsList();
         const caption =
           `📥 رسید واریز جدید\n` +
           `👤 کاربر: ${ctx.from.id}\n` +
+          `👤 نام: ${user ? (user.full_name || '---') : '---'}\n` +
+          `📱 تلفن: ${user ? (user.phone || '---') : '---'}\n` +
+          `💳 کارت: ${user ? (user.card_number || '---') : '---'}\n` +
           `🔖 کد سفارش: ${trackCode}\n` +
           `💰 مبلغ: ${amount.toLocaleString('en-US')} تومان\n` +
           `🧾 نوع تراکنش: واریز کارت‌به‌کارت\n` +
