@@ -1,104 +1,76 @@
 // handlers/sell.js
 const texts = require('../texts');
-const { sessions, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool, getUser } = require('../db');
+const { sessions, fillTemplate } = require('../utils');
+const { pool, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
+const { ADMIN_IDS } = require('../constants');
+const R = require('./receipts');
 
 module.exports = function registerSellHandlers(bot) {
 
-  // ============================================
-  // نمایش منوی محصولات فروش
-  // ============================================
+  async function adminIdsList() {
+    const ids = ADMIN_IDS.map(x => Number(x));
+    try {
+      const admins = await getAllAdmins();
+      admins.forEach(a => { if (!ids.includes(Number(a.telegram_id))) ids.push(Number(a.telegram_id)); });
+    } catch (e) {}
+    return ids;
+  }
+
+  async function showSellList(ctx) {
+    const products = await getSellProducts(true);
+    if (products.length === 0) {
+      return ctx.reply('❌ در حال حاضر هیچ محصول فروشی فعال نیست.', {
+        reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]] }
+      });
+    }
+    const buttons = products.map(p => [{ text: p.name, callback_data: 'sell_pick_' + p.key }]);
+    buttons.push([{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]);
+    return ctx.reply('♨️ محصولی که می‌خواهید بفروشید را انتخاب کنید:', {
+      reply_markup: { inline_keyboard: buttons }
+    });
+  }
+
   bot.action('menu_sell', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    const t = texts.fa;
-    const productsRes = await pool.query('SELECT * FROM sell_products WHERE active = 1 ORDER BY id ASC');
-
-    if (productsRes.rows.length === 0) {
-      return ctx.reply(t.sellNoProducts);
-    }
-
-    const buttons = productsRes.rows.map(p => [{ text: p.name, callback_data: 'sell_' + p.key }]);
-    ctx.reply(t.sellMenuTitle, { reply_markup: { inline_keyboard: buttons } });
+    return showSellList(ctx);
   });
 
-  // ============================================
-  // لغو فروش
-  // ============================================
-  bot.action('sell_cancel', async (ctx) => {
+  bot.action('sell_back', async (ctx) => {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
     try { await ctx.deleteMessage(); } catch (e) {}
-    ctx.reply('فروش لغو شد.');
+    return showSellList(ctx);
   });
 
-  // ============================================
-  // انتخاب محصول و درخواست کد ووچر
-  // ============================================
-  bot.action(/^sell_(.+)/, async (ctx) => {
+  bot.action(/^sell_pick_(.+)$/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
-    const t = texts.fa;
-
-    const productRes = await pool.query('SELECT * FROM sell_products WHERE key = $1 AND active = 1', [key]);
-    const product = productRes.rows[0];
-    if (!product) {
-      try { await ctx.deleteMessage(); } catch (e) {}
-      return ctx.reply(t.sellNoProducts);
-    }
-
-    // محاسبه مبلغ قابل پرداخت به کاربر پس از کسر کارمزد
-    const unitPrice = Number(product.unit_price);
-    let commissionText = '';
-    let netAmount = unitPrice;
-
-    if (product.commission_type === 'percentage') {
-      const commissionAmount = Math.round(unitPrice * (Number(product.commission_value) / 100));
-      netAmount = unitPrice - commissionAmount;
-      commissionText = `💰 کارمزد فروش: ${product.commission_value}% (${commissionAmount.toLocaleString()} تومان)`;
-    } else if (product.commission_type === 'fixed') {
-      const commissionAmount = Number(product.commission_value);
-      netAmount = unitPrice - commissionAmount;
-      commissionText = `💰 کارمزد فروش: ${commissionAmount.toLocaleString()} تومان`;
-    } else {
-      commissionText = '💰 بدون کارمزد';
-    }
-
-    // ساخت پیام راهنما
-    let messageText = fillTemplate(t.sellAskCode, {
-      product: product.name,
-      price: unitPrice.toLocaleString(),
-      sample: product.sample_code
-    });
-
-    messageText += '\n' + commissionText;
-    messageText += `\n💵 **مبلغ دریافتی شما (پس از کسر کارمزد): ${netAmount.toLocaleString()} تومان**`;
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const product = await getSellProductByKey(key);
+    if (!product || !product.active) return ctx.reply('❌ این محصول فروش در دسترس نیست.');
 
     sessions[ctx.from.id] = {
       flow: 'sell',
       step: 'waiting_code',
-      lang: 'fa',
       data: {
-        productType: product.key,
-        productLabel: product.name,
-        unitPrice: unitPrice,
-        netAmount: netAmount,
-        commissionType: product.commission_type,
-        commissionValue: Number(product.commission_value || 0)
+        productType: key,
+        productName: product.name,
+        unitPrice: Number(product.unit_price || 0)
       }
     };
 
-    try {
-      await ctx.editMessageText(messageText, { parse_mode: 'Markdown' });
-    } catch (e) {
-      try { await ctx.deleteMessage(); } catch (err) {}
-      ctx.reply(messageText, { parse_mode: 'Markdown' });
+    let msg = `🎟 کد ووچر ${product.name} خود را وارد کنید تا بررسی شود:`;
+    if (product.sample_code) {
+      msg += `\n\n📎 نمونه فرمت قابل قبول:\n\`${product.sample_code}\``;
     }
+    return ctx.reply(msg, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'sell_back' }]] }
+    });
   });
 
-  // ============================================
-  // دریافت کد ووچر از کاربر و ثبت سفارش فروش
-  // ============================================
+  // دریافت کد ووچر و ثبت سفارش فروش (با مبلغ تخمینی واقعی — نه صفر)
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'sell' || session.step !== 'waiting_code') return next();
@@ -108,21 +80,41 @@ module.exports = function registerSellHandlers(bot) {
       return ctx.reply('❌ کد ووچر نامعتبر است. لطفاً یک کد صحیح وارد کنید.');
     }
 
-    const trackingCode = generateTrackingCode();
+    const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
+    const estimatedAmount = Number(session.data.unitPrice || 0);
 
     try {
-      await pool.query(
-        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, NOW(), $5)',
-        [String(ctx.from.id), session.data.productType, voucherCode, 'pending_review', trackingCode]
+      const ins = await pool.query(
+        'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id',
+        [String(ctx.from.id), session.data.productType, voucherCode, estimatedAmount, 'pending_review', trackingCode]
       );
+      const orderId = ins.rows[0].id;
 
       delete sessions[ctx.from.id];
+      try { await ctx.deleteMessage(); } catch (e) {}
 
       ctx.reply(
-        fillTemplate(texts.fa.sellCodeReceived, {
-          trackingCode: trackingCode
-        })
+        `✅ کد ووچر شما ثبت شد و در صف بررسی قرار گرفت.\n\n` +
+        `🛍 محصول: ${session.data.productName}\n` +
+        `📍 کد پیگیری: \`${trackingCode}\`\n\n` +
+        `⏳ پس از بررسی توسط پشتیبانی، نتیجه و فاکتور برای شما ارسال می‌شود.`,
+        { parse_mode: 'Markdown' }
       );
+
+      // اطلاع به ادمین‌ها همراه دکمه بررسی مستقیم همان سفارش
+      const ids = await adminIdsList();
+      for (const id of ids) {
+        try {
+          await ctx.telegram.sendMessage(id,
+            `♨️ سفارش فروش جدید\n` +
+            `👤 کاربر: ${ctx.from.id}\n` +
+            `🛍 محصول: ${session.data.productName}\n` +
+            `🎟 کد ووچر:\n${voucherCode}\n` +
+            `📍 کد پیگیری: ${trackingCode}`,
+            { reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `selopen:${orderId}` }]] } }
+          );
+        } catch (e) { console.error('خطا در اطلاع فروش به ادمین:', e.message); }
+      }
     } catch (err) {
       console.error('خطا در ثبت سفارش فروش:', err);
       ctx.reply('❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.');
