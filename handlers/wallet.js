@@ -166,17 +166,104 @@ module.exports = function registerWalletHandlers(bot) {
     return showTransactionHistory(ctx, null);
   });
 
+  // ==================== تابع اصلی نمایش تاریخچه (جامع) ====================
   async function showTransactionHistory(ctx, filterType) {
-    const logs = await getTransactionLogs(ctx.from.id, 10);
-    if (logs.length === 0) {
+    const userId = String(ctx.from.id);
+    
+    // ۱. گرفتن خریدها از جدول orders
+    const ordersRes = await pool.query(
+      `SELECT 'buy' as type, amount, status, tracking_code, created_at 
+       FROM orders WHERE telegram_id = $1 
+       ORDER BY created_at DESC LIMIT 20`,
+      [userId]
+    );
+    
+    // ۲. گرفتن فروش‌ها از جدول sell_orders
+    const sellOrdersRes = await pool.query(
+      `SELECT 'sell' as type, amount, status, tracking_code, created_at 
+       FROM sell_orders WHERE telegram_id = $1 
+       ORDER BY created_at DESC LIMIT 20`,
+      [userId]
+    );
+    
+    // ۳. گرفتن درخواست‌های کیف پول از wallet_requests
+    const walletRes = await pool.query(
+      `SELECT type, amount, status, tracking_code, created_at 
+       FROM wallet_requests WHERE telegram_id = $1 
+       ORDER BY created_at DESC LIMIT 20`,
+      [userId]
+    );
+    
+    // ۴. گرفتن تراکنش‌های تاییدشده از transaction_logs
+    const logsRes = await getTransactionLogs(ctx.from.id, 20);
+    
+    // ترکیب همه منابع
+    let allTransactions = [];
+    
+    // اضافه کردن خریدها
+    ordersRes.rows.forEach(row => {
+      allTransactions.push({
+        type: 'buy',
+        amount: Number(row.amount),
+        status: row.status,
+        tracking_code: row.tracking_code,
+        created_at: row.created_at
+      });
+    });
+    
+    // اضافه کردن فروش‌ها
+    sellOrdersRes.rows.forEach(row => {
+      allTransactions.push({
+        type: 'sell',
+        amount: Number(row.amount),
+        status: row.status,
+        tracking_code: row.tracking_code,
+        created_at: row.created_at
+      });
+    });
+    
+    // اضافه کردن درخواست‌های کیف پول
+    walletRes.rows.forEach(row => {
+      allTransactions.push({
+        type: row.type, // 'deposit' یا 'withdraw'
+        amount: Number(row.amount),
+        status: row.status,
+        tracking_code: row.tracking_code,
+        created_at: row.created_at
+      });
+    });
+    
+    // اضافه کردن تراکنش‌های لاگ
+    logsRes.forEach(row => {
+      // جلوگیری از تکرار
+      const alreadyExists = allTransactions.some(t => t.tracking_code === row.tracking_code);
+      if (!alreadyExists) {
+        allTransactions.push({
+          type: row.type,
+          amount: Number(row.amount),
+          status: 'completed',
+          tracking_code: row.tracking_code,
+          created_at: row.created_at
+        });
+      }
+    });
+    
+    // مرتب‌سازی بر اساس تاریخ (جدیدترین اول)
+    allTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    // فیلتر کردن اگر نیاز باشد
+    let filtered = allTransactions;
+    if (filterType) {
+      filtered = allTransactions.filter(t => t.type === filterType);
+    }
+    
+    if (filtered.length === 0) {
       return ctx.reply('📋 شما هنوز تراکنشی ندارید.');
     }
-
-    const filtered = filterType ? logs.filter(l => l.type === filterType) : logs;
-    if (filtered.length === 0) {
-      return ctx.reply('📋 تراکنشی با این فیلتر یافت نشد.');
-    }
-
+    
+    // محدود کردن به ۱۰ تراکنش آخر
+    const displayList = filtered.slice(0, 10);
+    
     const emojis = {
       buy: '🟢 خرید',
       sell: '🟣 فروش',
@@ -187,15 +274,27 @@ module.exports = function registerWalletHandlers(bot) {
       refund: '♻️ بازگشت وجه',
       transfer: '🔄 انتقال'
     };
-
+    
+    const statusText = {
+      pending: '🟠 در انتظار تایید',
+      pending_delivery: '🟠 در انتظار تحویل',
+      pending_review: '🟠 در انتظار بررسی',
+      completed: '✅ تکمیل شده',
+      approved: '✅ تایید شده',
+      rejected: '❌ رد شده',
+      cancelled: '❌ لغو شده'
+    };
+    
     let text = '📋 **گزارش تراکنش‌ها**\n\n';
-    filtered.forEach(l => {
-      const typeLabel = emojis[l.type] || l.type;
-      text += `${typeLabel}: ${Number(l.amount).toLocaleString('en-US')} تومان\n`;
-      if (l.tracking_code) text += `📎 کد پیگیری: \`${l.tracking_code}\`\n`;
-      text += `📅 ${new Date(l.created_at).toLocaleDateString('fa-IR')}\n\n`;
+    displayList.forEach(t => {
+      const typeLabel = emojis[t.type] || t.type;
+      const statusLabel = statusText[t.status] || t.status;
+      text += `${typeLabel}: ${t.amount.toLocaleString('en-US')} تومان\n`;
+      text += `   ${statusLabel}`;
+      if (t.tracking_code) text += ` | کد: \`${t.tracking_code}\``;
+      text += `\n   📅 ${new Date(t.created_at).toLocaleDateString('fa-IR')}\n\n`;
     });
-
+    
     const filterButtons = [
       [{ text: '🟢 خرید', callback_data: 'wallet_history_filter_buy' },
        { text: '🟣 فروش', callback_data: 'wallet_history_filter_sell' }],
@@ -203,7 +302,7 @@ module.exports = function registerWalletHandlers(bot) {
        { text: '🔄 همه', callback_data: 'wallet_history' }],
       [{ text: '🔙 بازگشت', callback_data: 'menu_wallet' }]
     ];
-
+    
     ctx.reply(text, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: filterButtons }
