@@ -30,22 +30,22 @@ module.exports = function registerWalletHandlers(bot) {
 
     const profileText =
       `🧢 پروفایل: \`${user.telegram_id}\`\n` +
-      `👤 نام: ${name}\n` +
-      `📱 تلفن: ${phone}\n` +
-      `💳 کارت: ${card}\n` +
+      `👤 نام و نام خانوادگی: ${name}\n` +
+      `📱 شماره تلفن: ${phone}\n` +
+      `💳 شماره کارت: ${card}\n` +
       `💰 موجودی: ${balance.toLocaleString('en-US')} تومان\n` +
-      `🪄 بونوس: ${bonusBalance.toLocaleString('en-US')} تومان\n` +
-      `🎖 سطح احراز: ${level}\n` +
-      `👥 دعوت‌شده: ${inviteCount} نفر`;
+      `🪎 موجودی بونوس: ${bonusBalance.toLocaleString('en-US')} تومان\n` +
+      `🎗 سطح احراز: ${level}\n` +
+      `👥 افراد دعوت‌شده: ${inviteCount} نفر`;
 
     const keyboard = [
-      [{ text: getText(language, 'walletIncrease', '➕ افزایش موجودی'), callback_data: 'wallet_deposit' }],
-      [{ text: getText(language, 'walletWithdraw', '💳 برداشت موجودی'), callback_data: 'wallet_withdraw' }],
-      [{ text: getText(language, 'walletGoldVerify', '🪪 افزایش سقف خرید'), callback_data: 'wallet_gold_verify' }],
-      [{ text: getText(language, 'walletAddCard', '➕ افزودن کارت جدید'), callback_data: 'wallet_add_card' }],
-      [{ text: getText(language, 'walletHistory', '♻️ گزارش تراکنش‌ها'), callback_data: 'wallet_history' }],
-      [{ text: getText(language, 'walletReferral', '🪄 کسب درآمد'), callback_data: 'wallet_referral' }],
-      [{ text: getText(language, 'backButton', '🔴 بازگشت'), callback_data: 'back_main_menu' }]
+      [{ text: '🧳 افزایش موجودی', callback_data: 'wallet_deposit' }],
+      [{ text: '💸 برداشت موجودی', callback_data: 'wallet_withdraw' }],
+      [{ text: '🪪 افزایش سقف خرید', callback_data: 'wallet_gold_verify' }],
+      [{ text: '💳 افزودن کارت جدید', callback_data: 'wallet_add_card' }],
+      [{ text: '♻️ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
+      [{ text: '🪎 کسب درآمد', callback_data: 'wallet_referral' }],
+      [{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]
     ];
 
     ctx.reply(profileText, {
@@ -57,14 +57,15 @@ module.exports = function registerWalletHandlers(bot) {
   bot.action('wallet_deposit', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    const { language } = await getUser(ctx.from.id);
-    return ctx.reply(getText(language, 'depositMethodTitle', 'روش افزایش موجودی را انتخاب کنید:'), {
+    const user = await getUser(ctx.from.id);
+    const { language } = user || {};
+    return ctx.reply('روش افزایش موجودی را انتخاب کنید:', {
       reply_markup: {
         inline_keyboard: [
-          [{ text: getText(language, 'depositCard2Card', '💳 کارت به کارت'), callback_data: 'deposit_card' }],
-          [{ text: getText(language, 'depositTron', '🪙 ترون (تتر)'), callback_data: 'deposit_crypto' }],
-          [{ text: getText(language, 'depositGateway', '🌐 درگاه پرداخت'), callback_data: 'deposit_gateway' }],
-          [{ text: getText(language, 'backButton', '🔙 بازگشت'), callback_data: 'menu_wallet' }]
+          [{ text: '💳 کارت به کارت', callback_data: 'deposit_card' }],
+          [{ text: '🪙 ترون (تتر)', callback_data: 'deposit_crypto' }],
+          [{ text: '🌐 درگاه پرداخت', callback_data: 'deposit_gateway' }],
+          [{ text: '🔙 بازگشت', callback_data: 'menu_wallet' }]
         ]
       }
     });
@@ -74,42 +75,43 @@ module.exports = function registerWalletHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const cards = require('../constants').DEPOSIT_CARDS;
-    let msg = getText(ctx.user_language, 'depositCardsTrust', '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:\n') + '\n';
+    let msg = '✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:\n';
     cards.forEach(c => {
       msg += `💳 ${c.number} (${c.owner})\n`;
     });
 
+    const user = await getUser(ctx.from.id);
     sessions[ctx.from.id] = {
       flow: 'deposit_card',
       step: 'waiting_amount',
-      lang: ctx.user_language
+      lang: (user && user.language) || 'fa'
     };
 
     return ctx.reply(msg, { parse_mode: 'Markdown' })
       .then(sent => {
         sessions[ctx.from.id].lastBotMsgId = sent.message_id;
-        return ctx.reply(getText(ctx.user_language, 'depositAskAmount', 'مبلغ واریزی خود را به تومان وارد کنید:'));
+        return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
       })
       .catch(console.error);
   });
 
   bot.action('deposit_crypto', async (ctx) => {
     ctx.answerCbQuery();
-    return ctx.reply('🪙 بخش ارز دیجیتال به‌زودی فعال می‌شود.')  // تغییر زبان لازم نیاز نیست
+    return ctx.reply('🪙 بخش ارز دیجیتال به‌زودی فعال می‌شود.');
   });
 
   bot.action('deposit_gateway', async (ctx) => {
     ctx.answerCbQuery();
-    return ctx.reply('🌐 درگاه پرداخت به‌زودی فعال می‌شود.') // تغییر زبان لازم نیاز نیست
+    return ctx.reply('🌐 درگاه پرداخت به‌زودی فعال می‌شود.');
   });
 
   bot.action('wallet_withdraw', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const user = await getUser(ctx.from.id);
-    const { language } = user;
+    const { language } = user || {};
     if (!user || !user.card_number) {
-      return ctx.reply(getText(language, 'errorCardNotRegistered', '❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی جیب گزینه «افزودن کارت جدید» را انتخاب کنید.'));
+      return ctx.reply('❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی کیف پول گزینه «افزودن کارت جدید» را انتخاب کنید.');
     }
 
     sessions[ctx.from.id] = {
@@ -118,31 +120,28 @@ module.exports = function registerWalletHandlers(bot) {
       lang: language || 'fa'
     };
     
-    return ctx.reply(fillTemplate(getText(language, 'withdrawAskAmount', 'مبلغ برداشت خود را به تومان وارد کنید (حداقل {MIN_WITHDRAW} تومان):'), { MIN_WITHDRAW }));
+    return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`);
   });
 
   bot.action('wallet_gold_verify', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    const { language } = await getUser(ctx.from.id);
-    
-    if (!language) {
-      return ctx.reply('⚠️ لطفاً همگسترش زبان را انجام دهید.');
-    }
+    const user = await getUser(ctx.from.id);
+    const { language } = user || {};
     
     const msg = 
-      `💎 احراز هویت طلایی | Vochino۰۱\n` +
+      `💎 احراز هویت طلایی | Vochino⁰¹\n` +
       `🔐 یک قدم تا سقف خرید بالاتر\n` +
       `کافیست یک تصویر واضح و شفاف از\n` +
       `🪪 کارت ملی در کنار 💳 کارت بانکی\n` +
       `ارسال نمایید.\n` +
       `✅ پس از بررسی توسط پشتیبانی و تأیید مدارک، درخواست افزایش سقف خرید شما انجام خواهد شد.\n\n` +
-      `💛 Vochino۰۱ | تجربه‌ای متفاوت`;
+      `💛 Vochino⁰¹ | تجربه‌ای متفاوت`;
 
     sessions[ctx.from.id] = {
       flow: 'gold_verify',
       step: 'waiting_photo',
-      lang: language
+      lang: language || 'fa'
     };
 
     return ctx.reply(msg, { parse_mode: 'Markdown' });
@@ -151,14 +150,14 @@ module.exports = function registerWalletHandlers(bot) {
   bot.action('wallet_add_card', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-
+    const user = await getUser(ctx.from.id);
     sessions[ctx.from.id] = {
       flow: 'add_card',
       step: 'waiting_number',
-      lang: ctx.user_language
+      lang: (user && user.language) || 'fa'
     };
 
-    return ctx.reply(getText(ctx.user_language, 'addCardAsk', 'شماره کارت جدید را وارد کنید (۱۶ رقم):'));
+    return ctx.reply('شماره کارت جدید را وارد کنید (۱۶ رقم):');
   });
 
   bot.action('wallet_history', async (ctx) => {
@@ -179,29 +178,30 @@ module.exports = function registerWalletHandlers(bot) {
     }
 
     const emojis = {
-      buy: getText(ctx.user_language, 'transactionBuy', 'خرید'),
-      sell: getText(ctx.user_language, 'transactionSell', 'فروش'),
-      withdraw: getText(ctx.user_language, 'transactionWithdraw', 'برداشت'),
-      deposit: getText(ctx.user_language, 'transactionDeposit', 'واریز'),
-      bonus: getText(ctx.user_language, 'transactionBonus', 'بونوس'),
-      gift: getText(ctx.user_language, 'transactionGift', 'هدیه'),
-      refund: getText(ctx.user_language, 'transactionRefund', 'بازگشت وجه')
+      buy: '🟢 خرید',
+      sell: '🟣 فروش',
+      withdraw: '🔴 برداشت',
+      deposit: '🟠 در حال انتظار',
+      bonus: '🎁 بونوس',
+      gift: '🎁 هدیه',
+      refund: '♻️ بازگشت وجه',
+      transfer: '🔄 انتقال'
     };
 
-    let text = getText(ctx.user_language, 'historyTitle', '📋 **گزارش تراکنش‌ها**\n\n');
+    let text = '📋 **گزارش تراکنش‌ها**\n\n';
     filtered.forEach(l => {
       const typeLabel = emojis[l.type] || l.type;
-      text += `${typeLabel} | ${Number(l.amount).toLocaleString('en-US')} تومان\n`;
-      if (l.tracking_code) text += `📎 کد: ${l.tracking_code}\n`;
+      text += `${typeLabel}: ${Number(l.amount).toLocaleString('en-US')} تومان\n`;
+      if (l.tracking_code) text += `📎 کد پیگیری: \`${l.tracking_code}\`\n`;
       text += `📅 ${new Date(l.created_at).toLocaleDateString('fa-IR')}\n\n`;
     });
 
     const filterButtons = [
-      [{ text: getText(ctx.user_language, 'historyFilterBuy', '🟢 خرید'), callback_data: 'wallet_history_filter_buy' },
-       { text: getText(ctx.user_language, 'historyFilterSell', '🟣 فروش'), callback_data: 'wallet_history_filter_sell' }],
-      [{ text: getText(ctx.user_language, 'historyFilterWithdraw', '🔴 برداشت'), callback_data: 'wallet_history_filter_withdraw' },
-       { text: getText(ctx.user_language, 'historyFilterAll', '🔄 همه'), callback_data: 'wallet_history' }],
-      [{ text: getText(ctx.user_language, 'backButton', '🔙 بازگشت'), callback_data: 'menu_wallet' }]
+      [{ text: '🟢 خرید', callback_data: 'wallet_history_filter_buy' },
+       { text: '🟣 فروش', callback_data: 'wallet_history_filter_sell' }],
+      [{ text: '🔴 برداشت', callback_data: 'wallet_history_filter_withdraw' },
+       { text: '🔄 همه', callback_data: 'wallet_history' }],
+      [{ text: '🔙 بازگشت', callback_data: 'menu_wallet' }]
     ];
 
     ctx.reply(text, {
@@ -234,8 +234,6 @@ module.exports = function registerWalletHandlers(bot) {
 
     const user = await getUser(ctx.from.id);
     if (!user) return;
-    const { lang } = user;
-    const referralTexts = texts[lang] || texts.fa;
     const refLink = `https://t.me/${ctx.botInfo.username}?start=${user.telegram_id}`;
     const inviteRes = await pool.query('SELECT COUNT(*)::int AS count FROM users WHERE referrer_id = $1', [String(ctx.from.id)]);
     const count = inviteRes.rows[0].count;
@@ -253,7 +251,7 @@ module.exports = function registerWalletHandlers(bot) {
     if (session.flow === 'deposit_card' && session.step === 'waiting_amount') {
       const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
       if (!amount || amount <= 0) {
-        return ctx.reply(getText(session.lang, 'errorInvalidAmount', '❌ مبلغ نامعتبر. یک عدد وارد کنید:'));
+        return ctx.reply('❌ مبلغ نامعتبر. یک عدد وارد کنید:');
       }
       session.amount = amount;
       session.step = 'waiting_receipt';
@@ -264,11 +262,11 @@ module.exports = function registerWalletHandlers(bot) {
       const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
       const min = MIN_WITHDRAW;
       if (!amount || amount < min) {
-        return ctx.reply(fillTemplate(getText(session.lang, 'withdrawMinError', 'حداقل مبلغ برداشت {min} تومان است. لطفاً دوباره وارد کنید:'), { min: min.toLocaleString('en-US') }));
+        return ctx.reply(`حداقل مبلغ برداشت ${min.toLocaleString('en-US')} تومان است. لطفاً دوباره وارد کنید:`);
       }
       const user = await getUser(ctx.from.id);
       if (amount > Number(user.balance)) {
-        return ctx.reply(fillTemplate(getText(session.lang, 'withdrawInsufficientBalance', '❌ موجودی کیف پولت کافی نیست.\nمبلغ برداشت: {amount} تومان\nموجودی فعلی: {balance} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.'), { amount: amount.toLocaleString('en-US'), balance: user.balance.toLocaleString('en-US') }));
+        return ctx.reply(`❌ موجودی کیف پولت کافی نیست.\nمبلغ برداشت: ${amount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${user.balance.toLocaleString('en-US')} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.`);
       }
 
       const trackCode = 'WD-' + Math.floor(Math.random() * 90000 + 10000);
@@ -279,9 +277,9 @@ module.exports = function registerWalletHandlers(bot) {
       );
 
       delete sessions[ctx.from.id];
-      ctx.reply(fillTemplate(getText(session.lang, 'withdrawSubmitted', 'درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.'), {}));
+      ctx.reply('درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.\n\n📎 کد پیگیری: `' + trackCode + '`', { parse_mode: 'Markdown' });
 
-      return ADMIN_IDS.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n💰 ${amount.toLocaleString()} تومان\n💳 ${user.card_number}`).catch(console.error));
+      return ADMIN_IDS.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n💰 ${amount.toLocaleString()} تومان\n💳 ${user.card_number}\n📎 کد: ${trackCode}`).catch(console.error));
     }
 
     if (session.flow === 'add_card' && session.step === 'waiting_number') {
@@ -296,7 +294,7 @@ module.exports = function registerWalletHandlers(bot) {
       } catch (e) {}
 
       delete sessions[ctx.from.id];
-      ctx.reply(getText(session.lang, 'addCardSuccess', 'کارت جدید با موفقیت ثبت شد ✅'));
+      ctx.reply('کارت جدید با موفقیت ثبت شد ✅');
       return;
     }
 
@@ -319,10 +317,10 @@ module.exports = function registerWalletHandlers(bot) {
         );
 
         delete sessions[ctx.from.id];
-        ctx.reply(fillTemplate(getText(session.lang, 'depositSubmitted', 'درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی (معمولاً خیلی سریع)، موجودی شما به‌روزرسانی خواهد شد.'), {}));
+        ctx.reply('درخواست شارژ شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی (معمولاً خیلی سریع)، موجودی شما به‌روزرسانی خواهد شد.\n\n📎 کد پیگیری: `' + trackCode + '`', { parse_mode: 'Markdown' });
 
         return ADMIN_IDS.forEach(id => ctx.telegram.sendPhoto(id, fileId, {
-          caption: `📥 درخواست شارژ\n👤 ${ctx.from.id}\n💰 ${amount.toLocaleString()} تومان`
+          caption: `📥 درخواست شارژ\n👤 ${ctx.from.id}\n💰 ${amount.toLocaleString()} تومان\n📎 کد: ${trackCode}`
         }).catch(console.error));
       }
 
@@ -346,7 +344,7 @@ module.exports = function registerWalletHandlers(bot) {
         }
 
         delete sessions[ctx.from.id];
-        ctx.reply(fillTemplate(getText(lang, 'verifyPhotoReceived', '✅ مدارک شما ارسال شد. پس از بررسی نتیجه اطلاع داده خواهد شد.'), {}));
+        ctx.reply('✅ مدارک شما ارسال شد. پس از بررسی نتیجه اطلاع داده خواهد شد.');
         return;
       }
 
