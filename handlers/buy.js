@@ -58,7 +58,6 @@ module.exports = function registerBuyHandlers(bot) {
     );
   });
 
-  // ورود مبلغ + پیش‌فاکتور
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'buy' || session.step !== 'waiting_amount') return next();
@@ -141,8 +140,6 @@ module.exports = function registerBuyHandlers(bot) {
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
-    // نکته مهم: تا زمانی که API واقعی وصل نشده، همه سفارش‌ها دستی تحویل می‌شوند.
-    // هیچ کد/هش جعلی ساخته نمی‌شود.
     const orderStatus = 'pending_delivery';
 
     await pool.query(
