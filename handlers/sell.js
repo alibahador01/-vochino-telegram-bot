@@ -25,7 +25,7 @@ module.exports = function registerSellHandlers(bot) {
     }
     const buttons = products.map(p => [{ text: p.name, callback_data: 'sell_pick_' + p.key }]);
     buttons.push([{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]);
-    return ctx.reply('♨️ محصولی که می‌خواهید بفروشید را انتخاب کنید:', {
+    return ctx.reply(R.HEADER + '♨️ محصولی که می‌خواهید بفروشید را انتخاب کنید:', {
       reply_markup: { inline_keyboard: buttons }
     });
   }
@@ -36,17 +36,9 @@ module.exports = function registerSellHandlers(bot) {
     return showSellList(ctx);
   });
 
-  bot.action('sell_back', async (ctx) => {
-    ctx.answerCbQuery();
-    delete sessions[ctx.from.id];
-    try { await ctx.deleteMessage(); } catch (e) {}
-    return showSellList(ctx);
-  });
-
   bot.action(/^sell_pick_(.+)$/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
     const product = await getSellProductByKey(key);
     if (!product || !product.active) return ctx.reply('❌ این محصول فروش در دسترس نیست.');
 
@@ -60,14 +52,13 @@ module.exports = function registerSellHandlers(bot) {
       }
     };
 
+    // کد نمونه برای مشتری فقط به‌صورت متن ثابت (غیرقابل کپی) نمایش داده می‌شود
     let msg = `🎟 کد ووچر ${product.name} خود را وارد کنید تا بررسی شود:`;
     if (product.sample_code) {
-      msg += `\n\n📎 نمونه فرمت قابل قبول:\n\`${product.sample_code}\``;
+      msg += `\n\n📎 نمونه فرمت قابل قبول (ثابت):\n${product.sample_code}`;
     }
-    return ctx.reply(msg, {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'sell_back' }]] }
-    });
+    // بدون parse_mode تا کد نمونه قابل کپی نباشد؛ لیست محصولات هم حذف نمی‌شود
+    return ctx.reply(msg);
   });
 
   bot.on('text', async (ctx, next) => {
@@ -90,7 +81,6 @@ module.exports = function registerSellHandlers(bot) {
       const orderId = ins.rows[0].id;
 
       delete sessions[ctx.from.id];
-      try { await ctx.deleteMessage(); } catch (e) {}
 
       ctx.reply(
         `✅ کد ووچر شما ثبت شد و در صف بررسی قرار گرفت.\n\n` +
@@ -100,16 +90,22 @@ module.exports = function registerSellHandlers(bot) {
         { parse_mode: 'Markdown' }
       );
 
+      // برای ادمین: کد ووچر مشتری و کد نمونه هر دو قابل کپی (داخل بک‌تیک)
       const ids = await adminIdsList();
+      const product = await getSellProductByKey(session.data.productType);
       for (const id of ids) {
         try {
           await ctx.telegram.sendMessage(id,
             `♨️ سفارش فروش جدید\n` +
             `👤 کاربر: ${ctx.from.id}\n` +
             `🛍 محصول: ${session.data.productName}\n` +
-            `🎟 کد ووچر:\n${voucherCode}\n` +
+            `🎟 کد ووچر مشتری (قابل کپی):\n\`${voucherCode}\`\n` +
+            (product && product.sample_code ? `📎 کد نمونه (قابل کپی):\n\`${product.sample_code}\`\n` : '') +
             `📍 کد پیگیری: ${trackingCode}`,
-            { reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `selopen:${orderId}` }]] } }
+            {
+              parse_mode: 'Markdown',
+              reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `selopen:${orderId}` }]] }
+            }
           );
         } catch (e) { console.error('خطا در اطلاع فروش به ادمین:', e.message); }
       }
