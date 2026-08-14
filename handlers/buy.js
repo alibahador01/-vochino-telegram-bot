@@ -16,7 +16,7 @@ module.exports = function registerBuyHandlers(bot) {
     }
     const buttons = products.map(p => [{ text: p.name, callback_data: 'buy_pick_' + p.key }]);
     buttons.push([{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]);
-    return ctx.reply('🛍 محصول مورد نظر خود را انتخاب کنید:', {
+    return ctx.reply(R.HEADER + '🛍 محصول مورد نظر خود را انتخاب کنید:', {
       reply_markup: { inline_keyboard: buttons }
     });
   }
@@ -31,13 +31,11 @@ module.exports = function registerBuyHandlers(bot) {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
     try { await ctx.deleteMessage(); } catch (e) {}
-    return showBuyList(ctx);
   });
 
   bot.action(/^buy_pick_(.+)$/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
     const product = await getProductByKey(key);
     if (!product || !product.active) return ctx.reply('❌ این محصول در دسترس نیست.');
 
@@ -52,10 +50,8 @@ module.exports = function registerBuyHandlers(bot) {
       }
     };
 
-    return ctx.reply(
-      `💵 مبلغ خرید ${product.name} را به تومان وارد کنید:\n(حداقل ${Number(product.min_amount || 0).toLocaleString('en-US')} تومان)`,
-      { reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'buy_back' }]] } }
-    );
+    // لیست محصولات حذف نمی‌شود؛ فقط سوال مبلغ پرسیده می‌شود (بدون دکمه بازگشت)
+    return ctx.reply(`💵 مبلغ خرید ${product.name} را به تومان وارد کنید:\n(حداقل ${Number(product.min_amount || 0).toLocaleString('en-US')} تومان)`);
   });
 
   bot.on('text', async (ctx, next) => {
@@ -86,8 +82,8 @@ module.exports = function registerBuyHandlers(bot) {
     session.data.finalAmount = finalAmount;
     session.step = 'waiting_confirm';
 
-    try { await ctx.deleteMessage(); } catch (e) {}
     return ctx.reply(
+      R.HEADER +
       `📋 پیش‌فاکتور خرید\n` +
       `🛍 محصول: ${session.data.productName}\n` +
       `💰 مبلغ: ${amount.toLocaleString('en-US')} تومان\n` +
@@ -97,8 +93,7 @@ module.exports = function registerBuyHandlers(bot) {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '✅ تأیید خرید', callback_data: 'buy_confirm' }],
-            [{ text: '🔴 بازگشت', callback_data: 'buy_back' }]
+            [{ text: '✅ تأیید خرید', callback_data: 'buy_confirm' }, { text: '🔴 بازگشت', callback_data: 'buy_back' }]
           ]
         }
       }
@@ -133,13 +128,14 @@ module.exports = function registerBuyHandlers(bot) {
       delete sessions[ctx.from.id];
       return ctx.reply(
         `❌ موجودی کیف پول شما کافی نیست.\nمبلغ لازم: ${finalAmount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${user ? Number(user.balance).toLocaleString('en-US') : '0'} تومان`,
-        { reply_markup: { inline_keyboard: [[{ text: '🧳 شارژ کیف پول', callback_data: 'wallet_deposit' }], [{ text: '🔴 بازگشت', callback_data: 'buy_back' }]] } }
+        { reply_markup: { inline_keyboard: [[{ text: '🧳 شارژ کیف پول', callback_data: 'wallet_deposit' }], [{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]] } }
       );
     }
 
     await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
+    // هیچ کد/هش جعلی ساخته نمی‌شود؛ تحویل توسط ادمین یا API واقعی انجام می‌شود
     const orderStatus = 'pending_delivery';
 
     await pool.query(
