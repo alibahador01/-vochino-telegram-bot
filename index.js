@@ -88,7 +88,7 @@ require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
 require('./handlers/sell')(bot);
 require('./handlers/game')(bot);
-// ⚠️ orderAdmin باید قبل از admin ثبت شود تا جریان‌های اصلاح‌شده فعال شوند
+// ⚠️ orderAdmin باید قبل از admin ثبت شود
 require('./handlers/orderAdmin')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/adminBonus')(bot);
