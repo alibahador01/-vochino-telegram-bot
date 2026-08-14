@@ -1,6 +1,9 @@
 // handlers/orderAdmin.js
-// جریان‌های اصلاح‌شده پنل ادمین: بررسی واریز/برداشت، تحویل ووچر (کد+هش)، تأیید فروش
-// این فایل باید قبل از admin.js ثبت شود تا جریان‌های ناقص قدیمی جایگزین شوند.
+// جریان‌های اصلاح‌شده پنل ادمین:
+// - بررسی واریز/برداشت با اطلاعات کامل مشتری
+// - تحویل ووچر (کد + هش + پیام دلخواه)
+// - تأیید/رد فروش با کدهای قابل کپی
+// - احراز هویت در لیست درخواست‌ها
 const { sessions } = require('../utils');
 const { pool, getUser, getAllAdmins, getAdmin, logTransaction } = require('../db');
 const { ADMIN_IDS } = require('../constants');
@@ -12,6 +15,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
   // migration خودکار داخل کد (بدون دستور دستی)
   pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
   pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
+  pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
 
   async function isAdminUser(id) {
     if (ADMIN_IDS.includes(Number(id))) return true;
@@ -46,13 +50,16 @@ module.exports = function registerOrderAdminHandlers(bot) {
     const r = res.rows[0];
     if (r.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
 
+    const user = await getUser(r.telegram_id);
     const caption =
-      `🧾 جزئیات درخواست کیف پول\n` +
-      `👤 کاربر: ${r.telegram_id}\n` +
+      `🧾 جزئیات درخواست کیف پول\n\n` +
+      `👤 آیدی: ${r.telegram_id}\n` +
+      `👤 نام و نام خانوادگی: ${user ? (user.full_name || 'ثبت نشده') : 'ثبت نشده'}\n` +
+      `📱 شماره تلفن: ${user ? (user.phone || 'ثبت نشده') : 'ثبت نشده'}\n` +
+      `💳 شماره کارت: ${r.card_number || (user ? user.card_number : '---')}\n` +
       `🧾 نوع: ${r.type === 'deposit' ? 'واریز (شارژ)' : 'برداشت'}\n` +
       `💰 مبلغ: ${Number(r.amount).toLocaleString('en-US')} تومان\n` +
-      `💳 کارت: ${r.card_number || '---'}\n` +
-      `📍 کد: ${r.tracking_code}\n` +
+      `📍 کد پیگیری: ${r.tracking_code}\n` +
       `🕐 ${R.formatDateTime(r.created_at)}`;
     const kb = {
       reply_markup: {
@@ -115,18 +122,21 @@ module.exports = function registerOrderAdminHandlers(bot) {
     return ctx.reply('❌ دلیل رد این درخواست را بنویسید (همین متن در رسید کاربر نمایش داده می‌شود):');
   });
 
-  // ==================== سفارش‌های خرید (تحویل ووچر: کد + هش) ====================
+  // ==================== سفارش‌های خرید (تحویل ووچر: کد + هش + پیام دلخواه) ====================
   bot.action('admin_buy_pending', async (ctx) => {
     if (!(await isAdminUser(ctx.from.id))) return;
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const res = await pool.query(
-      `SELECT o.id, o.amount, o.tracking_code, o.created_at, p.name AS product_name
-       FROM orders o LEFT JOIN products p ON o.product_type = p.key
+      `SELECT o.id, o.amount, o.tracking_code, o.created_at, p.name AS product_name,
+              u.full_name, u.phone, u.card_number
+       FROM orders o
+       LEFT JOIN products p ON o.product_type = p.key
+       LEFT JOIN users u ON o.telegram_id = u.telegram_id
        WHERE o.status IN ('pending_delivery', 'pending') ORDER BY o.created_at DESC LIMIT 10`);
     if (res.rows.length === 0) return ctx.reply('✅ هیچ سفارش خرید در انتظاری وجود ندارد.', backPanel);
     const buttons = res.rows.map(r => [{
-      text: `🛍 ${r.product_name || r.product_type}\n💰 ${Number(r.amount).toLocaleString('en-US')} | 📍 ${r.tracking_code}`,
+      text: `🛍 ${r.product_name || r.product_type}\n💰 ${Number(r.amount).toLocaleString('en-US')} | 👤 ${r.full_name || r.telegram_id}\n📍 ${r.tracking_code}`,
       callback_data: `buyopen:${r.id}`
     }]);
     buttons.push([{ text: '🔴 بازگشت', callback_data: 'menu_admin_panel' }]);
@@ -138,13 +148,20 @@ module.exports = function registerOrderAdminHandlers(bot) {
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
     const res = await pool.query(
-      `SELECT o.*, p.name AS product_name FROM orders o LEFT JOIN products p ON o.product_type = p.key WHERE o.id = $1`, [id]);
+      `SELECT o.*, p.name AS product_name, u.full_name, u.phone, u.card_number
+       FROM orders o
+       LEFT JOIN products p ON o.product_type = p.key
+       LEFT JOIN users u ON o.telegram_id = u.telegram_id
+       WHERE o.id = $1`, [id]);
     if (res.rows.length === 0) return ctx.reply('⚠️ سفارش یافت نشد.');
     const o = res.rows[0];
     if (!['pending_delivery', 'pending'].includes(o.status)) return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
     const msg =
-      `🛒 جزئیات سفارش خرید\n` +
-      `👤 کاربر: ${o.telegram_id}\n` +
+      `🛒 جزئیات سفارش خرید\n\n` +
+      `👤 آیدی مشتری: ${o.telegram_id}\n` +
+      `👤 نام و نام خانوادگی: ${o.full_name || 'ثبت نشده'}\n` +
+      `📱 شماره تلفن: ${o.phone || 'ثبت نشده'}\n` +
+      `💳 شماره کارت: ${o.card_number || 'ثبت نشده'}\n` +
       `🛍 محصول: ${o.product_name || o.product_type}\n` +
       `💰 مبلغ پرداختی: ${Number(o.amount).toLocaleString('en-US')} تومان\n` +
       `💳 کارمزد: ${Number(o.commission || 0).toLocaleString('en-US')} تومان\n` +
@@ -153,7 +170,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
     ctx.reply(msg, {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🎟 تحویل ووچر (کد+هش)', callback_data: `buydel:${id}` }, { text: '❌ رد سفارش', callback_data: `buyno:${id}` }],
+          [{ text: '🎟 تحویل ووچر', callback_data: `buydel:${id}` }, { text: '❌ رد سفارش', callback_data: `buyno:${id}` }],
           [{ text: '🔴 بازگشت', callback_data: 'admin_buy_pending' }]
         ]
       }
@@ -184,12 +201,15 @@ module.exports = function registerOrderAdminHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     const res = await pool.query(
-      `SELECT s.id, s.amount, s.voucher_code, s.tracking_code, s.created_at, sp.name AS product_name
-       FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key
+      `SELECT s.id, s.amount, s.voucher_code, s.tracking_code, s.created_at, sp.name AS product_name,
+              u.full_name, u.phone, u.card_number
+       FROM sell_orders s
+       LEFT JOIN sell_products sp ON s.product_type = sp.key
+       LEFT JOIN users u ON s.telegram_id = u.telegram_id
        WHERE s.status = 'pending_review' ORDER BY s.created_at DESC LIMIT 10`);
     if (res.rows.length === 0) return ctx.reply('✅ هیچ سفارش فروش در انتظاری وجود ندارد.', backPanel);
     const buttons = res.rows.map(r => [{
-      text: `♨️ ${r.product_name || r.product_type}\n🎟 ${String(r.voucher_code || '').slice(0, 18)}...\n📍 ${r.tracking_code}`,
+      text: `♨️ ${r.product_name || r.product_type}\n👤 ${r.full_name || r.telegram_id}\n📍 ${r.tracking_code}`,
       callback_data: `selopen:${r.id}`
     }]);
     buttons.push([{ text: '🔴 بازگشت', callback_data: 'menu_admin_panel' }]);
@@ -201,18 +221,27 @@ module.exports = function registerOrderAdminHandlers(bot) {
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
     const res = await pool.query(
-      `SELECT s.*, sp.name AS product_name FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key WHERE s.id = $1`, [id]);
+      `SELECT s.*, sp.name AS product_name, sp.sample_code, u.full_name, u.phone, u.card_number
+       FROM sell_orders s
+       LEFT JOIN sell_products sp ON s.product_type = sp.key
+       LEFT JOIN users u ON s.telegram_id = u.telegram_id
+       WHERE s.id = $1`, [id]);
     if (res.rows.length === 0) return ctx.reply('⚠️ سفارش یافت نشد.');
     const s = res.rows[0];
     if (s.status !== 'pending_review') return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
     const msg =
-      `♨️ جزئیات سفارش فروش\n` +
-      `👤 کاربر: ${s.telegram_id}\n` +
+      `♨️ جزئیات سفارش فروش\n\n` +
+      `👤 آیدی مشتری: ${s.telegram_id}\n` +
+      `👤 نام و نام خانوادگی: ${s.full_name || 'ثبت نشده'}\n` +
+      `📱 شماره تلفن: ${s.phone || 'ثبت نشده'}\n` +
+      `💳 شماره کارت: ${s.card_number || 'ثبت نشده'}\n` +
       `🛍 محصول: ${s.product_name || s.product_type}\n` +
-      `🎟 کد ووچر کاربر:\n${s.voucher_code}\n` +
+      `🎟 کد ووچر مشتری (قابل کپی):\n\`${s.voucher_code}\`\n` +
+      (s.sample_code ? `📎 کد نمونه (قابل کپی):\n\`${s.sample_code}\`\n` : '') +
       `📍 کد پیگیری: ${s.tracking_code}\n` +
       `🕐 ${R.formatDateTime(s.created_at)}`;
     ctx.reply(msg, {
+      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [{ text: '💰 ثبت مبلغ و تأیید', callback_data: `selamt:${id}` }, { text: '❌ رد سفارش', callback_data: `selno:${id}` }],
@@ -278,15 +307,25 @@ module.exports = function registerOrderAdminHandlers(bot) {
       if (code.length < 3) return ctx.reply('❌ کد نامعتبر است.');
       session.data.code = code;
       session.step = 'waiting_hash';
-      return ctx.reply('🔐 حالا هش ووچر را وارد کنید.\n(اگر این محصول هش ندارد، عدد 0 را بفرستید تا خالی ذخیره شود — مقدار جعلی ساخته نمی‌شود):');
+      return ctx.reply('🔐 حالا هش ووچر را وارد کنید.\n(اگر این محصول هش ندارد، عدد 0 را بفرستید تا خالی ذخیره شود):');
     }
 
-    // هش ووچر + نهایی‌سازی تحویل
+    // هش ووچر + پیام دلخواه
     if (session.flow === 'buy_deliver' && session.step === 'waiting_hash') {
       const rawHash = ctx.message.text.trim();
       const hash = (rawHash === '0' || rawHash === 'ندارد' || rawHash === '-') ? null : rawHash;
+      session.data.hash = hash;
+      session.step = 'waiting_message';
+      return ctx.reply('💬 آیا پیام دلخواهی برای مشتری دارید؟\nاگر بله، پیام را بنویسید.\nاگر نه، عدد 0 را بفرستید.');
+    }
+
+    // پیام دلخواه + نهایی‌سازی تحویل خرید
+    if (session.flow === 'buy_deliver' && session.step === 'waiting_message') {
+      const rawMsg = ctx.message.text.trim();
+      const customMsg = (rawMsg === '0' || rawMsg === 'ندارد' || rawMsg === '-') ? null : rawMsg;
       const id = session.data.id;
       const code = session.data.code;
+      const hash = session.data.hash;
       delete sessions[ctx.from.id];
 
       const res = await pool.query(
@@ -304,15 +343,24 @@ module.exports = function registerOrderAdminHandlers(bot) {
       const user = await getUser(o.telegram_id);
       const paid = Number(o.amount || 0);
       const commission = Number(o.commission || 0);
+
+      // ساخت رسید خرید موفق
+      let receiptMsg = R.buildBuyReceipt({
+        productName: o.product_name || o.product_type,
+        base: paid - commission, commission, paid,
+        status: 'success', tracking: o.tracking_code,
+        card: user ? user.card_number : null,
+        voucherCode: code, voucherHash: hash,
+        createdAt: new Date()
+      });
+
+      // اضافه کردن پیام دلخواه ادمین در انتهای رسید
+      if (customMsg) {
+        receiptMsg += '\n\n💬 پیام پشتیبانی:\n' + customMsg;
+      }
+
       try {
-        await ctx.telegram.sendMessage(o.telegram_id, R.buildBuyReceipt({
-          productName: o.product_name || o.product_type,
-          base: paid - commission, commission, paid,
-          status: 'success', tracking: o.tracking_code,
-          card: user ? user.card_number : null,
-          voucherCode: code, voucherHash: hash,
-          createdAt: new Date()
-        }));
+        await ctx.telegram.sendMessage(o.telegram_id, receiptMsg);
       } catch (e) {}
       return ctx.reply('✅ سفارش تکمیل شد و رسید خرید برای کاربر ارسال شد.');
     }
