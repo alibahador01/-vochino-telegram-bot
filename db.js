@@ -439,6 +439,59 @@ async function getBotTextCategories() {
   return res.rows.map(r => r.category);
 }
 
+// ==================== ادمین‌ها ====================
+async function getAllAdmins() {
+  const res = await pool.query('SELECT * FROM admins WHERE is_active = TRUE ORDER BY created_at DESC');
+  return res.rows;
+}
+
+async function getAdmin(telegramId) {
+  const res = await pool.query('SELECT * FROM admins WHERE telegram_id = $1 AND is_active = TRUE', [String(telegramId)]);
+  return res.rows[0] || null;
+}
+
+async function addAdmin(telegramId, level = 1, name = '') {
+  const res = await pool.query(
+    'INSERT INTO admins (telegram_id, level, name, is_active, created_at) VALUES ($1, $2, $3, TRUE, NOW()) ON CONFLICT (telegram_id) DO UPDATE SET level = EXCLUDED.level, name = EXCLUDED.name, is_active = TRUE RETURNING *',
+    [String(telegramId), level, name]
+  );
+  return res.rows[0];
+}
+
+async function removeAdmin(telegramId) {
+  await pool.query('UPDATE admins SET is_active = FALSE WHERE telegram_id = $1', [String(telegramId)]);
+}
+
+async function updateAdminLevel(telegramId, level) {
+  const res = await pool.query(
+    'UPDATE admins SET level = $2 WHERE telegram_id = $1 RETURNING *',
+    [String(telegramId), level]
+  );
+  return res.rows[0] || null;
+}
+
+// ==================== هوش مصنوعی (Gemini) ====================
+async function getAiConfig(key, defaultValue = null) {
+  const res = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
+  return res.rows[0] ? res.rows[0].value : defaultValue;
+}
+
+async function setAiConfig(key, value) {
+  await pool.query(
+    'INSERT INTO ai_config (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
+    [key, value]
+  );
+}
+
+async function getAllAiConfig() {
+  const res = await pool.query('SELECT * FROM ai_config ORDER BY key ASC');
+  const config = {};
+  for (const row of res.rows) {
+    config[row.key] = row.value;
+  }
+  return config;
+}
+
 // ==================== ارسال نرخ به کانال ====================
 async function sendRatesToChannel(bot) {
   const channels = await getRequiredChannels();
@@ -657,6 +710,27 @@ async function initDb() {
       data_used BIGINT DEFAULT 0,
       tracking_code TEXT UNIQUE,
       created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    // ==================== جداول جدید اضافه شده ====================
+    `CREATE TABLE IF NOT EXISTS bot_texts (
+      key TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      value TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      updated_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS admins (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT UNIQUE NOT NULL,
+      level INTEGER DEFAULT 1,
+      name TEXT DEFAULT '',
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_config (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT NOW()
     );`
   ];
 
@@ -735,13 +809,11 @@ async function initDb() {
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
 
-
     // transaction_logs
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_before INTEGER',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_after INTEGER',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS tracking_code TEXT',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS description TEXT',
-
 
     // vpn_servers
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS port INTEGER',
@@ -759,7 +831,21 @@ async function initDb() {
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP',
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_limit BIGINT DEFAULT 5368709120',
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_used BIGINT DEFAULT 0',
-    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS tracking_code TEXT UNIQUE'
+    'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS tracking_code TEXT UNIQUE',
+
+    // bot_texts (جدید)
+    'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT \'general\'',
+    'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS value TEXT NOT NULL DEFAULT \'\'',
+    'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS description TEXT DEFAULT \'\'',
+    'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // admins (جدید)
+    'ALTER TABLE admins ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1',
+    'ALTER TABLE admins ADD COLUMN IF NOT EXISTS name TEXT DEFAULT \'\'',
+    'ALTER TABLE admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
+
+    // ai_config (جدید)
+    'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()'
   ];
 
   for (const sql of alterQueries) {
@@ -944,5 +1030,14 @@ module.exports = {
   searchBotTexts,
   updateBotText,
   getBotTextCategories,
-  sendRatesToChannel
+  sendRatesToChannel,
+  // توابع جدید اضافه شده
+  getAllAdmins,
+  getAdmin,
+  addAdmin,
+  removeAdmin,
+  updateAdminLevel,
+  getAiConfig,
+  setAiConfig,
+  getAllAiConfig
 };
