@@ -70,7 +70,6 @@ module.exports = function registerSellHandlers(bot) {
     });
   });
 
-  // دریافت کد ووچر و ثبت سفارش فروش (با مبلغ تخمینی واقعی — نه صفر)
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'sell' || session.step !== 'waiting_code') return next();
@@ -101,7 +100,6 @@ module.exports = function registerSellHandlers(bot) {
         { parse_mode: 'Markdown' }
       );
 
-      // اطلاع به ادمین‌ها همراه دکمه بررسی مستقیم همان سفارش
       const ids = await adminIdsList();
       for (const id of ids) {
         try {
