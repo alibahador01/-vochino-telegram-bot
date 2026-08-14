@@ -26,18 +26,15 @@ app.get('/api/status', (req, res) => res.json({ status: 'ok' }));
 app.get('/sub/:userId', async (req, res) => {
   const userId = req.params.userId;
   try {
-    // بررسی کاربر
     const userRes = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [userId]);
     if (!userRes.rows[0]) return res.status(404).send('کاربر یافت نشد.');
 
-    // بررسی اشتراک فعال
     const subRes = await pool.query(
       "SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active' AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [userId]
     );
     if (subRes.rows.length === 0) return res.status(403).send('اشتراک فعالی یافت نشد.');
 
-    // گرفتن سرورهای فعال و سالم
     const serversRes = await pool.query(
       `SELECT * FROM vpn_servers 
        WHERE is_active = true AND health_status = 'healthy' 
@@ -66,7 +63,6 @@ app.get('/sub/:userId', async (req, res) => {
   }
 });
 
-// Catch-all
 app.get('*', (req, res) => res.send('Vochino Bot Active'));
 
 app.listen(PORT, () => {
