@@ -1,10 +1,10 @@
 // constants.js
 const ADMIN_IDS = [8231962200];
+const SUPER_ADMIN_ID = 8231962200; // مالک اصلی ربات
 const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 const DEFAULT_USD_RATE = 60000;
 
-// آرایه‌ی ایموجی‌ها – بدون محدودیت (ادمین هر ایموجی استاندارد تلگرام را می‌تواند وارد کند)
 const ALLOWED_REACTIONS = [];
 
 const DEPOSIT_CARDS = [
@@ -12,18 +12,16 @@ const DEPOSIT_CARDS = [
   { number: '5047061669481125', owner: 'علی بهادر' }
 ];
 
-// منوی اصلی جدید (چیدمان دقیق طبق سند)
 const mainMenuButtons = [
   { key: 'buy',     text: '✨ خرید' },
   { key: 'sell',    text: '✨ فروش' },
-  { key: 'wallet',  text: '🧳 جیب' },
+  { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '💎 بونوس' },
-  { key: 'special', text: '🎁 ویژه ووچینو⁰۱' },
-  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰۱' },
-  { key: 'support', text: '📥 پشتیبانی' }
+  { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
+  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰¹' },
+  { key: 'support', text: '🎧 پشتیبانی آنلاین' }
 ];
 
-// دکمه‌ی پنل مدیریت (فقط برای ادمین‌ها نمایش داده می‌شود)
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
 
 const BROADCAST_SETTINGS = {
@@ -54,8 +52,28 @@ const GAME_TYPES = {
   SPIN: 'spin'
 };
 
+const ADMIN_LEVELS = {
+  SUPPORT: 1, // فقط پشتیبان
+  MANAGER: 3  // مدیر ارشد - دسترسی کامل به پنل
+};
+
+// تنظیمات دکمه‌های زیرمنوی پشتیبانی و هوش مصنوعی
+const GEMINI_API_CONFIG = {
+  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خلاصه و کوتاه بده تا کاربران راحت شوند.',
+  USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
+  SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
+  
+  // دکمه‌های زیرمنوی پشتیبانی
+  SUPPORT_MENU_BUTTONS: [
+    { key: 'ai_support',    text: '🤖 پشتیبانی هوشمند' },
+    { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
+    { key: 'back_main',     text: '🔙 بازگشت' }
+  ]
+};
+
 module.exports = {
   ADMIN_IDS,
+  SUPER_ADMIN_ID,
   DAILY_LIMIT_TEXT,
   MIN_WITHDRAW,
   DEFAULT_USD_RATE,
@@ -66,5 +84,7 @@ module.exports = {
   BROADCAST_SETTINGS,
   DELIVERY_TYPES,
   PRICE_TYPES,
-  GAME_TYPES
+  GAME_TYPES,
+  ADMIN_LEVELS,
+  GEMINI_API_CONFIG
 };
