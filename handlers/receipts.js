@@ -1,12 +1,13 @@
 // handlers/receipts.js
 // قالب‌های نهایی رسیدها — طبق سند حیاتی (بدون هیچ مقدار هاردکد/جعلی)
+// هر سازنده سه وضعیت را پشتیبانی می‌کند: 'success' | 'pending' | 'failed'
 
 const HEADER =
   '╭━━━━━━━ ❖ ━━━━━━╮\n' +
   '👑 ووچینو⁰¹\n' +
-  '╰━━━━━━━ ❖ ━━━━━━╯\n';
+  '╰━━━━━━━ ❖ ━━━━━━\n';
 
-const SEP_MONEY = '💲➖💲➖➖💲➖➖💲';
+const SEP_MONEY = '💲➖💲💲➖➖💲➖';
 const SEP_LINE = '━━━━━━━━━━━━━━━━';
 
 function faNum(n) {
@@ -30,7 +31,6 @@ function formatDateTime(d) {
 
 // ---------- رسید خرید ----------
 function buildBuyReceipt(o) {
-  // o: { productName, base, commission, paid, status:'success'|'failed', tracking, card, voucherCode, voucherHash, createdAt, reason }
   const name = o.productName || '';
   if (o.status === 'success') {
     let msg =
@@ -45,7 +45,6 @@ function buildBuyReceipt(o) {
       `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
       `💳 کارت پرداخت: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n';
-    // فقط اگر واقعاً کد/هش وجود داشته باشد نمایش بده (هرگز مقدار جعلی نه)
     if (o.voucherCode || o.voucherHash) {
       msg += '🎟️ اطلاعات ووچر 💎\n';
       if (o.voucherCode) msg += `💎 کد ووچر: ${o.voucherCode}\n`;
@@ -57,6 +56,22 @@ function buildBuyReceipt(o) {
       `✨ سفارش شما با موفقیت ثبت و پردازش شد.\n` +
       `📌 اطلاعات ووچر را در محل امن نگهداری کنید.`;
     return msg;
+  }
+  if (o.status === 'pending') {
+    return (
+      HEADER +
+      `فاکتور خرید 📋\n` +
+      `🛍️ نوع تراکنش: ${name}\n` +
+      `💰 مبلغ سفارش: ${faNum(o.base)} تومان\n` +
+      `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
+      `💵 مبلغ نهایی: ${faNum(o.paid)} تومان\n` +
+      `🟠 وضعیت: در انتظار | در حال پردازش و صدور\n` +
+      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      `💳 کارت پرداخت: ${maskCard(o.card)}\n` +
+      SEP_LINE + '\n' +
+      `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}\n` +
+      `⏳ پس از بررسی و صدور، اطلاعات ووچر برای شما ارسال می‌شود.`
+    );
   }
   return (
     HEADER +
@@ -76,7 +91,6 @@ function buildBuyReceipt(o) {
 
 // ---------- رسید فروش ----------
 function buildSellReceipt(o) {
-  // o: { productName, amount, commission, received, status, tracking, card, newBalance, createdAt, reason }
   const name = o.productName || '';
   if (o.status === 'success') {
     return (
@@ -99,6 +113,21 @@ function buildSellReceipt(o) {
       `🤝 ممنون که ووچینو⁰¹ را انتخاب کردید.`
     );
   }
+  if (o.status === 'pending') {
+    return (
+      HEADER +
+      `فاکتور فروش 📋\n` +
+      `🛍️ نوع تراکنش: ${name}\n` +
+      `💰 مبلغ فروش: ${faNum(o.amount)} تومان\n` +
+      `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
+      `🟠 وضعیت: در انتظار | در حال بررسی\n` +
+      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      SEP_LINE + '\n' +
+      `⏳ پس از تأیید توسط پشتیبانی، مبلغ به کیف پول شما اضافه می‌شود.\n` +
+      SEP_LINE + '\n' +
+      `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}`
+    );
+  }
   return (
     HEADER +
     `فاکتور فروش 📋\n` +
@@ -117,7 +146,6 @@ function buildSellReceipt(o) {
 
 // ---------- رسید برداشت ----------
 function buildWithdrawReceipt(o) {
-  // o: { amount, commission, net, status, tracking, card, newBalance, createdAt, reason }
   if (o.status === 'success') {
     return (
       HEADER +
@@ -139,6 +167,22 @@ function buildWithdrawReceipt(o) {
       `🤝 ممنون که ووچینو⁰¹ را انتخاب کردید.`
     );
   }
+  if (o.status === 'pending') {
+    return (
+      HEADER +
+      `فاکتور برداشت 📋\n` +
+      `💸 نوع تراکنش: برداشت موجودی\n` +
+      `💰 مبلغ برداشت: ${faNum(o.amount)} تومان\n` +
+      `💳 کارمزد برداشت: ${faNum(o.commission)} تومان\n` +
+      `🟠 وضعیت: در انتظار | در حال بررسی\n` +
+      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      `💳 کارت بانکی: ${maskCard(o.card)}\n` +
+      SEP_LINE + '\n' +
+      `⏳ پس از تأیید، مبلغ به کارت بانکی شما واریز می‌شود.\n` +
+      SEP_LINE + '\n' +
+      `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}`
+    );
+  }
   return (
     HEADER +
     `فاکتور برداشت 📋\n` +
@@ -157,7 +201,6 @@ function buildWithdrawReceipt(o) {
 
 // ---------- رسید شارژ (واریز) ----------
 function buildDepositReceipt(o) {
-  // o: { amount, status, tracking, newBalance, createdAt, reason }
   if (o.status === 'success') {
     return (
       HEADER +
@@ -173,6 +216,19 @@ function buildDepositReceipt(o) {
       `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}\n` +
       `✨ درخواست شارژ شما با موفقیت پردازش شد.\n` +
       `🤝 ممنون که ووچینو⁰¹ را انتخاب کردید.`
+    );
+  }
+  if (o.status === 'pending') {
+    return (
+      HEADER +
+      `فاکتور شارژ 📋\n` +
+      `💰 مبلغ شارژ: ${faNum(o.amount)} تومان\n` +
+      `🟠 وضعیت: در انتظار | در حال بررسی رسید\n` +
+      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      SEP_LINE + '\n' +
+      `⏳ پس از تأیید رسید توسط پشتیبانی، مبلغ به کیف پول اضافه می‌شود.\n` +
+      SEP_LINE + '\n' +
+      `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}`
     );
   }
   return (
