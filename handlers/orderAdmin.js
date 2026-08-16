@@ -330,8 +330,10 @@ module.exports = function registerOrderAdminHandlers(bot) {
       }
 
       try {
-        await ctx.telegram.sendMessage(o.telegram_id, receiptMsg);
-      } catch (e) {}
+        await ctx.telegram.sendMessage(o.telegram_id, receiptMsg, { parse_mode: 'Markdown' });
+      } catch (e) {
+        try { await ctx.telegram.sendMessage(o.telegram_id, receiptMsg); } catch (e2) {}
+      }
       return ctx.reply('✅ سفارش تکمیل شد و رسید خرید برای کاربر ارسال شد.');
     }
 
