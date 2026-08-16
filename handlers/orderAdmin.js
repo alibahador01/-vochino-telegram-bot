@@ -213,46 +213,19 @@ module.exports = function registerOrderAdminHandlers(bot) {
     for (const r of res.rows) {
       await ctx.reply(
         `♨️ ${r.product_name || r.product_type}\n👤 ${r.full_name || r.telegram_id}\n🎟 کد: \`${r.voucher_code}\`\n📍 ${r.tracking_code}`,
-        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '✅ تأیید و واریز', callback_data: `selok:${r.id}` }, { text: '❌ رد', callback_data: `selno:${r.id}` }]] } }
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `selamt:${r.id}` }, { text: '❌ رد', callback_data: `selno:${r.id}` }]] } }
       );
     }
   });
 
-  // تأیید مستقیم فروش با یک تپ: مبلغ و کارمزد به‌صورت خودکار از روی تنظیمات محصول محاسبه می‌شود
-  bot.action(/^selok:(\d+)$/, async (ctx) => {
+  // تأیید فروش: ادمین مبلغی که صرافی/خودش خریده را وارد می‌کند، سپس کارمزد تنظیم‌شده روی محصول به‌صورت خودکار از همان مبلغ کسر و باقی‌مانده واریز می‌شود
+  bot.action(/^selamt:(\d+)$/, async (ctx) => {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
-    const res = await pool.query(
-      `SELECT s.*, sp.name AS product_name, sp.commission_type, sp.commission_value FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key WHERE s.id = $1`, [id]);
-    if (res.rows.length === 0) return ctx.reply('⚠️ سفارش یافت نشد.');
-    const s = res.rows[0];
-    if (s.status !== 'pending_review') { try { await ctx.deleteMessage(); } catch (e) {} return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.'); }
-
-    const amount = Number(s.amount || 0);
-    let commission = 0;
-    if (s.commission_type === 'percentage') commission = Math.round(amount * (parseFloat(s.commission_value) / 100));
-    else if (s.commission_type === 'fixed') commission = parseInt(s.commission_value, 10) || 0;
-    const received = amount - commission;
-
-    await pool.query('UPDATE sell_orders SET amount = $1, commission = $2, status = $3 WHERE id = $4', [amount, commission, 'completed', id]);
-    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [received, s.telegram_id]);
-    try { await logTransaction(s.telegram_id, 'sell', received, `فروش ${s.product_name || s.product_type}`); } catch (e) {}
-
-    const user = await getUser(s.telegram_id);
-    try {
-      await ctx.telegram.sendMessage(s.telegram_id, R.buildSellReceipt({
-        productName: s.product_name || s.product_type,
-        amount, commission, received,
-        status: 'success', tracking: s.tracking_code,
-        card: user ? user.card_number : null,
-        newBalance: user ? user.balance : 0,
-        createdAt: new Date()
-      }));
-    } catch (e) {}
-
     try { await ctx.deleteMessage(); } catch (e) {}
-    return ctx.reply(`✅ فروش تأیید شد، ${received.toLocaleString('en-US')} تومان به کیف کاربر اضافه شد و رسید ارسال شد.`);
+    sessions[ctx.from.id] = { flow: 'sell_approve', step: 'waiting_amount', data: { id } };
+    return ctx.reply('💰 مبلغی که برای این ووچر پرداخت می‌کنید را به تومان وارد کنید (کارمزد به‌صورت خودکار از همین مبلغ کسر می‌شود):');
   });
 
   bot.action(/^selno:(\d+)$/, async (ctx) => {
@@ -386,6 +359,41 @@ module.exports = function registerOrderAdminHandlers(bot) {
         }));
       } catch (e) {}
       return ctx.reply('❌ سفارش رد شد، مبلغ به‌صورت خودکار به کیف کاربر برگشت و رسید ناموفق ارسال شد.');
+    }
+
+    // مبلغ تأیید فروش — ادمین مبلغ خرید را وارد می‌کند، کارمزد محصول خودکار کسر و باقی‌مانده واریز می‌شود
+    if (session.flow === 'sell_approve' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (!amount || amount <= 0) return ctx.reply('❌ مبلغ نامعتبر.');
+      const id = session.data.id;
+      delete sessions[ctx.from.id];
+      const res = await pool.query(
+        `SELECT s.*, sp.name AS product_name, sp.commission_type, sp.commission_value FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key WHERE s.id = $1`, [id]);
+      if (res.rows.length === 0) return ctx.reply('⚠️ سفارش یافت نشد.');
+      const s = res.rows[0];
+      if (s.status !== 'pending_review') return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
+
+      let commission = 0;
+      if (s.commission_type === 'percentage') commission = Math.round(amount * (parseFloat(s.commission_value) / 100));
+      else if (s.commission_type === 'fixed') commission = parseInt(s.commission_value, 10) || 0;
+      const received = amount - commission;
+
+      await pool.query('UPDATE sell_orders SET amount = $1, commission = $2, status = $3 WHERE id = $4', [amount, commission, 'completed', id]);
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [received, s.telegram_id]);
+      try { await logTransaction(s.telegram_id, 'sell', received, `فروش ${s.product_name || s.product_type}`); } catch (e) {}
+
+      const user = await getUser(s.telegram_id);
+      try {
+        await ctx.telegram.sendMessage(s.telegram_id, R.buildSellReceipt({
+          productName: s.product_name || s.product_type,
+          amount, commission, received,
+          status: 'success', tracking: s.tracking_code,
+          card: user ? user.card_number : null,
+          newBalance: user ? user.balance : 0,
+          createdAt: new Date()
+        }));
+      } catch (e) {}
+      return ctx.reply(`✅ فروش تأیید شد، ${received.toLocaleString('en-US')} تومان (پس از کسر کارمزد ${commission.toLocaleString('en-US')} تومان) به کیف کاربر اضافه شد و رسید ارسال شد.`);
     }
 
     // دلیل رد فروش
