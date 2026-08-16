@@ -791,12 +791,18 @@ async function initDb() {
     // sell_orders
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS reject_reason TEXT',
+
+    // orders (تکمیلی)
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS reject_reason TEXT',
 
     // wallet_requests
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS receipt_file_id TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS target_user_id TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS reject_reason TEXT',
 
     // api_sources
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS supports_products TEXT[]',
