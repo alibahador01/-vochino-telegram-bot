@@ -7,7 +7,7 @@ const HEADER =
   '👑 ووچینو⁰¹\n' +
   '╰━━━━━━━ ❖ ━━━━━━━╯\n';
 
-const SEP_MONEY = '💲➖💲💲➖💲💲➖';
+const SEP_MONEY = '💲';
 const SEP_LINE = '━━━━━━━━━━━━━━━━';
 
 function faNum(n) {
@@ -41,14 +41,14 @@ function buildBuyReceipt(o) {
       `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
       `💵 مبلغ نهایی: ${faNum(o.paid)} تومان\n` +
       `🟢 وضعیت: موفق | پرداخت و صدور انجام شد\n` +
-      SEP_MONEY + '\n' +
+      SEP_LINE + '\n' +
       `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
       `💳 کارت پرداخت: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n';
     if (o.voucherCode || o.voucherHash) {
       msg += '🎟️ اطلاعات ووچر 💎\n';
-      if (o.voucherCode) msg += `💎 کد ووچر: ${o.voucherCode}\n`;
-      if (o.voucherHash) msg += `🔐 هش ووچر: ${o.voucherHash}\n`;
+      if (o.voucherCode) msg += `💎 کد ووچر:\n\`${o.voucherCode}\`\n`;
+      if (o.voucherHash) msg += `🔐 هش ووچر:\n\`${o.voucherHash}\`\n`;
       msg += SEP_LINE + '\n';
     }
     msg +=
