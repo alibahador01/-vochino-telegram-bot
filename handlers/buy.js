@@ -1,11 +1,20 @@
 // handlers/buy.js
 const texts = require('../texts');
 const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool, getUser, getSetting, getProducts, getProductByKey } = require('../db');
+const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
 const R = require('./receipts');
 
 module.exports = function registerBuyHandlers(bot) {
+
+  async function adminIdsList() {
+    const ids = ADMIN_IDS.map(x => Number(x));
+    try {
+      const admins = await getAllAdmins();
+      admins.forEach(a => { if (!ids.includes(Number(a.telegram_id))) ids.push(Number(a.telegram_id)); });
+    } catch (e) {}
+    return ids;
+  }
 
   async function showBuyList(ctx) {
     const products = await getProducts(true);
@@ -145,7 +154,7 @@ module.exports = function registerBuyHandlers(bot) {
 
     delete sessions[ctx.from.id];
 
-    return ctx.reply(
+    ctx.reply(
       R.HEADER +
       `فاکتور خرید 📋\n` +
       `🛍️ نوع تراکنش: ${product.name}\n` +
@@ -158,5 +167,26 @@ module.exports = function registerBuyHandlers(bot) {
       `🕐 تاریخ و ساعت: ${R.formatDateTime(new Date())}\n` +
       `⏳ پس از بررسی و صدور، اطلاعات ووچر برای شما ارسال می‌شود.`
     );
+
+    // اطلاع فوری به ادمین‌ها با اطلاعات کامل مشتری، همراه دکمه تحویل مستقیم
+    const custUser = await getUser(ctx.from.id);
+    const ids = await adminIdsList();
+    for (const id of ids) {
+      try {
+        const orderRow = await pool.query('SELECT id FROM orders WHERE tracking_code = $1', [trackingCode]);
+        const orderId = orderRow.rows[0].id;
+        await ctx.telegram.sendMessage(id,
+          `🛒 سفارش خرید جدید\n` +
+          `👤 آیدی مشتری: ${ctx.from.id}\n` +
+          `👤 نام: ${custUser ? (custUser.full_name || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `📱 تلفن: ${custUser ? (custUser.phone || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `💳 کارت: ${custUser ? (custUser.card_number || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `🛍 محصول: ${product.name}\n` +
+          `💵 مبلغ نهایی: ${finalAmount.toLocaleString('en-US')} تومان\n` +
+          `📍 کد پیگیری: ${trackingCode}`,
+          { reply_markup: { inline_keyboard: [[{ text: '🎟 تحویل ووچر', callback_data: `buydel:${orderId}` }, { text: '❌ رد سفارش', callback_data: `buyno:${orderId}` }]] } }
+        );
+      } catch (e) { console.error('خطا در اطلاع خرید به ادمین:', e.message); }
+    }
   });
 };
