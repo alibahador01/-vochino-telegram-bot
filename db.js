@@ -759,13 +759,22 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
 
+    // cards
+    'ALTER TABLE cards ADD COLUMN IF NOT EXISTS card_number TEXT',
+
     // settings
+    'ALTER TABLE settings ADD COLUMN IF NOT EXISTS value TEXT',
     'ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
 
     // required_channels
+    'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS invite_link TEXT',
+    'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS title TEXT',
+    'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
     'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS force_join_enabled INTEGER DEFAULT 1',
 
     // products
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS name TEXT',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS min_amount NUMERIC',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS price_type TEXT DEFAULT \'toman\'',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'',
@@ -776,6 +785,8 @@ async function initDb() {
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
 
     // sell_products
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS name TEXT',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS unit_price NUMERIC',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS sample_code TEXT',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0',
@@ -783,12 +794,18 @@ async function initDb() {
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
 
     // orders
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_type TEXT',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS amount INTEGER',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'pending_delivery\'',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS voucher_code TEXT',
 
     // sell_orders
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS product_type TEXT',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS voucher_code TEXT',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'pending_review\'',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS tracking_code TEXT',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
@@ -798,6 +815,9 @@ async function initDb() {
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS reject_reason TEXT',
 
     // wallet_requests
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS type TEXT',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS amount INTEGER',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'pending\'',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS receipt_file_id TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS target_user_id TEXT',
@@ -805,13 +825,41 @@ async function initDb() {
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS reject_reason TEXT',
 
     // api_sources
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS name TEXT',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS type TEXT',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS base_url TEXT',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS api_key TEXT',
+    'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS secret_key TEXT',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS supports_products TEXT[]',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_multi INTEGER DEFAULT 0',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS ip_slot TEXT DEFAULT \'default\'',
 
+    // product_api_links (کل جدول از قبل بدون ALTER بود)
+    'ALTER TABLE product_api_links ADD COLUMN IF NOT EXISTS product_type TEXT',
+    'ALTER TABLE product_api_links ADD COLUMN IF NOT EXISTS product_key TEXT',
+    'ALTER TABLE product_api_links ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+    'ALTER TABLE product_api_links ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1',
+    'ALTER TABLE product_api_links ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
+
+    // coupons (کل جدول از قبل بدون ALTER بود)
+    'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS type TEXT',
+    'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS amount INTEGER',
+    'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS usage_limit INTEGER DEFAULT 1',
+    'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS used_count INTEGER DEFAULT 0',
+    'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP',
+    'ALTER TABLE coupons ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
+
+    // bonuses (کل جدول از قبل بدون ALTER بود)
+    'ALTER TABLE bonuses ADD COLUMN IF NOT EXISTS status TEXT',
+    'ALTER TABLE bonuses ADD COLUMN IF NOT EXISTS amount INTEGER',
+    'ALTER TABLE bonuses ADD COLUMN IF NOT EXISTS game_type TEXT',
+
     // tickets
+    'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subject TEXT',
+    'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS message TEXT',
+    'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'open\'',
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
 
@@ -822,6 +870,8 @@ async function initDb() {
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS description TEXT',
 
     // vpn_servers
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS name TEXT',
+    'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS host TEXT',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS port INTEGER',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS protocol TEXT',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
@@ -851,6 +901,7 @@ async function initDb() {
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
 
     // ai_config (جدید)
+    'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS value TEXT',
     'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()'
   ];
 
