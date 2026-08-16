@@ -12,6 +12,11 @@ const { checkAndGrantBonuses } = require('./bonusEngine');
 
 module.exports = function registerOrderAdminHandlers(bot) {
 
+  // migration خودکار داخل کد (بدون دستور دستی)
+  pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
+  pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
+  pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
+
   async function isAdminUser(id) {
     if (ADMIN_IDS.includes(Number(id))) return true;
     try { const a = await getAdmin(id); return !!a; } catch (e) { return false; }
@@ -59,8 +64,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
     const kb = {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✅ تأیید', callback_data: `wrok:${id}` }, { text: '❌ رد', callback_data: `wrno:${id}` }],
-          [{ text: '🔴 بازگشت', callback_data: 'admin_pending' }]
+          [{ text: '✅ تأیید', callback_data: `wrok:${id}` }, { text: '❌ رد', callback_data: `wrno:${id}` }]
         ]
       }
     };
@@ -88,6 +92,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
       try {
         await ctx.telegram.sendMessage(r.telegram_id, R.buildDepositReceipt({ amount: Number(r.amount), status: 'success', tracking: r.tracking_code, newBalance: after ? after.balance : 0, createdAt: new Date() }));
       } catch (e) {}
+      try { await ctx.deleteMessage(); } catch (e) {}
       return ctx.reply('✅ واریز تأیید شد و رسید برای کاربر ارسال شد.');
     }
 
@@ -97,6 +102,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
       try {
         await ctx.telegram.sendMessage(r.telegram_id, R.buildWithdrawReceipt({ amount: Number(r.amount), commission: 0, status: 'failed', tracking: r.tracking_code, createdAt: new Date(), reason: 'موجودی کیف پول کافی نیست.' }));
       } catch (e) {}
+      try { await ctx.deleteMessage(); } catch (e) {}
       return ctx.reply('❌ موجودی کاربر کافی نبود؛ درخواست به‌صورت خودکار رد شد.');
     }
     await pool.query(`UPDATE wallet_requests SET status = 'approved' WHERE id = $1`, [id]);
@@ -106,6 +112,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
     try {
       await ctx.telegram.sendMessage(r.telegram_id, R.buildWithdrawReceipt({ amount: Number(r.amount), commission: 0, net: Number(r.amount), status: 'success', tracking: r.tracking_code, card: r.card_number, newBalance: after ? after.balance : 0, createdAt: new Date() }));
     } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
     return ctx.reply('✅ برداشت تأیید شد، مبلغ از کیف کاربر کم شد و رسید ارسال شد. حالا به کارت کاربر واریز کن.');
   });
 
@@ -113,6 +120,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'wr_reject', step: 'waiting_reason', data: { id } };
     return ctx.reply('❌ دلیل رد این درخواست را بنویسید (همین متن در رسید کاربر نمایش داده می‌شود):');
   });
@@ -165,8 +173,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
     ctx.reply(msg, {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🎟 تحویل ووچر', callback_data: `buydel:${id}` }, { text: '❌ رد سفارش', callback_data: `buyno:${id}` }],
-          [{ text: '🔴 بازگشت', callback_data: 'admin_buy_pending' }]
+          [{ text: '🎟 تحویل ووچر', callback_data: `buydel:${id}` }, { text: '❌ رد سفارش', callback_data: `buyno:${id}` }]
         ]
       }
     });
@@ -176,16 +183,16 @@ module.exports = function registerOrderAdminHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return;
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'buy_deliver', step: 'waiting_code', data: { id } };
-    return ctx.reply('🎟 کد ووچر را برای این سفارش وارد کنید:', {
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'admin_cancel_flow' }]] }
-    });
+    return ctx.reply('🎟 کد ووچر را برای این سفارش وارد کنید:');
   });
 
   bot.action(/^buyno:(\d+)$/, async (ctx) => {
     if (!(await isAdminUser(ctx.from.id))) return;
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'buy_reject', step: 'waiting_reason', data: { id } };
     return ctx.reply('❌ دلیل رد این سفارش خرید را بنویسید (برای کاربر ارسال می‌شود و مبلغ به‌صورت خودکار بازگشت وجه می‌شود):');
   });
@@ -203,61 +210,56 @@ module.exports = function registerOrderAdminHandlers(bot) {
        LEFT JOIN users u ON s.telegram_id = u.telegram_id
        WHERE s.status = 'pending_review' ORDER BY s.created_at DESC LIMIT 10`);
     if (res.rows.length === 0) return ctx.reply('✅ هیچ سفارش فروش در انتظاری وجود ندارد.', backPanel);
-    const buttons = res.rows.map(r => [{
-      text: `♨️ ${r.product_name || r.product_type}\n👤 ${r.full_name || r.telegram_id}\n📍 ${r.tracking_code}`,
-      callback_data: `selopen:${r.id}`
-    }]);
-    buttons.push([{ text: '🔴 بازگشت', callback_data: 'menu_admin_panel' }]);
-    ctx.reply('♨️ **سفارش‌های فروش در انتظار بررسی:**', { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+    for (const r of res.rows) {
+      await ctx.reply(
+        `♨️ ${r.product_name || r.product_type}\n👤 ${r.full_name || r.telegram_id}\n🎟 کد: \`${r.voucher_code}\`\n📍 ${r.tracking_code}`,
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '✅ تأیید و واریز', callback_data: `selok:${r.id}` }, { text: '❌ رد', callback_data: `selno:${r.id}` }]] } }
+      );
+    }
   });
 
-  bot.action(/^selopen:(\d+)$/, async (ctx) => {
-    if (!(await isAdminUser(ctx.from.id))) return;
+  // تأیید مستقیم فروش با یک تپ: مبلغ و کارمزد به‌صورت خودکار از روی تنظیمات محصول محاسبه می‌شود
+  bot.action(/^selok:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
     const res = await pool.query(
-      `SELECT s.*, sp.name AS product_name, sp.sample_code, u.full_name, u.phone, u.card_number
-       FROM sell_orders s
-       LEFT JOIN sell_products sp ON s.product_type = sp.key
-       LEFT JOIN users u ON s.telegram_id = u.telegram_id
-       WHERE s.id = $1`, [id]);
+      `SELECT s.*, sp.name AS product_name, sp.commission_type, sp.commission_value FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key WHERE s.id = $1`, [id]);
     if (res.rows.length === 0) return ctx.reply('⚠️ سفارش یافت نشد.');
     const s = res.rows[0];
-    if (s.status !== 'pending_review') return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
-    const msg =
-      `♨️ جزئیات سفارش فروش\n\n` +
-      `👤 آیدی مشتری: ${s.telegram_id}\n` +
-      `👤 نام و نام خانوادگی: ${s.full_name || 'ثبت نشده'}\n` +
-      `📱 شماره تلفن: ${s.phone || 'ثبت نشده'}\n` +
-      `💳 شماره کارت: ${s.card_number || 'ثبت نشده'}\n` +
-      `🛍 محصول: ${s.product_name || s.product_type}\n` +
-      `🎟 کد ووچر مشتری (قابل کپی):\n\`${s.voucher_code}\`\n` +
-      (s.sample_code ? `📎 کد نمونه (قابل کپی):\n\`${s.sample_code}\`\n` : '') +
-      `📍 کد پیگیری: ${s.tracking_code}\n` +
-      `🕐 ${R.formatDateTime(s.created_at)}`;
-    ctx.reply(msg, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '💰 ثبت مبلغ و تأیید', callback_data: `selamt:${id}` }, { text: '❌ رد سفارش', callback_data: `selno:${id}` }],
-          [{ text: '🔴 بازگشت', callback_data: 'admin_sell_pending' }]
-        ]
-      }
-    });
-  });
+    if (s.status !== 'pending_review') { try { await ctx.deleteMessage(); } catch (e) {} return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.'); }
 
-  bot.action(/^selamt:(\d+)$/, async (ctx) => {
-    if (!(await isAdminUser(ctx.from.id))) return;
-    ctx.answerCbQuery();
-    const id = parseInt(ctx.match[1], 10);
-    sessions[ctx.from.id] = { flow: 'sell_approve', step: 'waiting_amount', data: { id } };
-    return ctx.reply('💰 مبلغ نهایی پرداختی به کاربر برای این فروش را به تومان وارد کنید:');
+    const amount = Number(s.amount || 0);
+    let commission = 0;
+    if (s.commission_type === 'percentage') commission = Math.round(amount * (parseFloat(s.commission_value) / 100));
+    else if (s.commission_type === 'fixed') commission = parseInt(s.commission_value, 10) || 0;
+    const received = amount - commission;
+
+    await pool.query('UPDATE sell_orders SET amount = $1, commission = $2, status = $3 WHERE id = $4', [amount, commission, 'completed', id]);
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [received, s.telegram_id]);
+    try { await logTransaction(s.telegram_id, 'sell', received, `فروش ${s.product_name || s.product_type}`); } catch (e) {}
+
+    const user = await getUser(s.telegram_id);
+    try {
+      await ctx.telegram.sendMessage(s.telegram_id, R.buildSellReceipt({
+        productName: s.product_name || s.product_type,
+        amount, commission, received,
+        status: 'success', tracking: s.tracking_code,
+        card: user ? user.card_number : null,
+        newBalance: user ? user.balance : 0,
+        createdAt: new Date()
+      }));
+    } catch (e) {}
+
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return ctx.reply(`✅ فروش تأیید شد، ${received.toLocaleString('en-US')} تومان به کیف کاربر اضافه شد و رسید ارسال شد.`);
   });
 
   bot.action(/^selno:(\d+)$/, async (ctx) => {
-    if (!(await isAdminUser(ctx.from.id))) return;
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'sell_reject', step: 'waiting_reason', data: { id } };
     return ctx.reply('❌ دلیل رد این سفارش فروش را بنویسید (برای کاربر ارسال می‌شود):');
   });
@@ -384,41 +386,6 @@ module.exports = function registerOrderAdminHandlers(bot) {
         }));
       } catch (e) {}
       return ctx.reply('❌ سفارش رد شد، مبلغ به‌صورت خودکار به کیف کاربر برگشت و رسید ناموفق ارسال شد.');
-    }
-
-    // مبلغ تأیید فروش
-    if (session.flow === 'sell_approve' && session.step === 'waiting_amount') {
-      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-      if (!amount || amount <= 0) return ctx.reply('❌ مبلغ نامعتبر.');
-      const id = session.data.id;
-      delete sessions[ctx.from.id];
-      const res = await pool.query(
-        `SELECT s.*, sp.name AS product_name, sp.commission_type, sp.commission_value FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key WHERE s.id = $1`, [id]);
-      if (res.rows.length === 0) return ctx.reply('⚠️ سفارش یافت نشد.');
-      const s = res.rows[0];
-      if (s.status !== 'pending_review') return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
-
-      let commission = 0;
-      if (s.commission_type === 'percentage') commission = Math.round(amount * (parseFloat(s.commission_value) / 100));
-      else if (s.commission_type === 'fixed') commission = parseInt(s.commission_value, 10) || 0;
-      const received = amount - commission;
-
-      await pool.query('UPDATE sell_orders SET amount = $1, commission = $2, status = $3 WHERE id = $4', [amount, commission, 'completed', id]);
-      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [received, s.telegram_id]);
-      try { await logTransaction(s.telegram_id, 'sell', received, `فروش ${s.product_name || s.product_type}`); } catch (e) {}
-
-      const user = await getUser(s.telegram_id);
-      try {
-        await ctx.telegram.sendMessage(s.telegram_id, R.buildSellReceipt({
-          productName: s.product_name || s.product_type,
-          amount, commission, received,
-          status: 'success', tracking: s.tracking_code,
-          card: user ? user.card_number : null,
-          newBalance: user ? user.balance : 0,
-          createdAt: new Date()
-        }));
-      } catch (e) {}
-      return ctx.reply('✅ فروش تأیید شد، مبلغ به کیف کاربر اضافه شد و رسید ارسال شد.');
     }
 
     // دلیل رد فروش
