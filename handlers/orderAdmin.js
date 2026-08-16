@@ -12,11 +12,6 @@ const { checkAndGrantBonuses } = require('./bonusEngine');
 
 module.exports = function registerOrderAdminHandlers(bot) {
 
-  // migration خودکار داخل کد (بدون دستور دستی)
-  pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
-  pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
-  pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
-
   async function isAdminUser(id) {
     if (ADMIN_IDS.includes(Number(id))) return true;
     try { const a = await getAdmin(id); return !!a; } catch (e) { return false; }
