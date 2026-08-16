@@ -347,6 +347,7 @@ module.exports = function registerWalletHandlers(bot) {
         newBalance: userAfter ? userAfter.balance : 0, createdAt: new Date()
       }));
     } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
     return ctx.reply(`✅ واریز ${Number(req.amount).toLocaleString('en-US')} تومانی تأیید و رسید برای کاربر ارسال شد.`);
   });
 
@@ -354,6 +355,7 @@ module.exports = function registerWalletHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'dep_reject', step: 'waiting_reason', data: { id } };
     return ctx.reply('❌ دلیل رد این واریز را بنویسید (همین متن برای کاربر ارسال می‌شود):');
   });
