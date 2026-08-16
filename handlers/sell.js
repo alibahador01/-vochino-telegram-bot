@@ -90,9 +90,16 @@ module.exports = function registerSellHandlers(bot) {
         { parse_mode: 'Markdown' }
       );
 
-      // برای ادمین: کد ووچر مشتری و کد نمونه هر دو قابل کپی (داخل بک‌تیک)
+      // برای ادمین: یک پیام واحد با مبلغ محاسبه‌شده (طبق کارمزد تنظیم‌شده روی محصول) و دکمه تأیید/رد مستقیم
       const ids = await adminIdsList();
       const product = await getSellProductByKey(session.data.productType);
+      let commission = 0;
+      if (product) {
+        if (product.commission_type === 'percentage') commission = Math.round(estimatedAmount * (parseFloat(product.commission_value) / 100));
+        else if (product.commission_type === 'fixed') commission = parseInt(product.commission_value, 10) || 0;
+      }
+      const payoutAmount = estimatedAmount - commission;
+
       for (const id of ids) {
         try {
           await ctx.telegram.sendMessage(id,
@@ -100,11 +107,11 @@ module.exports = function registerSellHandlers(bot) {
             `👤 کاربر: ${ctx.from.id}\n` +
             `🛍 محصول: ${session.data.productName}\n` +
             `🎟 کد ووچر مشتری (قابل کپی):\n\`${voucherCode}\`\n` +
-            (product && product.sample_code ? `📎 کد نمونه (قابل کپی):\n\`${product.sample_code}\`\n` : '') +
+            `💰 مبلغ پیشنهادی پس از کسر کارمزد: ${payoutAmount.toLocaleString('en-US')} تومان\n` +
             `📍 کد پیگیری: ${trackingCode}`,
             {
               parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `selopen:${orderId}` }]] }
+              reply_markup: { inline_keyboard: [[{ text: '✅ تأیید و واریز', callback_data: `selok:${orderId}` }, { text: '❌ رد', callback_data: `selno:${orderId}` }]] }
             }
           );
         } catch (e) { console.error('خطا در اطلاع فروش به ادمین:', e.message); }
