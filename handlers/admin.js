@@ -34,13 +34,15 @@ module.exports = function registerAdminHandlers(bot) {
     const pendingWallet = await pool.query("SELECT COUNT(*)::int AS c FROM wallet_requests WHERE status = 'pending'");
     const pendingSell = await pool.query("SELECT COUNT(*)::int AS c FROM sell_orders WHERE status = 'pending_review'");
     const pendingBuy = await pool.query("SELECT COUNT(*)::int AS c FROM orders WHERE status = 'pending_delivery'");
+    const pendingBonusWd = await pool.query("SELECT COUNT(*)::int AS c FROM bonus_withdrawals WHERE status = 'pending'");
 
     ctx.reply(
       '👑 **پنل مدیریت ووچینو**\n\n' +
       '📥 **درخواست‌های در انتظار:**\n' +
       '   🔹 کیف پول: ' + pendingWallet.rows[0].c + '\n' +
       '   🔹 فروش: ' + pendingSell.rows[0].c + '\n' +
-      '   🔹 خرید: ' + pendingBuy.rows[0].c + '\n\n' +
+      '   🔹 خرید: ' + pendingBuy.rows[0].c + '\n' +
+      '   🔹 برداشت بونوس: ' + pendingBonusWd.rows[0].c + '\n\n' +
       '👇 لطفاً یکی از گزینه‌های زیر را انتخاب کنید:',
       {
         parse_mode: 'Markdown',
@@ -279,21 +281,32 @@ module.exports = function registerAdminHandlers(bot) {
     const gameMultiplier = await getSetting('gameMultiplier', '2');
     const minPurchase = await getSetting('minPurchaseForGame', '0');
     const gameEnabled = await getSetting('disableBonusGame', 'false') === 'false';
+    const gameMinBet = await getSetting('game_min_bet', '10000');
+    const bonusMinWithdraw = await getSetting('bonus_min_withdraw', '200000');
+    const pendingBonusWithdrawals = await pool.query("SELECT COUNT(*)::int AS c FROM bonus_withdrawals WHERE status = 'pending'");
 
     let msg = '🎮 **تنظیمات بازی**\n\n';
     msg += `✅ بازی فعال: ${gameEnabled ? 'بله' : 'خیر'}\n`;
+    msg += `💰 حداقل مبلغ شروع بازی: ${Number(gameMinBet).toLocaleString()} تومان\n`;
     msg += `🎯 درصد برد بونوس: ${winRateBonus}%\n`;
     msg += `✖️ ضریب بازی: ${gameMultiplier}\n`;
     msg += `🛍 حداقل خرید برای فعال‌سازی: ${Number(minPurchase).toLocaleString()} تومان\n`;
+    msg += `🎁 حداقل برداشت بونوس به کیف پول: ${Number(bonusMinWithdraw).toLocaleString()} تومان\n`;
+    if (pendingBonusWithdrawals.rows[0].c > 0) {
+      msg += `\n📥 درخواست‌های برداشت بونوس در انتظار: ${pendingBonusWithdrawals.rows[0].c}\n`;
+    }
 
     ctx.reply(msg, {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [{ text: '✅ فعال/غیرفعال کردن بازی', callback_data: 'admin_toggle_game' }],
+          [{ text: '💰 حداقل مبلغ شروع بازی', callback_data: 'admin_set_game_min_bet' }],
           [{ text: '🎯 تغییر درصد برد بونوس', callback_data: 'admin_set_win_rate' }],
           [{ text: '✖️ تغییر ضریب بازی', callback_data: 'admin_set_game_multiplier' }],
           [{ text: '🛍 حداقل خرید برای بازی', callback_data: 'admin_set_min_purchase' }],
+          [{ text: '🎁 حداقل برداشت بونوس', callback_data: 'admin_set_bonus_min_withdraw' }],
+          [{ text: '📥 درخواست‌های برداشت بونوس', callback_data: 'admin_bonus_withdrawals' }],
           [{ text: '🔙 بازگشت', callback_data: 'menu_admin_panel' }]
         ]
       }
@@ -327,6 +340,77 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'admin_set_min_purchase', step: 'waiting_value', lang: 'fa' };
     ctx.reply('🛍 حداقل مبلغ خرید (تومان) برای فعال‌سازی بازی را وارد کنید:');
+  });
+
+  bot.action('admin_set_game_min_bet', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'admin_set_game_min_bet', step: 'waiting_value', lang: 'fa' };
+    ctx.reply('💰 حداقل مبلغ شروع بازی (تومان) را وارد کنید:');
+  });
+
+  bot.action('admin_set_bonus_min_withdraw', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'admin_set_bonus_min_withdraw', step: 'waiting_value', lang: 'fa' };
+    ctx.reply('🎁 حداقل مبلغ برداشت بونوس به کیف پول (تومان) را وارد کنید:');
+  });
+
+  // ============================================
+  // درخواست‌های برداشت بونوس
+  // ============================================
+  bot.action('admin_bonus_withdrawals', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    const pending = (await pool.query("SELECT * FROM bonus_withdrawals WHERE status='pending' ORDER BY id ASC")).rows;
+    if (pending.length === 0) return ctx.reply('✅ درخواست برداشت بونوسی در انتظار نیست.', {
+      reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'admin_game_settings' }]] }
+    });
+    for (const w of pending) {
+      const u = await getUser(w.telegram_id);
+      const msg = `🧩 درخواست برداشت بونوس\n👤 ${u?.full_name || '---'} (${w.telegram_id})\n💰 مبلغ: ${Number(w.amount).toLocaleString()} تومان\n💎 موجودی بونوس فعلی: ${Number(u?.bonus_balance || 0).toLocaleString()} تومان`;
+      const btns = [[
+        { text: '✅ تایید', callback_data: 'admin_bonus_wd_approve_' + w.id },
+        { text: '❌ رد', callback_data: 'admin_bonus_wd_reject_' + w.id }
+      ]];
+      ctx.reply(msg, { reply_markup: { inline_keyboard: btns } });
+    }
+  });
+
+  bot.action(/^admin_bonus_wd_approve_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const reqId = ctx.match[1];
+    const upd = await pool.query("UPDATE bonus_withdrawals SET status='approved', processed_at=NOW() WHERE id=$1 AND status='pending' RETURNING *", [reqId]);
+    if (upd.rows.length === 0) { ctx.answerCbQuery('⛔ قبلاً پردازش شده'); return; }
+    const req = upd.rows[0];
+    const user = await getUser(req.telegram_id);
+    if (!user || Number(user.bonus_balance) < req.amount) {
+      await pool.query("UPDATE bonus_withdrawals SET status='rejected' WHERE id=$1", [req.id]);
+      ctx.telegram.sendMessage(req.telegram_id, `❌ درخواست برداشت بونوس شما به دلیل موجودی ناکافی رد شد.`).catch(() => {});
+      ctx.answerCbQuery('❌ موجودی کافی نیست');
+      return ctx.reply('❌ موجودی بونوس کاربر کافی نبود؛ درخواست رد شد.');
+    }
+    await pool.query('UPDATE users SET bonus_balance = bonus_balance - $1, balance = balance + $1 WHERE telegram_id = $2', [req.amount, req.telegram_id]);
+    try {
+      await pool.query(
+        'INSERT INTO transaction_logs (telegram_id, type, amount, balance_before, balance_after, description, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())',
+        [req.telegram_id, 'transfer', req.amount, Number(user.balance), Number(user.balance) + req.amount, 'انتقال بونوس به کیف پول']
+      );
+    } catch (e) {}
+    ctx.telegram.sendMessage(req.telegram_id, `✅ درخواست برداشت بونوس شما تأیید شد.\n💰 ${Number(req.amount).toLocaleString()} تومان به کیف پول شما منتقل شد.`).catch(() => {});
+    ctx.answerCbQuery('✅ تأیید شد');
+    ctx.reply('✅ تأیید شد و مبلغ به کیف پول کاربر منتقل شد.');
+  });
+
+  bot.action(/^admin_bonus_wd_reject_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const reqId = ctx.match[1];
+    const upd = await pool.query("UPDATE bonus_withdrawals SET status='rejected', processed_at=NOW() WHERE id=$1 AND status='pending' RETURNING *", [reqId]);
+    if (upd.rows.length === 0) { ctx.answerCbQuery('⛔ قبلاً پردازش شده'); return; }
+    const req = upd.rows[0];
+    ctx.telegram.sendMessage(req.telegram_id, `❌ درخواست برداشت بونوس شما رد شد.`).catch(() => {});
+    ctx.answerCbQuery('❌ رد شد');
+    ctx.reply('❌ رد شد.');
   });
 
   // ============================================
@@ -1686,6 +1770,22 @@ module.exports = function registerAdminHandlers(bot) {
       await setSetting('minPurchaseForGame', String(val));
       delete sessions[ctx.from.id];
       ctx.reply('✅ حداقل خرید برای بازی تنظیم شد.');
+      return;
+    }
+    if (session.flow === 'admin_set_game_min_bet' && session.step === 'waiting_value') {
+      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
+      if (isNaN(val) || val < 0) return ctx.reply('❌ عدد نامعتبر.');
+      await setSetting('game_min_bet', String(val));
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ حداقل مبلغ شروع بازی تنظیم شد.');
+      return;
+    }
+    if (session.flow === 'admin_set_bonus_min_withdraw' && session.step === 'waiting_value') {
+      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
+      if (isNaN(val) || val < 0) return ctx.reply('❌ عدد نامعتبر.');
+      await setSetting('bonus_min_withdraw', String(val));
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ حداقل برداشت بونوس تنظیم شد.');
       return;
     }
     if (session.flow === 'admin_set_referral_bonus' && session.step === 'waiting_value') {
