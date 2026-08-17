@@ -24,6 +24,7 @@ module.exports = function registerAdminBonusHandlers(bot) {
     const refGift = await getSetting('bonus_referral_gift', '0');
     const refPercentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
     const refPercent = await getSetting('bonus_referral_percent', '0');
+    const refWagerMultiplier = await getSetting('referral_wagering_multiplier', '1');
 
     let msg = '🎁 **تنظیمات بونوس‌ها**\n\n';
     msg += `🛍 **بونوس اولین خرید**\n`;
@@ -36,7 +37,8 @@ module.exports = function registerAdminBonusHandlers(bot) {
     msg += `👥 **بونوس دعوت (مبلغ ثابت)**\n`;
     msg += `✅ فعال: ${refBonusActive ? 'بله' : 'خیر'}\n`;
     msg += `🔢 هر ${refThreshold} دعوت\n`;
-    msg += `🎁 مبلغ هدیه: ${Number(refGift).toLocaleString()} تومان\n\n`;
+    msg += `🎁 مبلغ هدیه: ${Number(refGift).toLocaleString()} تومان\n`;
+    msg += `🔄 ضریب شرط گردش: ${refWagerMultiplier}×\n\n`;
     msg += `♾️ **طرح سود مادام‌العمر (درصدی)**\n`;
     msg += `✅ فعال: ${refPercentActive ? 'بله' : 'خیر'}\n`;
     msg += `📈 درصد سود: ${refPercent}٪`;
@@ -142,12 +144,18 @@ module.exports = function registerAdminBonusHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'admin_bonus_ref', step: 'choose', lang: 'fa' };
-    ctx.reply('👥 **بونوس دعوت**\n\nگزینه مورد نظر:', {
+    const refWagerMultiplier = await getSetting('referral_wagering_multiplier', '1');
+    ctx.reply(
+      '👥 **بونوس دعوت**\n\n' +
+      `🔄 ضریب شرط گردش فعلی: ${refWagerMultiplier}×\n` +
+      'ℹ️ کاربر باید مبلغ بونوس دعوت را (ضربدر این ضریب) در بازی‌ها شرط‌بندی کند تا قابل برداشت شود.\n\n' +
+      'گزینه مورد نظر:', {
       reply_markup: {
         inline_keyboard: [
           [{ text: '🔄 فعال/غیرفعال', callback_data: 'bonus_ref_toggle' }],
           [{ text: '🔢 تعداد دعوت لازم', callback_data: 'bonus_ref_set_threshold' }],
           [{ text: '🎁 مبلغ هدیه', callback_data: 'bonus_ref_set_gift' }],
+          [{ text: '🔄 ضریب شرط گردش', callback_data: 'bonus_ref_set_wager' }],
           [{ text: '🔙 برگشت', callback_data: 'admin_bonus_settings' }]
         ]
       }
@@ -179,6 +187,14 @@ module.exports = function registerAdminBonusHandlers(bot) {
     try { await ctx.deleteMessage(); } catch (e) {}
     sessions[ctx.from.id] = { flow: 'admin_bonus_ref_gift', step: 'waiting_value' };
     ctx.reply('🎁 مبلغ هدیه (تومان) را وارد کنید:');
+  });
+
+  bot.action('bonus_ref_set_wager', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'admin_bonus_ref_wager', step: 'waiting_value' };
+    ctx.reply('🔄 ضریب شرط گردش بونوس دعوت را وارد کنید (مثلاً 1 یعنی باید معادل مبلغ بونوس شرط‌بندی شود):');
   });
 
   // ----------------- طرح سود مادام‌العمر (درصدی) -----------------
@@ -263,6 +279,14 @@ module.exports = function registerAdminBonusHandlers(bot) {
       await setSetting('bonus_referral_gift', String(val));
       delete sessions[ctx.from.id];
       ctx.reply('✅ مبلغ هدیه تنظیم شد.');
+      return;
+    }
+    if (session.flow === 'admin_bonus_ref_wager' && session.step === 'waiting_value') {
+      const val = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
+      if (isNaN(val) || val <= 0) return ctx.reply('❌ عدد نامعتبر.');
+      await setSetting('referral_wagering_multiplier', String(val));
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ ضریب شرط گردش بونوس دعوت تنظیم شد.');
       return;
     }
     if (session.flow === 'admin_bonus_ref_percent' && session.step === 'waiting_value') {
