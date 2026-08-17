@@ -1001,6 +1001,49 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply('🎁 **هدیه به کاربران**\n\nلطفاً آیدی کاربر(ها) را وارد کنید (با خط تیره جدا کنید، مثال:\n`123456-789012`)\n\n⚠️ می‌توانید چند کاربر را همزمان هدیه دهید.');
   });
 
+  async function sendGiftToUsers(ctx, target) {
+    const session = sessions[ctx.from.id];
+    if (!session || session.flow !== 'admin_gift' || session.step !== 'waiting_target') return;
+    const amount = session.data.amount;
+    const userIds = session.userIds;
+    const column = target === 'bonus' ? 'bonus_balance' : 'balance';
+    const targetLabel = target === 'bonus' ? 'موجودی بونوس' : 'کیف پول';
+    let success = 0;
+    for (const id of userIds) {
+      try {
+        await pool.query(`UPDATE users SET ${column} = ${column} + $1 WHERE telegram_id = $2`, [amount, id]);
+        success++;
+        const user = await getUserById(id);
+        if (user) {
+          const giftMsg =
+            '✨ یه سورپرایز کوچک برای شما...\n\n' +
+            `🎁 هدیه با موفقیت به ${targetLabel} اضافه شد.\n(${amount.toLocaleString()} تومان)\n\n` +
+            '🎗این هدیه از طرف مدیریت ووچینو⁰۱\nبه پاس همراهی شما تقدیم شد.\n\n' +
+            'گاهی برای شروع یک همراهی خوب،\nلازم نیست حرف زیادی بزنیم،،،\nکافیه یک قدم کوچیک برداریم💎\n\n' +
+            '👑امیدواریم وقتی نوبت خرید ووچر رسید،\nووچینو⁰۱ یکی از اولین انتخاب‌های شما باشد.\n\n' +
+            '🩵راستی رفیق جان\nامیدوارم امروز شروعِ شانسای خوبت باشه🤲\nپرسود باشید همیشه...💸';
+          await sendMessageToUser(bot, id, giftMsg);
+        }
+      } catch (e) { console.log(e); }
+    }
+    delete sessions[ctx.from.id];
+    ctx.reply(`✅ هدیه (${targetLabel}) به ${success} نفر ارسال شد.`);
+  }
+
+  bot.action('gift_target_balance', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return sendGiftToUsers(ctx, 'balance');
+  });
+
+  bot.action('gift_target_bonus', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return sendGiftToUsers(ctx, 'bonus');
+  });
+
   // ============================================
   // سفارشات خرید در انتظار
   // ============================================
@@ -1475,28 +1518,16 @@ module.exports = function registerAdminHandlers(bot) {
       if (session.step === 'waiting_amount') {
         const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
         if (!amount || amount <= 0) return ctx.reply('❌ مبلغ نامعتبر.');
-        const userIds = session.userIds;
-        let success = 0;
-        for (const id of userIds) {
-          try {
-            await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, id]);
-            success++;
-            const user = await getUserById(id);
-            if (user) {
-              const giftMsg = 
-                '✨ یه سورپرایز کوچک برای شما...\n\n' +
-                `🎁 هدیه با موفقیت به کیف پولتان اضافه شد.\n(${amount.toLocaleString()} تومان)\n\n` +
-                '🎗این هدیه از طرف مدیریت ووچینو⁰۱\nبه پاس همراهی شما تقدیم شد.\n\n' +
-                'گاهی برای شروع یک همراهی خوب،\nلازم نیست حرف زیادی بزنیم،،،\nکافیه یک قدم کوچیک برداریم💎\n\n' +
-                '👑امیدواریم وقتی نوبت خرید ووچر رسید،\nووچینو⁰۱ یکی از اولین انتخاب‌های شما باشد.\n\n' +
-                '🩵راستی رفیق جان\nامیدوارم امروز شروعِ شانسای خوبت باشه🤲\nپرسود باشید همیشه...💸';
-              await sendMessageToUser(bot, id, giftMsg);
-            }
-          } catch (e) { console.log(e); }
-        }
-        delete sessions[ctx.from.id];
-        ctx.reply(`✅ هدیه به ${success} نفر ارسال شد.`);
-        return;
+        session.data.amount = amount;
+        session.step = 'waiting_target';
+        return ctx.reply('🎯 هدیه به کدام موجودی واریز شود؟', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '💰 موجودی اصلی (کیف پول)', callback_data: 'gift_target_balance' }],
+              [{ text: '🎁 موجودی بونوس', callback_data: 'gift_target_bonus' }]
+            ]
+          }
+        });
       }
     }
 
