@@ -23,9 +23,9 @@ function maskCard(card) {
 
 function formatDateTime(d) {
   try {
-    return new Date(d).toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' });
+    return new Date(d).toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Tehran' });
   } catch (e) {
-    return new Date(d).toLocaleString();
+    return new Date(d).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' });
   }
 }
 
