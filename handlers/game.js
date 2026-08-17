@@ -6,6 +6,21 @@ const { ADMIN_IDS } = require('../constants');
 
 const GAME_HEADER = '╭─ ✦ ─╮\n👑 ووچینو⁰¹\n╰─ ✦ ─╯\n\n';
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// نگاشت بازی‌ها به ایموجی متد sendDice تلگرام برای پخش انیمیشن زنده
+// dice→🎲 dart→🎯 bowling→🎳 penalty→⚽ wheel→🎰 (نزدیک‌ترین ایموجی‌های رسمی تلگرام)
+const DICE_EMOJI = {
+  dice: '🎲',
+  dart: '🎯',
+  bowling: '🎳',
+  penalty: '⚽',
+  wheel: '🎰'
+};
+const DICE_ANIMATION_DELAY_MS = 4000;
+
 function faNum(n) {
   return Number(n || 0).toLocaleString('en-US');
 }
@@ -157,9 +172,37 @@ function registerGameHandlers(bot) {
       return ctx.reply(gameMessages.insufficientBonus);
     }
 
-    // رزرو مبلغ بازی از موجودی بونوس (بازی ابتدا کسر می‌شود)
-    await pool.query('UPDATE users SET bonus_balance = bonus_balance - $1 WHERE telegram_id = $2', [betAmount, String(userId)]);
+    // رزرو مبلغ بازی از موجودی بونوس (بازی ابتدا کسر می‌شود) + پیشرفت شرط گردش بونوس دعوت
+    await pool.query(
+      'UPDATE users SET bonus_balance = bonus_balance - $1, referral_wagering_remaining = GREATEST(referral_wagering_remaining - $1, 0) WHERE telegram_id = $2',
+      [betAmount, String(userId)]
+    );
 
+    // ----------------- انیمیشن زنده بازی -----------------
+    if (gameKey === 'rock_paper_scissors') {
+      const rpsFrames = ['✊ سنگ', '✋ کاغذ', '✌️ قیچی'];
+      const animMsg = await ctx.reply(
+        GAME_HEADER + `${gameMessages.gameNames[gameKey]}\n\n🎮 در حال بازی...\n\n${rpsFrames[0]}`
+      );
+      for (let i = 1; i <= 4; i++) {
+        await sleep(600);
+        try {
+          await ctx.telegram.editMessageText(
+            animMsg.chat.id,
+            animMsg.message_id,
+            undefined,
+            GAME_HEADER + `${gameMessages.gameNames[gameKey]}\n\n🎮 در حال بازی...\n\n${rpsFrames[i % rpsFrames.length]}`
+          );
+        } catch (e) {}
+      }
+      await sleep(400);
+    } else {
+      const emoji = DICE_EMOJI[gameKey] || '🎲';
+      try { await ctx.replyWithDice({ emoji }); } catch (e) {}
+      await sleep(DICE_ANIMATION_DELAY_MS);
+    }
+
+    // ----------------- منطق برد/باخت (بعد از پایان انیمیشن) -----------------
     const winRate = parseInt(await getSetting('winRateBonus', '50'), 10);
     const multiplier = parseFloat(await getSetting('gameMultiplier', '2'));
     const roll = Math.random() * 100;
@@ -246,13 +289,22 @@ function registerGameHandlers(bot) {
     }
 
     const minWithdraw = parseInt(await getSetting('bonus_min_withdraw', '200000'), 10);
+    const bonusBalance = Number(user.bonus_balance || 0);
+    const lockedWager = Number(user.referral_wagering_remaining || 0);
+    const withdrawable = Math.max(bonusBalance - lockedWager, 0);
+
     sessions[userId] = { flow: 'bonus_withdraw', step: 'waiting_amount' };
-    return ctx.reply(
+
+    let msg =
       GAME_HEADER +
       `🎁 برداشت بونوس\n` +
       `💰 مبلغ بونوس موردنظر را وارد کنید:\n` +
-      `📌 حداقل برداشت: ${faNum(minWithdraw)} تومان`
-    );
+      `📌 حداقل برداشت: ${faNum(minWithdraw)} تومان\n` +
+      `✅ موجودی قابل برداشت: ${faNum(withdrawable)} تومان`;
+    if (lockedWager > 0) {
+      msg += `\n🔒 مبلغ قفل‌شده (نیازمند شرط گردش در بازی‌ها): ${faNum(lockedWager)} تومان`;
+    }
+    return ctx.reply(msg);
   });
 
   // ----------------- پردازش ورودی‌های متنی (مبلغ بازی / مبلغ برداشت) -----------------
@@ -318,6 +370,9 @@ function registerGameHandlers(bot) {
 
       const user = await getUser(userId);
       const bonusBalance = Number(user.bonus_balance || 0);
+      const lockedWager = Number(user.referral_wagering_remaining || 0);
+      const withdrawable = Math.max(bonusBalance - lockedWager, 0);
+
       if (val > bonusBalance) {
         delete sessions[userId];
         return ctx.reply(
@@ -326,6 +381,18 @@ function registerGameHandlers(bot) {
           `💰 مبلغ واردشده: ${faNum(val)} تومان\n` +
           `💎 موجودی بونوس شما: ${faNum(bonusBalance)} تومان\n` +
           `🎁 موجودی بونوس شما کمتر از مبلغ درخواستی است.`
+        );
+      }
+
+      if (val > withdrawable) {
+        delete sessions[userId];
+        return ctx.reply(
+          GAME_HEADER +
+          `⚠️ امکان برداشت وجود ندارد.\n` +
+          `💰 مبلغ واردشده: ${faNum(val)} تومان\n` +
+          `✅ موجودی قابل برداشت: ${faNum(withdrawable)} تومان\n` +
+          `🔒 مبلغ قفل‌شده (نیازمند شرط گردش): ${faNum(lockedWager)} تومان\n` +
+          `📌 بخشی از بونوس شما از دعوت دوستان است و باید ابتدا در بخش «🎮 بازی‌ها» چرخانده شود.`
         );
       }
 
