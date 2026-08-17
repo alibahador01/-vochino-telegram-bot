@@ -112,13 +112,13 @@ module.exports = function registerWalletHandlers(bot) {
     const st = statusInfo(t.status);
     const amount = t.amount.toLocaleString('en-US');
     let firstLine;
-    if (st.label === 'رد شده') firstLine = '🔴 سفارش رد شده';
+    if (st.label === 'رد شده') firstLine = '🔴 رد شده';
     else if (t.kind === 'buy') firstLine = `🟢 خرید ${t.productName || ''}`.trim();
     else if (t.kind === 'sell') firstLine = `🔵 فروش ${t.productName || ''}`.trim();
-    else if (t.kind === 'withdraw') firstLine = '🟠 برداشت موجودی';
-    else if (t.kind === 'deposit') firstLine = '🟡 شارژ موجودی';
+    else if (t.kind === 'withdraw') firstLine = '🟠 برداشت';
+    else if (t.kind === 'deposit') firstLine = '🟡 شارژ';
     else firstLine = `⚪️ ${t.kind}`;
-    return `${firstLine}\n💰 ${amount} تومان\n📍 ${t.tracking_code || '-'}`;
+    return `${firstLine} | ${amount} تومان`;
   }
 
   bot.action('wallet_history', async (ctx) => {
@@ -163,7 +163,7 @@ module.exports = function registerWalletHandlers(bot) {
       return ctx.reply(R.buildBuyReceipt({
         productName: t.product_name || t.product_type,
         base: paid - commission, commission, paid,
-        status: state, tracking: t.tracking_code,
+        status: state, tracking: null,
         card: user ? user.card_number : null,
         voucherCode: t.delivered_code || t.voucher_code,
         voucherHash: t.provider_tx_id,
@@ -186,7 +186,7 @@ module.exports = function registerWalletHandlers(bot) {
       return ctx.reply(R.buildSellReceipt({
         productName: t.product_name || t.product_type,
         amount, commission, received: amount - commission,
-        status: state, tracking: t.tracking_code,
+        status: state, tracking: null,
         card: user ? user.card_number : null,
         newBalance: user ? user.balance : 0,
         createdAt: t.created_at,
@@ -206,13 +206,13 @@ module.exports = function registerWalletHandlers(bot) {
       if (t.type === 'withdraw') {
         return ctx.reply(R.buildWithdrawReceipt({
           amount, commission: 0, net: amount,
-          status: state, tracking: t.tracking_code,
+          status: state, tracking: null,
           card: t.card_number, newBalance: user ? user.balance : 0,
           createdAt: t.created_at, reason: t.reject_reason
         }));
       }
       return ctx.reply(R.buildDepositReceipt({
-        amount, status: state, tracking: t.tracking_code,
+        amount, status: state, tracking: null,
         newBalance: user ? user.balance : 0,
         createdAt: t.created_at, reason: t.reject_reason
       }));
@@ -245,13 +245,32 @@ module.exports = function registerWalletHandlers(bot) {
     cards.forEach(c => { msg += `💳 ${c.number} (${c.owner})\n`; });
 
     const user = await getUser(ctx.from.id);
-    sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_amount', lang: (user && user.language) || 'fa' };
+    const myCards = await getUserCards(ctx.from.id);
 
-    return ctx.reply(msg, { parse_mode: 'Markdown' })
-      .then(() => {
-        return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
-      })
-      .catch(console.error);
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
+
+    if (myCards.length > 1) {
+      sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_source_card', lang: (user && user.language) || 'fa', data: {} };
+      const buttons = myCards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `dcard:${i}` }]);
+      return ctx.reply('واریز را از کدام کارت خودتان انجام می‌دهید؟', { reply_markup: { inline_keyboard: buttons } });
+    }
+
+    sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { sourceCard: myCards[0] ? myCards[0].card_number : null } };
+    return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
+  });
+
+  bot.action(/^dcard:(\d+)$/, async (ctx) => {
+    ctx.answerCbQuery();
+    const session = sessions[ctx.from.id];
+    if (!session || session.flow !== 'deposit_card' || session.step !== 'waiting_source_card') return;
+    const myCards = await getUserCards(ctx.from.id);
+    const idx = parseInt(ctx.match[1], 10);
+    const card = myCards[idx];
+    if (!card) return ctx.reply('❌ کارت یافت نشد. دوباره تلاش کنید.');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    session.data.sourceCard = card.card_number;
+    session.step = 'waiting_amount';
+    return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
   });
 
   bot.action('deposit_crypto', async (ctx) => {
@@ -311,6 +330,14 @@ module.exports = function registerWalletHandlers(bot) {
   bot.action('wallet_gold_verify', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    if (user && user.verification_status === 'gold') {
+      return ctx.reply('✅ شما قبلاً احراز هویت طلایی شده‌اید.');
+    }
+    const pendingReq = await pool.query(`SELECT id FROM wallet_requests WHERE telegram_id = $1 AND type = 'gold_verify' AND status = 'pending'`, [String(ctx.from.id)]);
+    if (pendingReq.rows.length > 0) {
+      return ctx.reply('🟡 درخواست احراز هویت شما در حال بررسی است. لطفاً صبر کنید.');
+    }
     const msg =
       R.HEADER +
       `💎 احراز هویت طلایی | Vochino⁰¹\n` +
@@ -496,7 +523,7 @@ module.exports = function registerWalletHandlers(bot) {
         return ctx.reply('❌ مبلغ نامعتبر. یک عدد وارد کنید:');
       }
       session.amount = amount;
-      session.step = 'waiting_receipt';
+      session.step = 'waiting_photo';
       return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
     }
 
@@ -531,8 +558,16 @@ module.exports = function registerWalletHandlers(bot) {
       if (!/^\d{16}$/.test(card)) {
         return ctx.reply('❌ شماره کارت نامعتبر. ۱۶ رقم وارد کنید:');
       }
-      await pool.query('UPDATE users SET card_number = $1 WHERE telegram_id = $2', [card, String(ctx.from.id)]);
-      try { await pool.query('INSERT INTO cards (telegram_id, card_number) VALUES ($1, $2)', [String(ctx.from.id), card]); } catch (e) {}
+      const myCards = await getUserCards(ctx.from.id);
+      if (myCards.some(c => c.card_number === card)) {
+        return ctx.reply('❌ این شماره کارت قبلاً برای شما ثبت شده است. یک کارت دیگر وارد کنید:');
+      }
+      const user = await getUser(ctx.from.id);
+      if (user && user.card_number) {
+        await pool.query('INSERT INTO cards (telegram_id, card_number) VALUES ($1, $2)', [String(ctx.from.id), card]);
+      } else {
+        await pool.query('UPDATE users SET card_number = $1 WHERE telegram_id = $2', [card, String(ctx.from.id)]);
+      }
       delete sessions[ctx.from.id];
       ctx.reply('کارت جدید با موفقیت ثبت شد ✅');
       return;
@@ -551,12 +586,13 @@ module.exports = function registerWalletHandlers(bot) {
 
       if (session.flow === 'deposit_card') {
         const amount = session.amount;
+        const sourceCard = (session.data && session.data.sourceCard) || null;
         const user = await getUser(ctx.from.id);
         const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
         const ins = await pool.query(
-          `INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code)
-           VALUES ($1, 'deposit', $2, $3, 'pending', NOW(), $4) RETURNING id`,
-          [String(ctx.from.id), amount, fileId, trackCode]
+          `INSERT INTO wallet_requests (telegram_id, type, amount, card_number, receipt_file_id, status, created_at, tracking_code)
+           VALUES ($1, 'deposit', $2, $3, $4, 'pending', NOW(), $5) RETURNING id`,
+          [String(ctx.from.id), amount, sourceCard, fileId, trackCode]
         );
         const reqId = ins.rows[0].id;
 
@@ -568,7 +604,7 @@ module.exports = function registerWalletHandlers(bot) {
           `📋 تأیید دریافت رسید\n\n` +
           `💰 مبلغ شارژ: ${amount.toLocaleString('en-US')} تومان\n` +
           `👤 نام و نام خانوادگی: ${user ? (user.full_name || 'ثبت نشده') : 'ثبت نشده'}\n` +
-          `💳 شماره کارت: ${user ? (user.card_number || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `💳 شماره کارت: ${sourceCard || (user ? (user.card_number || 'ثبت نشده') : 'ثبت نشده')}\n` +
           `🔖 کد پیگیری: ${trackCode}\n\n` +
           `✅ رسید شما ثبت و به واحد مالی ارسال شد.\n` +
           `⏳ پس از بررسی، نتیجه در همین ربات اعلام می‌شود.`,
@@ -582,7 +618,7 @@ module.exports = function registerWalletHandlers(bot) {
           `👤 کاربر: ${ctx.from.id}\n` +
           `👤 نام: ${user ? (user.full_name || '---') : '---'}\n` +
           `📱 تلفن: ${user ? (user.phone || '---') : '---'}\n` +
-          `💳 کارت: ${user ? (user.card_number || '---') : '---'}\n` +
+          `💳 کارت: ${sourceCard || (user ? (user.card_number || '---') : '---')}\n` +
           `🔖 کد سفارش: ${trackCode}\n` +
           `💰 مبلغ: ${amount.toLocaleString('en-US')} تومان\n` +
           `🧾 نوع تراکنش: واریز کارت‌به‌کارت\n` +
