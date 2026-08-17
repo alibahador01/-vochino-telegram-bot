@@ -6,7 +6,7 @@ const {
   getAllApiSources, getApiSourceById, addApiSource, updateApiSource, deleteApiSource,
   getProductApiLinks, getAllProductApiLinks, addProductApiLink, updateProductApiLink, removeProductApiLink,
   getAllBotTexts, searchBotTexts, updateBotText, getBotTextCategories,
-  getProducts, getSellProducts, getProductByKey, getSellProductByKey,
+  getProducts, getSellProducts, getProductByKey, getSellProductByKey, updateProduct, updateSellProduct,
   addCoupon, deleteCoupon, addChannel, updateChannel, deleteChannel, getRequiredChannels,
   getTransactionLogs, logTransaction, getUserStats
 } = require('../db');
