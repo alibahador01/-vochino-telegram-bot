@@ -804,6 +804,7 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_count INTEGER DEFAULT 0',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_wagering_remaining INTEGER DEFAULT 0',
 
     // settings
     'ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
@@ -948,6 +949,7 @@ async function initDb() {
         ('bonus_referral_gift', '0', NOW()),
         ('bonus_referral_percent_active', 'false', NOW()),
         ('bonus_referral_percent', '0', NOW()),
+        ('referral_wagering_multiplier', '1', NOW()),
         ('gold_daily_limit', '10000000', NOW()),
         ('bonus_referral_activated_at', NULL, NOW())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
