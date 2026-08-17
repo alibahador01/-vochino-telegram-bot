@@ -1,279 +1,126 @@
-// handlers/adminBonus.js
-const { sessions } = require('../utils');
-const { pool, setSetting, getSetting } = require('../db');
-const { ADMIN_IDS } = require('../constants');
+// handlers/bonusEngine.js
+const { pool, getUser, getSetting } = require('../db');
 
-function isAdmin(telegramId) {
-  return ADMIN_IDS.includes(Number(telegramId));
-}
+/**
+ * بررسی و اعطای بونوس‌های سه‌گانه (ثبت‌نام، اولین خرید، دعوت)
+ * @param {object} ctx - context تلگرام
+ * @param {string} userId - telegram_id
+ * @param {string} eventType - 'registration', 'purchase', 'referral'
+ */
+async function checkAndGrantBonuses(ctx, userId, eventType) {
+  const user = await getUser(userId);
+  if (!user) return;
 
-module.exports = function registerAdminBonusHandlers(bot) {
-
-  bot.action('admin_bonus_settings', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const buyBonusActive = (await getSetting('bonus_first_purchase_active', 'false')) === 'true';
-    const buyMinAmount = await getSetting('bonus_first_purchase_min_amount', '0');
-    const buyGift = await getSetting('bonus_first_purchase_gift', '0');
-    const regBonusActive = (await getSetting('bonus_registration_active', 'false')) === 'true';
-    const regGift = await getSetting('bonus_registration_gift', '0');
-    const refBonusActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
-    const refThreshold = await getSetting('bonus_referral_threshold', '1');
-    const refGift = await getSetting('bonus_referral_gift', '0');
-    const refPercentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
-    const refPercent = await getSetting('bonus_referral_percent', '0');
-
-    let msg = '🎁 **تنظیمات بونوس‌ها**\n\n';
-    msg += `🛍 **بونوس اولین خرید**\n`;
-    msg += `✅ فعال: ${buyBonusActive ? 'بله' : 'خیر'}\n`;
-    msg += `📉 حداقل مبلغ خرید: ${Number(buyMinAmount).toLocaleString()} تومان\n`;
-    msg += `🎁 مبلغ هدیه: ${Number(buyGift).toLocaleString()} تومان\n\n`;
-    msg += `👤 **بونوس ثبت‌نام**\n`;
-    msg += `✅ فعال: ${regBonusActive ? 'بله' : 'خیر'}\n`;
-    msg += `🎁 مبلغ هدیه: ${Number(regGift).toLocaleString()} تومان\n\n`;
-    msg += `👥 **بونوس دعوت (مبلغ ثابت)**\n`;
-    msg += `✅ فعال: ${refBonusActive ? 'بله' : 'خیر'}\n`;
-    msg += `🔢 هر ${refThreshold} دعوت\n`;
-    msg += `🎁 مبلغ هدیه: ${Number(refGift).toLocaleString()} تومان\n\n`;
-    msg += `♾️ **طرح سود مادام‌العمر (درصدی)**\n`;
-    msg += `✅ فعال: ${refPercentActive ? 'بله' : 'خیر'}\n`;
-    msg += `📈 درصد سود: ${refPercent}٪`;
-
-    ctx.reply(msg, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🛍 بونوس خرید اول', callback_data: 'admin_bonus_set_buy' }],
-          [{ text: '👤 بونوس ثبت‌نام', callback_data: 'admin_bonus_set_reg' }],
-          [{ text: '👥 بونوس دعوت (مبلغ ثابت)', callback_data: 'admin_bonus_set_ref' }],
-          [{ text: '♾️ سود مادام‌العمر (درصدی)', callback_data: 'admin_bonus_set_ref_percent' }],
-          [{ text: '🔙 بازگشت', callback_data: 'menu_admin_panel' }]
-        ]
-      }
-    });
-  });
-
-  // ----------------- بونوس اولین خرید -----------------
-  bot.action('admin_bonus_set_buy', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_buy', step: 'choose', lang: 'fa' };
-    ctx.reply('🛍 **بونوس اولین خرید**\n\nگزینه مورد نظر:', {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🔄 فعال/غیرفعال کردن', callback_data: 'bonus_buy_toggle' }],
-          [{ text: '📉 حداقل مبلغ خرید', callback_data: 'bonus_buy_set_min' }],
-          [{ text: '🎁 مبلغ هدیه', callback_data: 'bonus_buy_set_gift' }],
-          [{ text: '🔙 برگشت', callback_data: 'admin_bonus_settings' }]
-        ]
-      }
-    });
-  });
-
-  bot.action('bonus_buy_toggle', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const cur = (await getSetting('bonus_first_purchase_active', 'false')) === 'true';
-    await setSetting('bonus_first_purchase_active', cur ? 'false' : 'true');
-    if (!cur) {
-      await setSetting('bonus_first_purchase_activated_at', new Date().toISOString());
-    }
-    ctx.answerCbQuery();
-    ctx.reply(`✅ بونوس خرید اول ${cur ? 'غیرفعال' : 'فعال'} شد.`);
-  });
-
-  bot.action('bonus_buy_set_min', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_buy_min', step: 'waiting_value' };
-    ctx.reply('📉 حداقل مبلغ خرید (تومان) را وارد کنید:');
-  });
-
-  bot.action('bonus_buy_set_gift', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_buy_gift', step: 'waiting_value' };
-    ctx.reply('🎁 مبلغ هدیه (تومان) را وارد کنید:');
-  });
-
-  // ----------------- بونوس ثبت‌نام -----------------
-  bot.action('admin_bonus_set_reg', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_reg', step: 'choose', lang: 'fa' };
-    ctx.reply('👤 **بونوس ثبت‌نام**\n\nگزینه مورد نظر:', {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🔄 فعال/غیرفعال', callback_data: 'bonus_reg_toggle' }],
-          [{ text: '🎁 مبلغ هدیه', callback_data: 'bonus_reg_set_gift' }],
-          [{ text: '🔙 برگشت', callback_data: 'admin_bonus_settings' }]
-        ]
-      }
-    });
-  });
-
-  bot.action('bonus_reg_toggle', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const cur = (await getSetting('bonus_registration_active', 'false')) === 'true';
-    await setSetting('bonus_registration_active', cur ? 'false' : 'true');
-    if (!cur) {
-      await setSetting('bonus_registration_activated_at', new Date().toISOString());
-    }
-    ctx.answerCbQuery();
-    ctx.reply(`✅ بونوس ثبت‌نام ${cur ? 'غیرفعال' : 'فعال'} شد.`);
-  });
-
-  bot.action('bonus_reg_set_gift', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_reg_gift', step: 'waiting_value' };
-    ctx.reply('🎁 مبلغ هدیه (تومان) را وارد کنید:');
-  });
-
-  // ----------------- بونوس دعوت -----------------
-  bot.action('admin_bonus_set_ref', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_ref', step: 'choose', lang: 'fa' };
-    ctx.reply('👥 **بونوس دعوت**\n\nگزینه مورد نظر:', {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🔄 فعال/غیرفعال', callback_data: 'bonus_ref_toggle' }],
-          [{ text: '🔢 تعداد دعوت لازم', callback_data: 'bonus_ref_set_threshold' }],
-          [{ text: '🎁 مبلغ هدیه', callback_data: 'bonus_ref_set_gift' }],
-          [{ text: '🔙 برگشت', callback_data: 'admin_bonus_settings' }]
-        ]
-      }
-    });
-  });
-
-  bot.action('bonus_ref_toggle', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const cur = (await getSetting('bonus_referral_active', 'false')) === 'true';
-    await setSetting('bonus_referral_active', cur ? 'false' : 'true');
-    if (!cur) {
-      await setSetting('bonus_referral_activated_at', new Date().toISOString());
-    }
-    ctx.answerCbQuery();
-    ctx.reply(`✅ بونوس دعوت ${cur ? 'غیرفعال' : 'فعال'} شد.`);
-  });
-
-  bot.action('bonus_ref_set_threshold', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_ref_threshold', step: 'waiting_value' };
-    ctx.reply('🔢 هر چند دعوت یک بونوس تعلق بگیرد؟ (عدد وارد کنید)');
-  });
-
-  bot.action('bonus_ref_set_gift', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_ref_gift', step: 'waiting_value' };
-    ctx.reply('🎁 مبلغ هدیه (تومان) را وارد کنید:');
-  });
-
-  // ----------------- طرح سود مادام‌العمر (درصدی) -----------------
-  bot.action('admin_bonus_set_ref_percent', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    const active = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
-    const percent = await getSetting('bonus_referral_percent', '0');
-    ctx.reply(
-      `♾️ **طرح سود مادام‌العمر**\n\n✅ فعال: ${active ? 'بله' : 'خیر'}\n📈 درصد فعلی: ${percent}٪\n\n` +
-      `ℹ️ با هر خرید موفقِ کاربر دعوت‌شده، این درصد از مبلغ خرید مستقیم به کیف پول (موجودی اصلی) دعوت‌کننده واریز می‌شود.`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔄 فعال/غیرفعال', callback_data: 'bonus_ref_percent_toggle' }],
-            [{ text: '📈 تنظیم درصد سود', callback_data: 'bonus_ref_percent_set' }],
-            [{ text: '🔙 برگشت', callback_data: 'admin_bonus_settings' }]
-          ]
+  // --- بونوس ثبت‌نام ---
+  if (eventType === 'registration') {
+    const regActive = (await getSetting('bonus_registration_active', 'false')) === 'true';
+    const regActivatedAt = await getSetting('bonus_registration_activated_at', null);
+    const regGift = parseInt(await getSetting('bonus_registration_gift', '0'), 10);
+    if (regActive && regGift > 0 && !user.reg_bonus_received) {
+      if (regActivatedAt && user.registered_at) {
+        const activatedDate = new Date(regActivatedAt);
+        const userRegDate = new Date(user.registered_at);
+        if (userRegDate >= activatedDate) {
+          await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, reg_bonus_received = true WHERE telegram_id = $2', [regGift, userId]);
+          try { ctx.telegram.sendMessage(userId, `🎁 بونوس ثبت‌نام: ${regGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
         }
       }
+    }
+  }
+
+  // --- بونوس اولین خرید ---
+  if (eventType === 'purchase') {
+    const buyActive = (await getSetting('bonus_first_purchase_active', 'false')) === 'true';
+    const buyMinAmount = parseInt(await getSetting('bonus_first_purchase_min_amount', '0'), 10);
+    const buyGift = parseInt(await getSetting('bonus_first_purchase_gift', '0'), 10);
+    const buyActivatedAt = await getSetting('bonus_first_purchase_activated_at', null);
+    if (buyActive && buyGift > 0 && !user.first_purchase_bonus_received) {
+      let query = "SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'";
+      const params = [userId];
+      if (buyActivatedAt) {
+        query += ' AND created_at >= $2';
+        params.push(buyActivatedAt);
+      }
+      const res = await pool.query(query, params);
+      const total = Number(res.rows[0].total);
+      if (total >= buyMinAmount && total > 0) {
+        await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2', [buyGift, userId]);
+        try { ctx.telegram.sendMessage(userId, `🎁 بونوس اولین خرید: ${buyGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+      }
+    }
+  }
+
+  // --- بونوس دعوت (ثبت‌نام دعوت‌شونده) ---
+  if (eventType === 'referral') {
+    const refActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
+    const refThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10);
+    const refGift = parseInt(await getSetting('bonus_referral_gift', '0'), 10);
+    const refActivatedAt = await getSetting('bonus_referral_activated_at', null);
+    if (refActive && refGift > 0 && refThreshold > 0) {
+      let query = "SELECT COUNT(*)::int AS cnt FROM users WHERE referrer_id = $1";
+      const params = [userId];
+      if (refActivatedAt) {
+        query += ' AND registered_at >= $2';
+        params.push(refActivatedAt);
+      }
+      const cntRes = await pool.query(query, params);
+      const totalReferrals = cntRes.rows[0].cnt;
+
+      const receivedCount = user.ref_bonus_count || 0;
+      const eligibleBonuses = Math.floor(totalReferrals / refThreshold) - receivedCount;
+      if (eligibleBonuses > 0) {
+        const totalGift = eligibleBonuses * refGift;
+        // شرط گردش: بونوس دعوت باید در بازی‌ها چرخانده شود تا قابل برداشت شود
+        const wagerMultiplier = parseFloat(await getSetting('referral_wagering_multiplier', '1')) || 1;
+        const wagerRequirement = Math.round(totalGift * wagerMultiplier);
+        await pool.query(
+          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4',
+          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId]
+        );
+        try {
+          ctx.telegram.sendMessage(
+            userId,
+            `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
+            `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
+          );
+        } catch (e) {}
+      }
+    }
+  }
+}
+
+/**
+ * طرح سود مادام‌العمر: به‌ازای هر خرید موفقِ کاربر دعوت‌شده، درصدی از مبلغ خرید
+ * مستقیم و بلافاصله به موجودی اصلی (کیف پول) دعوت‌کننده واریز می‌شود.
+ * فقط زمانی فعال است که bonus_referral_percent_active روشن باشد؛ مستقل از بونوس ثبت‌نامی دعوت است.
+ * @param {object} ctx - context تلگرام
+ * @param {string} buyerId - telegram_id خریدار (دعوت‌شونده)
+ * @param {number} purchaseAmount - مبلغ خرید (پایه، بدون کارمزد خود سیستم)
+ */
+async function checkAndGrantReferralCommission(ctx, buyerId, purchaseAmount) {
+  const percentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
+  const percentValue = parseFloat(await getSetting('bonus_referral_percent', '0'));
+  if (!percentActive || !percentValue || percentValue <= 0) return;
+
+  const buyer = await getUser(buyerId);
+  if (!buyer || !buyer.referrer_id) return;
+
+  const referrer = await getUser(buyer.referrer_id);
+  if (!referrer) return;
+
+  const commission = Math.round(Number(purchaseAmount) * (percentValue / 100));
+  if (commission <= 0) return;
+
+  await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [commission, referrer.telegram_id]);
+  try {
+    const { logTransaction } = require('../db');
+    await logTransaction(referrer.telegram_id, 'bonus', commission, `سود مادام‌العمر از خرید کاربر دعوت‌شده (${percentValue}٪)`);
+  } catch (e) {}
+  try {
+    await ctx.telegram.sendMessage(referrer.telegram_id,
+      `♾️ سود دعوت شما\n\n💰 ${commission.toLocaleString('en-US')} تومان (${percentValue}٪ از خرید یکی از دعوت‌شده‌هایتان) به کیف پول شما اضافه شد.`
     );
-  });
+  } catch (e) {}
+}
 
-  bot.action('bonus_ref_percent_toggle', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const cur = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
-    await setSetting('bonus_referral_percent_active', cur ? 'false' : 'true');
-    ctx.answerCbQuery();
-    ctx.reply(`✅ طرح سود مادام‌العمر ${cur ? 'غیرفعال' : 'فعال'} شد.`);
-  });
-
-  bot.action('bonus_ref_percent_set', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_bonus_ref_percent', step: 'waiting_value' };
-    ctx.reply('📈 درصد سود را وارد کنید (فقط عدد، مثلاً 5 برای ۵٪):');
-  });
-
-  // پردازش مقادیر
-  bot.on('text', async (ctx, next) => {
-    const session = sessions[ctx.from.id];
-    if (!session) return next();
-
-    if (session.flow === 'admin_bonus_buy_min' && session.step === 'waiting_value') {
-      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
-      if (isNaN(val) || val < 0) return ctx.reply('❌ عدد نامعتبر.');
-      await setSetting('bonus_first_purchase_min_amount', String(val));
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ حداقل مبلغ خرید برای بونوس تنظیم شد.');
-      return;
-    }
-    if (session.flow === 'admin_bonus_buy_gift' && session.step === 'waiting_value') {
-      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
-      if (isNaN(val) || val <= 0) return ctx.reply('❌ عدد نامعتبر.');
-      await setSetting('bonus_first_purchase_gift', String(val));
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ مبلغ هدیه تنظیم شد.');
-      return;
-    }
-    if (session.flow === 'admin_bonus_reg_gift' && session.step === 'waiting_value') {
-      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
-      if (isNaN(val) || val <= 0) return ctx.reply('❌ عدد نامعتبر.');
-      await setSetting('bonus_registration_gift', String(val));
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ مبلغ هدیه تنظیم شد.');
-      return;
-    }
-    if (session.flow === 'admin_bonus_ref_threshold' && session.step === 'waiting_value') {
-      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
-      if (isNaN(val) || val <= 1) return ctx.reply('❌ حداقل ۲ وارد کنید.');
-      await setSetting('bonus_referral_threshold', String(val));
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ تعداد دعوت لازم تنظیم شد.');
-      return;
-    }
-    if (session.flow === 'admin_bonus_ref_gift' && session.step === 'waiting_value') {
-      const val = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
-      if (isNaN(val) || val <= 0) return ctx.reply('❌ عدد نامعتبر.');
-      await setSetting('bonus_referral_gift', String(val));
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ مبلغ هدیه تنظیم شد.');
-      return;
-    }
-    if (session.flow === 'admin_bonus_ref_percent' && session.step === 'waiting_value') {
-      const val = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
-      if (isNaN(val) || val <= 0 || val > 100) return ctx.reply('❌ عدد نامعتبر (بین ۰ تا ۱۰۰ وارد کنید).');
-      await setSetting('bonus_referral_percent', String(val));
-      delete sessions[ctx.from.id];
-      ctx.reply('✅ درصد سود مادام‌العمر تنظیم شد.');
-      return;
-    }
-
-    return next();
-  });
-};
+module.exports = { checkAndGrantBonuses, checkAndGrantReferralCommission };
