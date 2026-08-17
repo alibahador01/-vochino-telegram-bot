@@ -70,8 +70,20 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
       const eligibleBonuses = Math.floor(totalReferrals / refThreshold) - receivedCount;
       if (eligibleBonuses > 0) {
         const totalGift = eligibleBonuses * refGift;
-        await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2 WHERE telegram_id = $3', [totalGift, receivedCount + eligibleBonuses, userId]);
-        try { ctx.telegram.sendMessage(userId, `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+        // شرط گردش: بونوس دعوت باید در بازی‌ها چرخانده شود تا قابل برداشت شود
+        const wagerMultiplier = parseFloat(await getSetting('referral_wagering_multiplier', '1')) || 1;
+        const wagerRequirement = Math.round(totalGift * wagerMultiplier);
+        await pool.query(
+          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4',
+          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId]
+        );
+        try {
+          ctx.telegram.sendMessage(
+            userId,
+            `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
+            `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
+          );
+        } catch (e) {}
       }
     }
   }
