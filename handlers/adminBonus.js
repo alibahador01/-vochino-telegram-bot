@@ -22,6 +22,8 @@ module.exports = function registerAdminBonusHandlers(bot) {
     const refBonusActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
     const refThreshold = await getSetting('bonus_referral_threshold', '1');
     const refGift = await getSetting('bonus_referral_gift', '0');
+    const refPercentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
+    const refPercent = await getSetting('bonus_referral_percent', '0');
 
     let msg = '🎁 **تنظیمات بونوس‌ها**\n\n';
     msg += `🛍 **بونوس اولین خرید**\n`;
@@ -31,10 +33,13 @@ module.exports = function registerAdminBonusHandlers(bot) {
     msg += `👤 **بونوس ثبت‌نام**\n`;
     msg += `✅ فعال: ${regBonusActive ? 'بله' : 'خیر'}\n`;
     msg += `🎁 مبلغ هدیه: ${Number(regGift).toLocaleString()} تومان\n\n`;
-    msg += `👥 **بونوس دعوت**\n`;
+    msg += `👥 **بونوس دعوت (مبلغ ثابت)**\n`;
     msg += `✅ فعال: ${refBonusActive ? 'بله' : 'خیر'}\n`;
     msg += `🔢 هر ${refThreshold} دعوت\n`;
-    msg += `🎁 مبلغ هدیه: ${Number(refGift).toLocaleString()} تومان`;
+    msg += `🎁 مبلغ هدیه: ${Number(refGift).toLocaleString()} تومان\n\n`;
+    msg += `♾️ **طرح سود مادام‌العمر (درصدی)**\n`;
+    msg += `✅ فعال: ${refPercentActive ? 'بله' : 'خیر'}\n`;
+    msg += `📈 درصد سود: ${refPercent}٪`;
 
     ctx.reply(msg, {
       parse_mode: 'Markdown',
@@ -42,7 +47,8 @@ module.exports = function registerAdminBonusHandlers(bot) {
         inline_keyboard: [
           [{ text: '🛍 بونوس خرید اول', callback_data: 'admin_bonus_set_buy' }],
           [{ text: '👤 بونوس ثبت‌نام', callback_data: 'admin_bonus_set_reg' }],
-          [{ text: '👥 بونوس دعوت', callback_data: 'admin_bonus_set_ref' }],
+          [{ text: '👥 بونوس دعوت (مبلغ ثابت)', callback_data: 'admin_bonus_set_ref' }],
+          [{ text: '♾️ سود مادام‌العمر (درصدی)', callback_data: 'admin_bonus_set_ref_percent' }],
           [{ text: '🔙 بازگشت', callback_data: 'menu_admin_panel' }]
         ]
       }
@@ -175,6 +181,45 @@ module.exports = function registerAdminBonusHandlers(bot) {
     ctx.reply('🎁 مبلغ هدیه (تومان) را وارد کنید:');
   });
 
+  // ----------------- طرح سود مادام‌العمر (درصدی) -----------------
+  bot.action('admin_bonus_set_ref_percent', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const active = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
+    const percent = await getSetting('bonus_referral_percent', '0');
+    ctx.reply(
+      `♾️ **طرح سود مادام‌العمر**\n\n✅ فعال: ${active ? 'بله' : 'خیر'}\n📈 درصد فعلی: ${percent}٪\n\n` +
+      `ℹ️ با هر خرید موفقِ کاربر دعوت‌شده، این درصد از مبلغ خرید مستقیم به کیف پول (موجودی اصلی) دعوت‌کننده واریز می‌شود.`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 فعال/غیرفعال', callback_data: 'bonus_ref_percent_toggle' }],
+            [{ text: '📈 تنظیم درصد سود', callback_data: 'bonus_ref_percent_set' }],
+            [{ text: '🔙 برگشت', callback_data: 'admin_bonus_settings' }]
+          ]
+        }
+      }
+    );
+  });
+
+  bot.action('bonus_ref_percent_toggle', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const cur = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
+    await setSetting('bonus_referral_percent_active', cur ? 'false' : 'true');
+    ctx.answerCbQuery();
+    ctx.reply(`✅ طرح سود مادام‌العمر ${cur ? 'غیرفعال' : 'فعال'} شد.`);
+  });
+
+  bot.action('bonus_ref_percent_set', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'admin_bonus_ref_percent', step: 'waiting_value' };
+    ctx.reply('📈 درصد سود را وارد کنید (فقط عدد، مثلاً 5 برای ۵٪):');
+  });
+
   // پردازش مقادیر
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
@@ -218,6 +263,14 @@ module.exports = function registerAdminBonusHandlers(bot) {
       await setSetting('bonus_referral_gift', String(val));
       delete sessions[ctx.from.id];
       ctx.reply('✅ مبلغ هدیه تنظیم شد.');
+      return;
+    }
+    if (session.flow === 'admin_bonus_ref_percent' && session.step === 'waiting_value') {
+      const val = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
+      if (isNaN(val) || val <= 0 || val > 100) return ctx.reply('❌ عدد نامعتبر (بین ۰ تا ۱۰۰ وارد کنید).');
+      await setSetting('bonus_referral_percent', String(val));
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ درصد سود مادام‌العمر تنظیم شد.');
       return;
     }
 
