@@ -3,6 +3,7 @@ const texts = require('../texts');
 const { sessions, fillTemplate } = require('../utils');
 const { pool, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+const { tryAutoFulfillSell } = require('../exchangeEngine');
 const R = require('./receipts');
 
 module.exports = function registerSellHandlers(bot) {
@@ -72,11 +73,12 @@ module.exports = function registerSellHandlers(bot) {
 
     const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
     const estimatedAmount = Number(session.data.unitPrice || 0);
+    const productKey = session.data.productType;
 
     try {
       const ins = await pool.query(
         'INSERT INTO sell_orders (telegram_id, product_type, voucher_code, amount, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id',
-        [String(ctx.from.id), session.data.productType, voucherCode, estimatedAmount, 'pending_review', trackingCode]
+        [String(ctx.from.id), productKey, voucherCode, estimatedAmount, 'pending_review', trackingCode]
       );
       const orderId = ins.rows[0].id;
 
@@ -90,6 +92,19 @@ module.exports = function registerSellHandlers(bot) {
         { parse_mode: 'Markdown' }
       );
 
+      // تلاش برای تأیید و تسویه خودکار از طریق صرافی متصل — فقط اگر حالت API «خودکار» باشد؛
+      // در غیر این صورت (پیش‌فرض فعلی) درخواست دقیقاً مثل قبل برای بررسی دستی ادمین می‌ماند.
+      let autoResult = { executed: false };
+      try {
+        const product = await getSellProductByKey(productKey);
+        autoResult = await tryAutoFulfillSell(
+          { sellOrderId: orderId, telegramId: ctx.from.id, productKey, amount: estimatedAmount, product, trackingCode, voucherCode },
+          bot
+        );
+      } catch (e) { console.error('خطا در اجرای خودکار سفارش فروش:', e.message); }
+
+      if (autoResult.executed) return; // کاربر و لاگ قبلاً داخل exchangeEngine مطلع شدند
+
       // برای ادمین: یک پیام واحد با کد ووچر مشتری و دکمه‌های تأیید/رد
       const ids = await adminIdsList();
       for (const id of ids) {
@@ -102,7 +117,7 @@ module.exports = function registerSellHandlers(bot) {
             `📍 کد پیگیری: ${trackingCode}`,
             {
               parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `selamt:${orderId}` }, { text: '❌ رد', callback_data: `selno:${orderId}` }]] }
+              reply_markup: { inline_keyboard: [[{ text: '💰 بررسی و تأیید', callback_data: `admin_sell_approve_${orderId}` }, { text: '❌ رد', callback_data: `admin_sell_reject_${orderId}` }]] }
             }
           );
         } catch (e) { console.error('خطا در اطلاع فروش به ادمین:', e.message); }
