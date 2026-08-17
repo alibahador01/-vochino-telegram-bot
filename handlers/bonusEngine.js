@@ -50,7 +50,7 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
     }
   }
 
-  // --- بونوس دعوت ---
+  // --- بونوس دعوت (ثبت‌نام دعوت‌شونده) ---
   if (eventType === 'referral') {
     const refActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
     const refThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10);
@@ -77,4 +77,38 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
   }
 }
 
-module.exports = { checkAndGrantBonuses };
+/**
+ * طرح سود مادام‌العمر: به‌ازای هر خرید موفقِ کاربر دعوت‌شده، درصدی از مبلغ خرید
+ * مستقیم و بلافاصله به موجودی اصلی (کیف پول) دعوت‌کننده واریز می‌شود.
+ * فقط زمانی فعال است که bonus_referral_percent_active روشن باشد؛ مستقل از بونوس ثبت‌نامی دعوت است.
+ * @param {object} ctx - context تلگرام
+ * @param {string} buyerId - telegram_id خریدار (دعوت‌شونده)
+ * @param {number} purchaseAmount - مبلغ خرید (پایه، بدون کارمزد خود سیستم)
+ */
+async function checkAndGrantReferralCommission(ctx, buyerId, purchaseAmount) {
+  const percentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
+  const percentValue = parseFloat(await getSetting('bonus_referral_percent', '0'));
+  if (!percentActive || !percentValue || percentValue <= 0) return;
+
+  const buyer = await getUser(buyerId);
+  if (!buyer || !buyer.referrer_id) return;
+
+  const referrer = await getUser(buyer.referrer_id);
+  if (!referrer) return;
+
+  const commission = Math.round(Number(purchaseAmount) * (percentValue / 100));
+  if (commission <= 0) return;
+
+  await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [commission, referrer.telegram_id]);
+  try {
+    const { logTransaction } = require('../db');
+    await logTransaction(referrer.telegram_id, 'bonus', commission, `سود مادام‌العمر از خرید کاربر دعوت‌شده (${percentValue}٪)`);
+  } catch (e) {}
+  try {
+    await ctx.telegram.sendMessage(referrer.telegram_id,
+      `♾️ سود دعوت شما\n\n💰 ${commission.toLocaleString('en-US')} تومان (${percentValue}٪ از خرید یکی از دعوت‌شده‌هایتان) به کیف پول شما اضافه شد.`
+    );
+  } catch (e) {}
+}
+
+module.exports = { checkAndGrantBonuses, checkAndGrantReferralCommission };
