@@ -383,6 +383,44 @@ async function getActiveApiForProduct(productType, productKey) {
   return res.rows[0] || null;
 }
 
+// زنجیره کامل صرافی‌های متصل به یک محصول (برای فیل‌اوور خودکار)، به ترتیب اولویت
+async function getApiChainForProduct(productType, productKey) {
+  const res = await pool.query(
+    `SELECT pal.id AS link_id, pal.priority AS link_priority, apis.* 
+     FROM product_api_links pal JOIN api_sources apis ON pal.api_source_id = apis.id 
+     WHERE pal.product_type = $1 AND pal.product_key = $2 AND pal.active = 1 AND apis.is_active = 1 
+     ORDER BY pal.priority ASC`,
+    [productType, productKey]
+  );
+  return res.rows;
+}
+
+async function setOrderFulfillment(orderId, { status, apiSourceId, apiCost, providerTxId, deliveredCode, fulfillmentMode }) {
+  const fields = ['status = $2'];
+  const values = [orderId, status];
+  let i = 3;
+  if (apiSourceId !== undefined) { fields.push(`api_source_id = $${i++}`); values.push(apiSourceId); }
+  if (apiCost !== undefined) { fields.push(`api_cost = $${i++}`); values.push(apiCost); }
+  if (providerTxId !== undefined) { fields.push(`provider_tx_id = $${i++}`); values.push(providerTxId); }
+  if (deliveredCode !== undefined) { fields.push(`delivered_code = $${i++}`); values.push(deliveredCode); }
+  if (fulfillmentMode !== undefined) { fields.push(`fulfillment_mode = $${i++}`); values.push(fulfillmentMode); }
+  const res = await pool.query(`UPDATE orders SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, values);
+  return res.rows[0] || null;
+}
+
+async function setSellOrderFulfillment(sellOrderId, { status, amount, commission, apiSourceId, apiCost, fulfillmentMode }) {
+  const fields = ['status = $2'];
+  const values = [sellOrderId, status];
+  let i = 3;
+  if (amount !== undefined) { fields.push(`amount = $${i++}`); values.push(amount); }
+  if (commission !== undefined) { fields.push(`commission = $${i++}`); values.push(commission); }
+  if (apiSourceId !== undefined) { fields.push(`api_source_id = $${i++}`); values.push(apiSourceId); }
+  if (apiCost !== undefined) { fields.push(`api_cost = $${i++}`); values.push(apiCost); }
+  if (fulfillmentMode !== undefined) { fields.push(`fulfillment_mode = $${i++}`); values.push(fulfillmentMode); }
+  const res = await pool.query(`UPDATE sell_orders SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, values);
+  return res.rows[0] || null;
+}
+
 // ==================== VPN ====================
 async function getVpnSubscription(userId) {
   const res = await pool.query(
@@ -787,10 +825,17 @@ async function initDb() {
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS voucher_code TEXT',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_cost NUMERIC DEFAULT 0',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_mode TEXT DEFAULT \'manual\'',
 
     // sell_orders
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS api_cost NUMERIC DEFAULT 0',
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS fulfillment_mode TEXT DEFAULT \'manual\'',
 
     // wallet_requests
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
@@ -1026,6 +1071,9 @@ module.exports = {
   updateProductApiLink,
   removeProductApiLink,
   getActiveApiForProduct,
+  getApiChainForProduct,
+  setOrderFulfillment,
+  setSellOrderFulfillment,
   getVpnSubscription,
   createVpnSubscription,
   getAllBotTexts,
