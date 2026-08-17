@@ -3,6 +3,7 @@ const texts = require('../texts');
 const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
 const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
+const { calculateBuyFinal, tryAutoFulfillBuy } = require('../exchangeEngine');
 const R = require('./receipts');
 
 module.exports = function registerBuyHandlers(bot) {
@@ -79,12 +80,12 @@ module.exports = function registerBuyHandlers(bot) {
     }
 
     const product = await getProductByKey(session.data.productType);
-    let commission = 0;
+    let commission = 0, finalAmount = amount;
     if (product) {
-      if (product.commission_type === 'percentage') commission = Math.round(amount * (parseFloat(product.commission_value) / 100));
-      else if (product.commission_type === 'fixed') commission = parseInt(product.commission_value, 10) || 0;
+      const calc = calculateBuyFinal(amount, product);
+      commission = calc.commission;
+      finalAmount = calc.finalAmount;
     }
-    const finalAmount = amount + commission;
 
     session.data.amount = amount;
     session.data.commission = commission;
@@ -147,10 +148,11 @@ module.exports = function registerBuyHandlers(bot) {
     // هیچ کد/هش جعلی ساخته نمی‌شود؛ تحویل توسط ادمین یا API واقعی انجام می‌شود
     const orderStatus = 'pending_delivery';
 
-    await pool.query(
-      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, NOW(), $6)',
+    const orderIns = await pool.query(
+      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id',
       [String(ctx.from.id), productKey, finalAmount, commission, orderStatus, trackingCode]
     );
+    const orderId = orderIns.rows[0].id;
 
     delete sessions[ctx.from.id];
 
@@ -168,13 +170,20 @@ module.exports = function registerBuyHandlers(bot) {
       `⏳ پس از بررسی و صدور، اطلاعات ووچر برای شما ارسال می‌شود.`
     );
 
+    // تلاش برای اجرای خودکار از طریق صرافی متصل — فقط اگر ادمین حالت API را «خودکار» کرده باشد؛
+    // در غیر این صورت (پیش‌فرض فعلی) هیچ کاری نمی‌کند و سفارش دقیقاً مثل قبل دستی می‌ماند.
+    let autoResult = { executed: false };
+    try {
+      autoResult = await tryAutoFulfillBuy({ orderId, telegramId: ctx.from.id, productKey, amount: finalAmount, trackingCode }, bot);
+    } catch (e) { console.error('خطا در اجرای خودکار سفارش خرید:', e.message); }
+
+    if (autoResult.executed) return; // کاربر و لاگ قبلاً داخل exchangeEngine مطلع شدند
+
     // اطلاع فوری به ادمین‌ها با اطلاعات کامل مشتری، همراه دکمه تحویل مستقیم
     const custUser = await getUser(ctx.from.id);
     const ids = await adminIdsList();
     for (const id of ids) {
       try {
-        const orderRow = await pool.query('SELECT id FROM orders WHERE tracking_code = $1', [trackingCode]);
-        const orderId = orderRow.rows[0].id;
         await ctx.telegram.sendMessage(id,
           `🛒 سفارش خرید جدید\n` +
           `👤 آیدی مشتری: ${ctx.from.id}\n` +
@@ -184,7 +193,7 @@ module.exports = function registerBuyHandlers(bot) {
           `🛍 محصول: ${product.name}\n` +
           `💵 مبلغ نهایی: ${finalAmount.toLocaleString('en-US')} تومان\n` +
           `📍 کد پیگیری: ${trackingCode}`,
-          { reply_markup: { inline_keyboard: [[{ text: '🎟 تحویل ووچر', callback_data: `buydel:${orderId}` }, { text: '❌ رد سفارش', callback_data: `buyno:${orderId}` }]] } }
+          { reply_markup: { inline_keyboard: [[{ text: '🎟 تحویل ووچر', callback_data: `admin_deliver_${orderId}` }, { text: '❌ رد سفارش', callback_data: `admin_buy_cancel_${orderId}` }]] } }
         );
       } catch (e) { console.error('خطا در اطلاع خرید به ادمین:', e.message); }
     }
