@@ -1,126 +1,147 @@
-// handlers/bonusEngine.js
-const { pool, getUser, getSetting } = require('../db');
+// handlers/orderAdmin.js
+// مدیریت سفارشات خرید و فروش توسط ادمین (تحویل خرید، تأیید/رد فروش و واریز به کیف پول)
+const { sessions } = require('../utils');
+const { pool, getUser, getSellProductByKey } = require('../db');
+const { ADMIN_IDS } = require('../constants');
+const { calculateSellPayout } = require('../exchangeEngine');
 
-/**
- * بررسی و اعطای بونوس‌های سه‌گانه (ثبت‌نام، اولین خرید، دعوت)
- * @param {object} ctx - context تلگرام
- * @param {string} userId - telegram_id
- * @param {string} eventType - 'registration', 'purchase', 'referral'
- */
-async function checkAndGrantBonuses(ctx, userId, eventType) {
-  const user = await getUser(userId);
-  if (!user) return;
+function isAdmin(telegramId) {
+  return ADMIN_IDS.includes(Number(telegramId));
+}
 
-  // --- بونوس ثبت‌نام ---
-  if (eventType === 'registration') {
-    const regActive = (await getSetting('bonus_registration_active', 'false')) === 'true';
-    const regActivatedAt = await getSetting('bonus_registration_activated_at', null);
-    const regGift = parseInt(await getSetting('bonus_registration_gift', '0'), 10);
-    if (regActive && regGift > 0 && !user.reg_bonus_received) {
-      if (regActivatedAt && user.registered_at) {
-        const activatedDate = new Date(regActivatedAt);
-        const userRegDate = new Date(user.registered_at);
-        if (userRegDate >= activatedDate) {
-          await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, reg_bonus_received = true WHERE telegram_id = $2', [regGift, userId]);
-          try { ctx.telegram.sendMessage(userId, `🎁 بونوس ثبت‌نام: ${regGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+module.exports = function registerOrderAdminHandlers(bot) {
+
+  bot.action('admin_buy_pending', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    const pending = (await pool.query("SELECT * FROM orders WHERE status='pending_delivery' ORDER BY id ASC")).rows;
+    if (pending.length === 0) return ctx.reply('✅ سفارش خریدی در انتظار نیست.');
+    for (const o of pending) {
+      const u = await getUser(o.telegram_id);
+      const p = (await pool.query('SELECT name FROM products WHERE key=$1', [o.product_type])).rows[0]?.name || o.product_type;
+      let msg = `📦 خرید ${p}\n👤 ${u?.full_name||'---'}\n💰 ${Number(o.amount).toLocaleString()} تومان\n🆔 ${o.tracking_code}`;
+      ctx.reply(msg, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📤 تحویل', callback_data: 'admin_deliver_' + o.id }],
+            [{ text: '✅ تکمیل دستی', callback_data: 'admin_buy_complete_' + o.id }, { text: '❌ لغو', callback_data: 'admin_buy_cancel_' + o.id }]
+          ]
         }
-      }
+      });
     }
-  }
+  });
 
-  // --- بونوس اولین خرید ---
-  if (eventType === 'purchase') {
-    const buyActive = (await getSetting('bonus_first_purchase_active', 'false')) === 'true';
-    const buyMinAmount = parseInt(await getSetting('bonus_first_purchase_min_amount', '0'), 10);
-    const buyGift = parseInt(await getSetting('bonus_first_purchase_gift', '0'), 10);
-    const buyActivatedAt = await getSetting('bonus_first_purchase_activated_at', null);
-    if (buyActive && buyGift > 0 && !user.first_purchase_bonus_received) {
-      let query = "SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'";
-      const params = [userId];
-      if (buyActivatedAt) {
-        query += ' AND created_at >= $2';
-        params.push(buyActivatedAt);
-      }
-      const res = await pool.query(query, params);
-      const total = Number(res.rows[0].total);
-      if (total >= buyMinAmount && total > 0) {
-        await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2', [buyGift, userId]);
-        try { ctx.telegram.sendMessage(userId, `🎁 بونوس اولین خرید: ${buyGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
-      }
+  bot.action(/^admin_deliver_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const orderId = ctx.match[1]; ctx.answerCbQuery();
+    const order = (await pool.query('SELECT * FROM orders WHERE id=$1', [orderId])).rows[0];
+    if (!order) return ctx.reply('سفارش یافت نشد.');
+    sessions[ctx.from.id] = { flow: 'admin_deliver_code', step: 'waiting_code', data: { orderId, telegramId: order.telegram_id, trackingCode: order.tracking_code } };
+    ctx.reply('کد تحویل را وارد کنید:');
+  });
+
+  bot.action(/^admin_buy_complete_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const orderId = ctx.match[1];
+    await pool.query("UPDATE orders SET status='completed' WHERE id=$1", [orderId]);
+    ctx.answerCbQuery('✅ تکمیل شد'); ctx.reply('✅ سفارش تکمیل شد.');
+  });
+
+  bot.action(/^admin_buy_cancel_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const orderId = ctx.match[1];
+    const o = (await pool.query('SELECT * FROM orders WHERE id=$1', [orderId])).rows[0];
+    if (!o) return;
+    const refund = Number(o.amount) + Number(o.commission || 0);
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [refund, o.telegram_id]);
+    await pool.query("UPDATE orders SET status='cancelled' WHERE id=$1", [orderId]);
+    ctx.telegram.sendMessage(o.telegram_id, `❌ سفارش لغو شد. ${refund.toLocaleString()} تومان بازگشت.`);
+    ctx.answerCbQuery('✅ لغو شد'); ctx.reply('✅ سفارش لغو شد.');
+  });
+
+  bot.action('admin_sell_pending', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    const pending = (await pool.query("SELECT * FROM sell_orders WHERE status='pending_review' ORDER BY id ASC")).rows;
+    if (pending.length === 0) return ctx.reply('✅ درخواست فروشی در انتظار نیست.');
+    for (const s of pending) {
+      const u = await getUser(s.telegram_id);
+      const p = (await pool.query('SELECT name FROM sell_products WHERE key=$1', [s.product_type])).rows[0]?.name || s.product_type;
+      let msg = `🎟 فروش ${p}\n👤 ${u?.full_name||'---'}\n🎫 ${s.voucher_code}\n🆔 ${s.tracking_code}`;
+      ctx.reply(msg, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ تایید', callback_data: 'admin_sell_approve_' + s.id }],
+            [{ text: '❌ رد', callback_data: 'admin_sell_reject_' + s.id }, { text: '✉️ رد با دلیل', callback_data: 'admin_sell_reject_reason_' + s.id }]
+          ]
+        }
+      });
     }
-  }
+  });
 
-  // --- بونوس دعوت (ثبت‌نام دعوت‌شونده) ---
-  if (eventType === 'referral') {
-    const refActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
-    const refThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10);
-    const refGift = parseInt(await getSetting('bonus_referral_gift', '0'), 10);
-    const refActivatedAt = await getSetting('bonus_referral_activated_at', null);
-    if (refActive && refGift > 0 && refThreshold > 0) {
-      let query = "SELECT COUNT(*)::int AS cnt FROM users WHERE referrer_id = $1";
-      const params = [userId];
-      if (refActivatedAt) {
-        query += ' AND registered_at >= $2';
-        params.push(refActivatedAt);
-      }
-      const cntRes = await pool.query(query, params);
-      const totalReferrals = cntRes.rows[0].cnt;
+  bot.action(/^admin_sell_approve_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const requestId = ctx.match[1]; ctx.answerCbQuery();
+    sessions[ctx.from.id] = { flow: 'admin_sell_amount', step: 'waiting_amount', data: { requestId } };
+    ctx.reply('💰 مبلغ پایه (ارزش واقعی/تأیید‌شده ووچر به تومان) را وارد کنید — کارمزد تنظیم‌شده در پنل به‌صورت خودکار از آن کسر و مبلغ نهایی به کاربر واریز می‌شود:');
+  });
 
-      const receivedCount = user.ref_bonus_count || 0;
-      const eligibleBonuses = Math.floor(totalReferrals / refThreshold) - receivedCount;
-      if (eligibleBonuses > 0) {
-        const totalGift = eligibleBonuses * refGift;
-        // شرط گردش: بونوس دعوت باید در بازی‌ها چرخانده شود تا قابل برداشت شود
-        const wagerMultiplier = parseFloat(await getSetting('referral_wagering_multiplier', '1')) || 1;
-        const wagerRequirement = Math.round(totalGift * wagerMultiplier);
-        await pool.query(
-          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4',
-          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId]
-        );
-        try {
-          ctx.telegram.sendMessage(
-            userId,
-            `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
-            `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
-          );
-        } catch (e) {}
-      }
+  bot.action(/^admin_sell_reject_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    await pool.query("UPDATE sell_orders SET status='rejected' WHERE id=$1", [ctx.match[1]]);
+    ctx.answerCbQuery('❌ رد شد'); ctx.reply('❌ رد شد.');
+  });
+
+  bot.action(/^admin_sell_reject_reason_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const requestId = ctx.match[1]; ctx.answerCbQuery();
+    sessions[ctx.from.id] = { flow: 'admin_sell_reject_reason', step: 'waiting_reason', data: { requestId } };
+    ctx.reply('دلیل رد را بنویسید:');
+  });
+
+  bot.on('text', async (ctx, next) => {
+    const session = sessions[ctx.from.id];
+    if (!session) return next();
+
+    if (session.flow === 'admin_deliver_code' && session.step === 'waiting_code') {
+      const deliveredCode = ctx.message.text.trim();
+      const { orderId, telegramId, trackingCode } = session.data;
+      await pool.query("UPDATE orders SET status='completed', delivered_code=$1 WHERE id=$2", [deliveredCode, orderId]);
+      ctx.telegram.sendMessage(telegramId, `🎉 سفارش تحویل داده شد!\n🆔 ${trackingCode}\n📦 کد:\n${deliveredCode}`);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ تحویل شد.');
+      return;
     }
-  }
-}
 
-/**
- * طرح سود مادام‌العمر: به‌ازای هر خرید موفقِ کاربر دعوت‌شده، درصدی از مبلغ خرید
- * مستقیم و بلافاصله به موجودی اصلی (کیف پول) دعوت‌کننده واریز می‌شود.
- * فقط زمانی فعال است که bonus_referral_percent_active روشن باشد؛ مستقل از بونوس ثبت‌نامی دعوت است.
- * @param {object} ctx - context تلگرام
- * @param {string} buyerId - telegram_id خریدار (دعوت‌شونده)
- * @param {number} purchaseAmount - مبلغ خرید (پایه، بدون کارمزد خود سیستم)
- */
-async function checkAndGrantReferralCommission(ctx, buyerId, purchaseAmount) {
-  const percentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
-  const percentValue = parseFloat(await getSetting('bonus_referral_percent', '0'));
-  if (!percentActive || !percentValue || percentValue <= 0) return;
+    if (session.flow === 'admin_sell_reject_reason' && session.step === 'waiting_reason') {
+      const reason = ctx.message.text;
+      const requestId = session.data.requestId;
+      await pool.query("UPDATE sell_orders SET status='rejected' WHERE id=$1", [requestId]);
+      const req = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
+      ctx.telegram.sendMessage(req.telegram_id, `❌ فروش رد شد.\n🆔 ${req.tracking_code}\n📝 ${reason}`);
+      delete sessions[ctx.from.id];
+      ctx.reply('✅ رد شد.');
+      return;
+    }
 
-  const buyer = await getUser(buyerId);
-  if (!buyer || !buyer.referrer_id) return;
+    if (session.flow === 'admin_sell_amount' && session.step === 'waiting_amount') {
+      const baseAmount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
+      if (!baseAmount || baseAmount <= 0) return ctx.reply('⚠️ مبلغ نامعتبر.');
+      const requestId = session.data.requestId;
+      const req = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
+      if (!req || req.status !== 'pending_review') { delete sessions[ctx.from.id]; return ctx.reply('❌ این درخواست قبلاً بررسی شده.'); }
+      const sellProduct = await getSellProductByKey(req.product_type);
+      const { commission, payout } = calculateSellPayout(baseAmount, sellProduct || { commission_type: 'none', commission_value: 0 });
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, req.telegram_id]);
+      await pool.query("UPDATE sell_orders SET status='approved', amount=$1, commission=$2, fulfillment_mode='manual' WHERE id=$3", [payout, commission, requestId]);
+      ctx.telegram.sendMessage(req.telegram_id,
+        `✅ فروش تأیید شد.\n💰 مبلغ پایه: ${baseAmount.toLocaleString()} تومان\n💳 کارمزد: ${commission.toLocaleString()} تومان\n💵 واریز به کیف پول: ${payout.toLocaleString()} تومان`
+      );
+      delete sessions[ctx.from.id];
+      ctx.reply(`✅ تأیید شد.\nپایه: ${baseAmount.toLocaleString()} | کارمزد: ${commission.toLocaleString()} | واریزی: ${payout.toLocaleString()}`);
+      return;
+    }
 
-  const referrer = await getUser(buyer.referrer_id);
-  if (!referrer) return;
-
-  const commission = Math.round(Number(purchaseAmount) * (percentValue / 100));
-  if (commission <= 0) return;
-
-  await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [commission, referrer.telegram_id]);
-  try {
-    const { logTransaction } = require('../db');
-    await logTransaction(referrer.telegram_id, 'bonus', commission, `سود مادام‌العمر از خرید کاربر دعوت‌شده (${percentValue}٪)`);
-  } catch (e) {}
-  try {
-    await ctx.telegram.sendMessage(referrer.telegram_id,
-      `♾️ سود دعوت شما\n\n💰 ${commission.toLocaleString('en-US')} تومان (${percentValue}٪ از خرید یکی از دعوت‌شده‌هایتان) به کیف پول شما اضافه شد.`
-    );
-  } catch (e) {}
-}
-
-module.exports = { checkAndGrantBonuses, checkAndGrantReferralCommission };
+    return next();
+  });
+};
