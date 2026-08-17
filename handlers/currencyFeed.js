@@ -1,149 +1,126 @@
-const { pool, sendRatesToChannel } = require('../db');
-const { ADMIN_IDS } = require('../constants');
-const { sessions } = require('../utils');
+// handlers/bonusEngine.js
+const { pool, getUser, getSetting } = require('../db');
 
-let feedInterval = null;
+/**
+ * بررسی و اعطای بونوس‌های سه‌گانه (ثبت‌نام، اولین خرید، دعوت)
+ * @param {object} ctx - context تلگرام
+ * @param {string} userId - telegram_id
+ * @param {string} eventType - 'registration', 'purchase', 'referral'
+ */
+async function checkAndGrantBonuses(ctx, userId, eventType) {
+  const user = await getUser(userId);
+  if (!user) return;
 
-module.exports = function registerCurrencyFeedHandlers(bot) {
-
-  (async function initFeed() {
-    const isActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
-    if (isActive.rows.length > 0 && isActive.rows[0].value === 'true') {
-      startFeedTimer(bot);
-    }
-  })();
-
-  async function startFeedTimer(botInstance) {
-    if (feedInterval) {
-      clearInterval(feedInterval);
-      feedInterval = null;
-    }
-
-    const interval = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_interval'`);
-    const seconds = interval.rows.length > 0 ? Number(interval.rows[0].value) : 3600;
-
-    feedInterval = setInterval(async () => {
-      try {
-        await sendRatesToChannel(botInstance);
-        console.log('📨 نرخ ارز به‌طور خودکار ارسال شد.');
-      } catch (e) {
-        console.log('❌ خطا در ارسال خودکار نرخ: ' + e.message);
-      }
-    }, seconds * 1000);
-
-    console.log('⏱️ تایمر فید نرخ ارز با زمان ' + seconds + ' ثانیه راه‌اندازی شد.');
-  }
-
-  async function stopFeedTimer() {
-    if (feedInterval) {
-      clearInterval(feedInterval);
-      feedInterval = null;
-      console.log('⏹️ تایمر فید نرخ ارز متوقف شد.');
-    }
-  }
-
-  bot.action('admin_currency_feed', async (ctx) => {
-    if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const isActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
-    const interval = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_interval'`);
-
-    const activeStatus = isActive.rows.length > 0 ? isActive.rows[0].value : 'false';
-    const intervalValue = interval.rows.length > 0 ? Number(interval.rows[0].value) : 3600;
-
-    ctx.reply(
-      '🌐 **مدیریت فید نرخ ارز**\n\n' +
-      '🔹 وضعیت: ' + (activeStatus === 'true' ? '✅ فعال' : '❌ غیرفعال') + '\n' +
-      '⏱️ زمانبندی: هر ' + (intervalValue / 60) + ' دقیقه\n\n' +
-      'از گزینه‌های زیر انتخاب کنید:',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: (activeStatus === 'true' ? '⏹️ غیرفعال کردن' : '▶️ فعال کردن'), callback_data: 'admin_currency_feed_toggle' }],
-            [{ text: '⏱️ تنظیم زمانبندی (دقیقه)', callback_data: 'admin_currency_feed_interval' }],
-            [{ text: '📨 ارسال دستی نرخ‌ها', callback_data: 'admin_currency_feed_send' }],
-            [{ text: '🔙 بازگشت', callback_data: 'menu_admin_panel' }]
-          ]
+  // --- بونوس ثبت‌نام ---
+  if (eventType === 'registration') {
+    const regActive = (await getSetting('bonus_registration_active', 'false')) === 'true';
+    const regActivatedAt = await getSetting('bonus_registration_activated_at', null);
+    const regGift = parseInt(await getSetting('bonus_registration_gift', '0'), 10);
+    if (regActive && regGift > 0 && !user.reg_bonus_received) {
+      if (regActivatedAt && user.registered_at) {
+        const activatedDate = new Date(regActivatedAt);
+        const userRegDate = new Date(user.registered_at);
+        if (userRegDate >= activatedDate) {
+          await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, reg_bonus_received = true WHERE telegram_id = $2', [regGift, userId]);
+          try { ctx.telegram.sendMessage(userId, `🎁 بونوس ثبت‌نام: ${regGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
         }
       }
+    }
+  }
+
+  // --- بونوس اولین خرید ---
+  if (eventType === 'purchase') {
+    const buyActive = (await getSetting('bonus_first_purchase_active', 'false')) === 'true';
+    const buyMinAmount = parseInt(await getSetting('bonus_first_purchase_min_amount', '0'), 10);
+    const buyGift = parseInt(await getSetting('bonus_first_purchase_gift', '0'), 10);
+    const buyActivatedAt = await getSetting('bonus_first_purchase_activated_at', null);
+    if (buyActive && buyGift > 0 && !user.first_purchase_bonus_received) {
+      let query = "SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE telegram_id = $1 AND status = 'completed'";
+      const params = [userId];
+      if (buyActivatedAt) {
+        query += ' AND created_at >= $2';
+        params.push(buyActivatedAt);
+      }
+      const res = await pool.query(query, params);
+      const total = Number(res.rows[0].total);
+      if (total >= buyMinAmount && total > 0) {
+        await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2', [buyGift, userId]);
+        try { ctx.telegram.sendMessage(userId, `🎁 بونوس اولین خرید: ${buyGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+      }
+    }
+  }
+
+  // --- بونوس دعوت (ثبت‌نام دعوت‌شونده) ---
+  if (eventType === 'referral') {
+    const refActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
+    const refThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10);
+    const refGift = parseInt(await getSetting('bonus_referral_gift', '0'), 10);
+    const refActivatedAt = await getSetting('bonus_referral_activated_at', null);
+    if (refActive && refGift > 0 && refThreshold > 0) {
+      let query = "SELECT COUNT(*)::int AS cnt FROM users WHERE referrer_id = $1";
+      const params = [userId];
+      if (refActivatedAt) {
+        query += ' AND registered_at >= $2';
+        params.push(refActivatedAt);
+      }
+      const cntRes = await pool.query(query, params);
+      const totalReferrals = cntRes.rows[0].cnt;
+
+      const receivedCount = user.ref_bonus_count || 0;
+      const eligibleBonuses = Math.floor(totalReferrals / refThreshold) - receivedCount;
+      if (eligibleBonuses > 0) {
+        const totalGift = eligibleBonuses * refGift;
+        // شرط گردش: بونوس دعوت باید در بازی‌ها چرخانده شود تا قابل برداشت شود
+        const wagerMultiplier = parseFloat(await getSetting('referral_wagering_multiplier', '1')) || 1;
+        const wagerRequirement = Math.round(totalGift * wagerMultiplier);
+        await pool.query(
+          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4',
+          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId]
+        );
+        try {
+          ctx.telegram.sendMessage(
+            userId,
+            `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
+            `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
+          );
+        } catch (e) {}
+      }
+    }
+  }
+}
+
+/**
+ * طرح سود مادام‌العمر: به‌ازای هر خرید موفقِ کاربر دعوت‌شده، درصدی از مبلغ خرید
+ * مستقیم و بلافاصله به موجودی اصلی (کیف پول) دعوت‌کننده واریز می‌شود.
+ * فقط زمانی فعال است که bonus_referral_percent_active روشن باشد؛ مستقل از بونوس ثبت‌نامی دعوت است.
+ * @param {object} ctx - context تلگرام
+ * @param {string} buyerId - telegram_id خریدار (دعوت‌شونده)
+ * @param {number} purchaseAmount - مبلغ خرید (پایه، بدون کارمزد خود سیستم)
+ */
+async function checkAndGrantReferralCommission(ctx, buyerId, purchaseAmount) {
+  const percentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
+  const percentValue = parseFloat(await getSetting('bonus_referral_percent', '0'));
+  if (!percentActive || !percentValue || percentValue <= 0) return;
+
+  const buyer = await getUser(buyerId);
+  if (!buyer || !buyer.referrer_id) return;
+
+  const referrer = await getUser(buyer.referrer_id);
+  if (!referrer) return;
+
+  const commission = Math.round(Number(purchaseAmount) * (percentValue / 100));
+  if (commission <= 0) return;
+
+  await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [commission, referrer.telegram_id]);
+  try {
+    const { logTransaction } = require('../db');
+    await logTransaction(referrer.telegram_id, 'bonus', commission, `سود مادام‌العمر از خرید کاربر دعوت‌شده (${percentValue}٪)`);
+  } catch (e) {}
+  try {
+    await ctx.telegram.sendMessage(referrer.telegram_id,
+      `♾️ سود دعوت شما\n\n💰 ${commission.toLocaleString('en-US')} تومان (${percentValue}٪ از خرید یکی از دعوت‌شده‌هایتان) به کیف پول شما اضافه شد.`
     );
-  });
+  } catch (e) {}
+}
 
-  bot.action('admin_currency_feed_toggle', async (ctx) => {
-    if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
-    ctx.answerCbQuery();
-
-    const current = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
-    const newValue = current.rows.length > 0 && current.rows[0].value === 'true' ? 'false' : 'true';
-
-    await pool.query(
-      "INSERT INTO settings (key, value) VALUES ('currency_feed_active', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-      [newValue]
-    );
-
-    if (newValue === 'true') {
-      await startFeedTimer(bot);
-      ctx.reply('✅ فید نرخ ارز فعال شد.');
-    } else {
-      await stopFeedTimer();
-      ctx.reply('✅ فید نرخ ارز غیرفعال شد.');
-    }
-  });
-
-  bot.action('admin_currency_feed_interval', async (ctx) => {
-    if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    sessions[ctx.from.id] = {
-      flow: 'admin_currency_feed_interval',
-      step: 'waiting_value',
-      lang: 'fa'
-    };
-
-    ctx.reply('⏱️ **تنظیم زمانبندی فید نرخ ارز**\n\nلطفاً زمان را به **دقیقه** وارد کنید:\nمثال: `60` (هر یک ساعت)', { parse_mode: 'Markdown' });
-  });
-
-  bot.action('admin_currency_feed_send', async (ctx) => {
-    if (!ADMIN_IDS.includes(Number(ctx.from.id))) return;
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-
-    const msg = await ctx.reply('📨 در حال ارسال نرخ‌ها به کانال...');
-    try {
-      await sendRatesToChannel(bot);
-      await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ نرخ‌ها با موفقیت به کانال ارسال شدند.');
-    } catch (err) {
-      await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '❌ خطا در ارسال: ' + err.message);
-    }
-  });
-
-  bot.on('text', async (ctx, next) => {
-    const session = sessions[ctx.from.id];
-    if (!session || session.flow !== 'admin_currency_feed_interval') return next();
-
-    const minutes = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-    if (!minutes || minutes < 1) {
-      ctx.reply('❌ لطفاً یک عدد معتبر (بزرگتر از ۰) وارد کنید.');
-      return;
-    }
-
-    const seconds = minutes * 60;
-    await pool.query(
-      "INSERT INTO settings (key, value) VALUES ('currency_feed_interval', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-      [String(seconds)]
-    );
-
-    const isActive = await pool.query(`SELECT value FROM settings WHERE key = 'currency_feed_active'`);
-    if (isActive.rows.length > 0 && isActive.rows[0].value === 'true') {
-      await startFeedTimer(bot);
-    }
-
-    delete sessions[ctx.from.id];
-    ctx.reply('✅ زمانبندی فید نرخ ارز به **هر ' + minutes + ' دقیقه** تنظیم شد.');
-  });
-
-};
+module.exports = { checkAndGrantBonuses, checkAndGrantReferralCommission };
