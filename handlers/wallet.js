@@ -1,7 +1,7 @@
 // handlers/wallet.js
 const texts = require('../texts');
 const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool, getUser, updateUser, getUserCards, getTransactionLogs, logTransaction, getAdmin, getAllAdmins } = require('../db');
+const { pool, getUser, updateUser, getUserCards, getTransactionLogs, logTransaction, getAdmin, getAllAdmins, getSetting, setSetting } = require('../db');
 const { MIN_WITHDRAW, ADMIN_IDS } = require('../constants');
 const R = require('./receipts');
 
@@ -283,7 +283,27 @@ module.exports = function registerWalletHandlers(bot) {
     if (!user || !user.card_number) {
       return ctx.reply('❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی کیف پول گزینه «افزودن کارت جدید» را انتخاب کنید.');
     }
-    sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: (user && user.language) || 'fa' };
+    const cards = await getUserCards(ctx.from.id);
+    if (cards.length === 1) {
+      sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { card: cards[0].card_number } };
+      return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`);
+    }
+    sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_card', lang: (user && user.language) || 'fa', data: {} };
+    const buttons = cards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `wcard:${i}` }]);
+    return ctx.reply('کارت مقصد واریز را انتخاب کنید:', { reply_markup: { inline_keyboard: buttons } });
+  });
+
+  bot.action(/^wcard:(\d+)$/, async (ctx) => {
+    ctx.answerCbQuery();
+    const session = sessions[ctx.from.id];
+    if (!session || session.flow !== 'withdraw' || session.step !== 'waiting_card') return;
+    const cards = await getUserCards(ctx.from.id);
+    const idx = parseInt(ctx.match[1], 10);
+    const card = cards[idx];
+    if (!card) return ctx.reply('❌ کارت یافت نشد. دوباره تلاش کنید.');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    session.data.card = card.card_number;
+    session.step = 'waiting_amount';
     return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`);
   });
 
@@ -318,12 +338,45 @@ module.exports = function registerWalletHandlers(bot) {
     const user = await getUser(ctx.from.id);
     if (!user) return;
     const refLink = `https://t.me/${ctx.botInfo.username}?start=${user.telegram_id}`;
-    const inviteRes = await pool.query('SELECT COUNT(*)::int AS count FROM users WHERE referrer_id = $1', [String(ctx.from.id)]);
-    const count = inviteRes.rows[0].count;
-    return ctx.reply(
-      `🔗 لینک دعوت شما:\n${refLink}\n\n👥 تعداد دعوت: ${count} نفر\n💰 پاداش هر دعوت: طبق قوانین به موجودی شما اضافه می‌شود.`,
-      { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]] } }
-    );
+
+    const bonusActive = await getSetting('bonus_referral_active', 'false');
+    const bonusGift = await getSetting('bonus_referral_gift', '0');
+    const percentActive = await getSetting('bonus_referral_percent_active', 'false');
+    const percentValue = await getSetting('bonus_referral_percent', '0');
+
+    if (percentActive === 'true' && Number(percentValue) > 0) {
+      const msg =
+        R.HEADER +
+        `\n♾️ طرح سود مادام‌العمر\n\n` +
+        `👥 دعوت موفق\n` +
+        `📈 درصد سود: ${percentValue}٪\n\n` +
+        `هر خریدِ دعوت‌شده،\n` +
+        `برای شما سهم ایجاد می‌کند.`;
+      return ctx.reply(msg, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}` }],
+            [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
+          ]
+        }
+      });
+    }
+
+    const gift = bonusActive === 'true' ? Number(bonusGift).toLocaleString('en-US') : '××××';
+    const msg =
+      R.HEADER +
+      `\n👥 دعوت از تو بونوس از ووچینو⁰¹\n\n` +
+      `🪎پاداش هر دعوت: ${gift} تومان\n\n` +
+      `🔗 لینک اختصاصی خودت رو بساز\n` +
+      `و از دعوت‌های موفق پاداش بگیر.`;
+    return ctx.reply(msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}` }],
+          [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
+        ]
+      }
+    });
   });
 
   // ==================== تأیید/رد واریز از روی رسید ارسالی ادمین ====================
@@ -360,6 +413,43 @@ module.exports = function registerWalletHandlers(bot) {
     return ctx.reply('❌ دلیل رد این واریز را بنویسید (همین متن برای کاربر ارسال می‌شود):');
   });
 
+  // ==================== تأیید/رد احراز هویت طلایی ====================
+  bot.action(/^gold_ok:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
+    ctx.answerCbQuery();
+    const id = parseInt(ctx.match[1], 10);
+    const res = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [id]);
+    if (res.rows.length === 0) return ctx.reply('⚠️ درخواست یافت نشد.');
+    const req = res.rows[0];
+    if (req.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
+
+    await pool.query(`UPDATE wallet_requests SET status = 'approved' WHERE id = $1`, [id]);
+    await pool.query(`UPDATE users SET verification_status = 'gold' WHERE telegram_id = $1`, [req.telegram_id]);
+
+    const limit = await getSetting('gold_daily_limit', '10000000');
+    try {
+      await ctx.telegram.sendMessage(req.telegram_id,
+        R.HEADER +
+        `\n🏅 احراز هویت طلایی تأیید شد\n\n` +
+        `✅ حساب شما با موفقیت ارتقا یافت.\n\n` +
+        `💰 سقف خرید روزانه:\n${Number(limit).toLocaleString('en-US')} تومان\n\n` +
+        `🔐 سقف جدید از همین حالا برای حساب شما فعال است.\n\n` +
+        `🤝 اعتماد شما، اعتبار ماست.`
+      );
+    } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return ctx.reply('✅ احراز هویت طلایی تأیید شد و پیام برای کاربر ارسال شد.');
+  });
+
+  bot.action(/^gold_no:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
+    ctx.answerCbQuery();
+    const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'gold_reject', step: 'waiting_reason', data: { id } };
+    return ctx.reply('❌ دلیل رد احراز هویت را بنویسید (همین متن برای کاربر ارسال می‌شود):');
+  });
+
   // ==================== ورودی‌های متنی ====================
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
@@ -383,6 +473,23 @@ module.exports = function registerWalletHandlers(bot) {
       return ctx.reply('❌ درخواست رد شد و رسید ناموفق برای کاربر ارسال شد.');
     }
 
+    if (session.flow === 'gold_reject' && session.step === 'waiting_reason') {
+      const reason = ctx.message.text.trim();
+      const id = session.data.id;
+      delete sessions[ctx.from.id];
+      const res = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [id]);
+      if (res.rows.length === 0) return ctx.reply('⚠️ درخواست یافت نشد.');
+      const req = res.rows[0];
+      if (req.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
+      await pool.query('UPDATE wallet_requests SET status = $1, reject_reason = $2 WHERE id = $3', ['rejected', reason, id]);
+      try {
+        await ctx.telegram.sendMessage(req.telegram_id,
+          R.HEADER + `\n❌ احراز هویت طلایی رد شد\n\n📝 دلیل: ${reason}\n\nمی‌توانید مجدداً با مدارک صحیح اقدام کنید.`
+        );
+      } catch (e) {}
+      return ctx.reply('❌ احراز هویت رد شد و پیام برای کاربر ارسال شد.');
+    }
+
     if (session.flow === 'deposit_card' && session.step === 'waiting_amount') {
       const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
       if (!amount || amount <= 0) {
@@ -403,19 +510,20 @@ module.exports = function registerWalletHandlers(bot) {
       if (amount > Number(user.balance)) {
         return ctx.reply(`❌ موجودی کیف پولت کافی نیست.\nمبلغ برداشت: ${amount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${Number(user.balance).toLocaleString('en-US')} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.`);
       }
+      const destCard = (session.data && session.data.card) || user.card_number;
 
       const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
       await pool.query(
         `INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code)
          VALUES ($1, 'withdraw', $2, $3, 'pending', NOW(), $4)`,
-        [String(ctx.from.id), amount, user.card_number, trackCode]
+        [String(ctx.from.id), amount, destCard, trackCode]
       );
 
       delete sessions[ctx.from.id];
       ctx.reply(`درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.\n\n📍 کد پیگیری: \`${trackCode}\``, { parse_mode: 'Markdown' });
 
       const ids = await adminIdsList();
-      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n📱 ${user.phone || '---'}\n💳 ${user.card_number}\n💰 ${amount.toLocaleString()} تومان\n📍 کد: ${trackCode}`).catch(console.error));
+      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n📱 ${user.phone || '---'}\n💳 ${destCard}\n💰 ${amount.toLocaleString()} تومان\n📍 کد: ${trackCode}`).catch(console.error));
     }
 
     if (session.flow === 'add_card' && session.step === 'waiting_number') {
@@ -498,12 +606,24 @@ module.exports = function registerWalletHandlers(bot) {
       if (session.flow === 'gold_verify') {
         const user = await getUser(ctx.from.id);
         const ids = await adminIdsList();
+        const ins = await pool.query(
+          `INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code)
+           VALUES ($1, 'gold_verify', 0, $2, 'pending', NOW(), $3) RETURNING id`,
+          [String(ctx.from.id), fileId, 'GOLD-' + Math.floor(1000000 + Math.random() * 9000000)]
+        );
+        const reqId = ins.rows[0].id;
         for (const adminId of ids) {
           try {
-            ctx.telegram.sendPhoto(adminId, fileId, {
+            await ctx.telegram.sendPhoto(adminId, fileId, {
               caption: `📸 مدارک احراز طلایی\n👤 ${user.full_name || '---'}\n🆔 \`${user.telegram_id}\`\n📱 ${user.phone || '---'}\n💳 ${user.card_number || '---'}`,
-              parse_mode: 'Markdown'
-            }).catch(console.error);
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '✅ تأیید احراز', callback_data: `gold_ok:${reqId}` }],
+                  [{ text: '❌ رد احراز', callback_data: `gold_no:${reqId}` }]
+                ]
+              }
+            });
           } catch (e) { console.error(e); }
         }
         delete sessions[ctx.from.id];
