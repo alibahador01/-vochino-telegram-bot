@@ -7,7 +7,7 @@ const HEADER =
   '👑 ووچینو⁰¹\n' +
   '╰━━━━━━━ ❖ ━━━━━━━╯\n';
 
-const SEP_MONEY = '💲';
+const SEP_MONEY = '💲➖💲💲➖💲💲➖';
 const SEP_LINE = '━━━━━━━━━━━━━━━━';
 
 function faNum(n) {
@@ -42,7 +42,7 @@ function buildBuyReceipt(o) {
       `💵 مبلغ نهایی: ${faNum(o.paid)} تومان\n` +
       `🟢 وضعیت: موفق | پرداخت و صدور انجام شد\n` +
       SEP_LINE + '\n' +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       `💳 کارت پرداخت: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n';
     if (o.voucherCode || o.voucherHash) {
@@ -66,7 +66,7 @@ function buildBuyReceipt(o) {
       `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
       `💵 مبلغ نهایی: ${faNum(o.paid)} تومان\n` +
       `🟠 وضعیت: در انتظار | در حال پردازش و صدور\n` +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       `💳 کارت پرداخت: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n' +
       `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}\n` +
@@ -80,7 +80,7 @@ function buildBuyReceipt(o) {
     `💰 مبلغ سفارش: ${faNum(o.base)} تومان\n` +
     `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
     `🔴 وضعیت: ناموفق | خرید و صدور انجام نشد\n` +
-    `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+    (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
     SEP_LINE + '\n' +
     `❌ دلیل عدم انجام: ${o.reason || 'اطلاعات سفارش مورد تأیید قرار نگرفت.'}\n` +
     SEP_LINE + '\n' +
@@ -102,7 +102,7 @@ function buildSellReceipt(o) {
       `💵 مبلغ دریافتی: ${faNum(o.received)} تومان\n` +
       `🟢 وضعیت: موفق | فروش و واریز انجام شد\n` +
       SEP_MONEY + '\n' +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       `💳 کارت بانکی: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n' +
       `💰 مبلغ ${faNum(o.received)} تومان با موفقیت به کیف پول ووچینو⁰¹ شما اضافه شد.\n` +
@@ -121,7 +121,7 @@ function buildSellReceipt(o) {
       `💰 مبلغ فروش: ${faNum(o.amount)} تومان\n` +
       `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
       `🟠 وضعیت: در انتظار | در حال بررسی\n` +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       SEP_LINE + '\n' +
       `⏳ پس از تأیید توسط پشتیبانی، مبلغ به کیف پول شما اضافه می‌شود.\n` +
       SEP_LINE + '\n' +
@@ -135,7 +135,7 @@ function buildSellReceipt(o) {
     `💰 مبلغ فروش: ${faNum(o.amount)} تومان\n` +
     `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
     `🔴 وضعیت: ناموفق | فروش و واریز انجام نشد\n` +
-    `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+    (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
     SEP_LINE + '\n' +
     `❌ دلیل عدم انجام: ${o.reason || 'اطلاعات سفارش مورد تأیید قرار نگرفت.'}\n` +
     SEP_LINE + '\n' +
@@ -156,7 +156,7 @@ function buildWithdrawReceipt(o) {
       `💵 مبلغ واریزی: ${faNum(o.net)} تومان\n` +
       `🟢 وضعیت: موفق | مبلغ با موفقیت واریز شد\n` +
       SEP_MONEY + '\n' +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       `💳 کارت بانکی: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n' +
       `💰 مبلغ ${faNum(o.net)} تومان با موفقیت به حساب بانکی شما واریز شد.\n` +
@@ -175,7 +175,7 @@ function buildWithdrawReceipt(o) {
       `💰 مبلغ برداشت: ${faNum(o.amount)} تومان\n` +
       `💳 کارمزد برداشت: ${faNum(o.commission)} تومان\n` +
       `🟠 وضعیت: در انتظار | در حال بررسی\n` +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       `💳 کارت بانکی: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n' +
       `⏳ پس از تأیید، مبلغ به کارت بانکی شما واریز می‌شود.\n` +
@@ -190,7 +190,7 @@ function buildWithdrawReceipt(o) {
     `💰 مبلغ برداشت: ${faNum(o.amount)} تومان\n` +
     `💳 کارمزد برداشت: ${faNum(o.commission)} تومان\n` +
     `🔴 وضعیت: ناموفق | برداشت و واریز انجام نشد\n` +
-    `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+    (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
     SEP_LINE + '\n' +
     `❌ دلیل عدم انجام: ${o.reason || 'اطلاعات درخواست مورد تأیید قرار نگرفت.'}\n` +
     SEP_LINE + '\n' +
@@ -208,7 +208,7 @@ function buildDepositReceipt(o) {
       `💰 مبلغ شارژ: ${faNum(o.amount)} تومان\n` +
       `🟢 وضعیت: موفق | مبلغ به کیف پول اضافه شد\n` +
       SEP_MONEY + '\n' +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       SEP_LINE + '\n' +
       `💰 مبلغ ${faNum(o.amount)} تومان با موفقیت به کیف پول ووچینو⁰¹ شما اضافه شد.\n` +
       `📍 موجودی جدید: ${faNum(o.newBalance)} تومان\n` +
@@ -224,7 +224,7 @@ function buildDepositReceipt(o) {
       `فاکتور شارژ 📋\n` +
       `💰 مبلغ شارژ: ${faNum(o.amount)} تومان\n` +
       `🟠 وضعیت: در انتظار | در حال بررسی رسید\n` +
-      `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+      (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       SEP_LINE + '\n' +
       `⏳ پس از تأیید رسید توسط پشتیبانی، مبلغ به کیف پول اضافه می‌شود.\n` +
       SEP_LINE + '\n' +
@@ -236,7 +236,7 @@ function buildDepositReceipt(o) {
     `فاکتور شارژ 📋\n` +
     `💰 مبلغ شارژ: ${faNum(o.amount)} تومان\n` +
     `🔴 وضعیت: ناموفق | واریز انجام نشد\n` +
-    `🔖 کد پیگیری سفارش: ${o.tracking}\n` +
+    (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
     SEP_LINE + '\n' +
     `❌ دلیل عدم انجام: ${o.reason || 'اطلاعات واریز مورد تأیید قرار نگرفت.'}\n` +
     SEP_LINE + '\n' +
