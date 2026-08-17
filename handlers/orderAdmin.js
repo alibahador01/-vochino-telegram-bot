@@ -8,7 +8,7 @@ const { sessions } = require('../utils');
 const { pool, getUser, getAllAdmins, getAdmin, logTransaction } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const R = require('./receipts');
-const { checkAndGrantBonuses } = require('./bonusEngine');
+const { checkAndGrantBonuses, checkAndGrantReferralCommission } = require('./bonusEngine');
 
 module.exports = function registerOrderAdminHandlers(bot) {
 
@@ -309,6 +309,7 @@ module.exports = function registerOrderAdminHandlers(bot) {
         [code, hash, id]);
       try { await logTransaction(o.telegram_id, 'buy', -Number(o.amount), `خرید ${o.product_name || o.product_type}`); } catch (e) {}
       try { await checkAndGrantBonuses(ctx, o.telegram_id, 'purchase'); } catch (e) {}
+      try { await checkAndGrantReferralCommission(ctx, o.telegram_id, Number(o.amount) - Number(o.commission || 0)); } catch (e) {}
 
       const user = await getUser(o.telegram_id);
       const paid = Number(o.amount || 0);
