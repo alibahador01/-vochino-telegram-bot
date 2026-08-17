@@ -769,6 +769,14 @@ async function initDb() {
       key TEXT PRIMARY KEY,
       value TEXT,
       updated_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS bonus_withdrawals (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      amount INTEGER NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW(),
+      processed_at TIMESTAMP
     );`
   ];
 
