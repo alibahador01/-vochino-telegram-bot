@@ -15,6 +15,7 @@ const {
   validatePlaceholders, refreshText, formatTextForDisplay
 } = require('../textManager');
 const { ADMIN_IDS, MIN_WITHDRAW } = require('../constants');
+const { calculateSellPayout, isAutoExecutionEnabled } = require('../exchangeEngine');
 
 function isAdmin(telegramId) {
   return ADMIN_IDS.includes(Number(telegramId));
@@ -665,13 +666,16 @@ module.exports = function registerAdminHandlers(bot) {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
     const apis = await getAllApiSources(true);
+    const autoMode = await isAutoExecutionEnabled();
     let msg = '🔗 **مدیریت صرافی‌ها**\n\n';
+    msg += `⚙️ حالت اجرای سفارشات: ${autoMode ? '🟢 خودکار (API واقعی فراخوانی می‌شود)' : '🔴 دستی (فقط تحویل توسط ادمین — پیش‌فرض ایمن)'}\n\n`;
     if (apis.length === 0) msg += '❌ هیچ صرافی ثبت نشده.';
     else apis.forEach(a => msg += `🔹 ${a.name} (${a.type}) | اولویت: ${a.priority} | ${a.is_active ? '✅' : '⛔'}\n`);
     ctx.reply(msg, {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
+          [{ text: autoMode ? '🔴 غیرفعال کردن اجرای خودکار' : '🟢 فعال کردن اجرای خودکار', callback_data: 'admin_toggle_api_exec_mode' }],
           [{ text: '➕ افزودن صرافی', callback_data: 'admin_add_api_source' }],
           [{ text: '✏️ ویرایش', callback_data: 'admin_edit_api_source' }],
           [{ text: '❌ غیرفعال کردن', callback_data: 'admin_delete_api_source' }],
@@ -679,6 +683,17 @@ module.exports = function registerAdminHandlers(bot) {
         ]
       }
     });
+  });
+
+  bot.action('admin_toggle_api_exec_mode', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const cur = await isAutoExecutionEnabled();
+    await setSetting('api_execution_mode', cur ? 'manual' : 'auto');
+    ctx.answerCbQuery(cur ? '🔴 حالت دستی فعال شد' : '🟢 حالت خودکار فعال شد');
+    ctx.reply(cur
+      ? '✅ اجرای خودکار API غیرفعال شد. همه سفارش‌ها دستی پردازش می‌شوند.'
+      : '⚠️ اجرای خودکار API فعال شد. از این پس با هر سفارش، سیستم صرافی‌های متصل را به ترتیب اولویت فراخوانی می‌کند.'
+    );
   });
 
   bot.action('admin_add_api_source', async (ctx) => {
@@ -1122,7 +1137,7 @@ module.exports = function registerAdminHandlers(bot) {
     if (!isAdmin(ctx.from.id)) return;
     const requestId = ctx.match[1]; ctx.answerCbQuery();
     sessions[ctx.from.id] = { flow: 'admin_sell_amount', step: 'waiting_amount', data: { requestId } };
-    ctx.reply('مبلغ نهایی فروش (تومان) را وارد کنید:');
+    ctx.reply('💰 مبلغ پایه (ارزش واقعی/تأیید‌شده ووچر به تومان) را وارد کنید — کارمزد تنظیم‌شده در پنل به‌صورت خودکار از آن کسر و مبلغ نهایی به کاربر واریز می‌شود:');
   });
 
   bot.action(/^admin_sell_reject_(\d+)/, async (ctx) => {
@@ -1613,17 +1628,22 @@ module.exports = function registerAdminHandlers(bot) {
       return;
     }
 
-    // فروش - ورود مبلغ
+    // فروش - ورود مبلغ پایه و کسر خودکار کارمزد
     if (session.flow === 'admin_sell_amount' && session.step === 'waiting_amount') {
-      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
-      if (!amount || amount <= 0) return ctx.reply('⚠️ مبلغ نامعتبر.');
+      const baseAmount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
+      if (!baseAmount || baseAmount <= 0) return ctx.reply('⚠️ مبلغ نامعتبر.');
       const requestId = session.data.requestId;
       const req = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
-      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [amount, req.telegram_id]);
-      await pool.query("UPDATE sell_orders SET status='approved', amount=$1 WHERE id=$2", [amount, requestId]);
-      ctx.telegram.sendMessage(req.telegram_id, `✅ فروش تأیید شد.\n💰 ${amount.toLocaleString()} تومان به کیف پول اضافه شد.`);
+      if (!req || req.status !== 'pending_review') { delete sessions[ctx.from.id]; return ctx.reply('❌ این درخواست قبلاً بررسی شده.'); }
+      const sellProduct = await getSellProductByKey(req.product_type);
+      const { commission, payout } = calculateSellPayout(baseAmount, sellProduct || { commission_type: 'none', commission_value: 0 });
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, req.telegram_id]);
+      await pool.query("UPDATE sell_orders SET status='approved', amount=$1, commission=$2, fulfillment_mode='manual' WHERE id=$3", [payout, commission, requestId]);
+      ctx.telegram.sendMessage(req.telegram_id,
+        `✅ فروش تأیید شد.\n💰 مبلغ پایه: ${baseAmount.toLocaleString()} تومان\n💳 کارمزد: ${commission.toLocaleString()} تومان\n💵 واریز به کیف پول: ${payout.toLocaleString()} تومان`
+      );
       delete sessions[ctx.from.id];
-      ctx.reply('✅ تأیید شد.');
+      ctx.reply(`✅ تأیید شد.\nپایه: ${baseAmount.toLocaleString()} | کارمزد: ${commission.toLocaleString()} | واریزی: ${payout.toLocaleString()}`);
       return;
     }
 
