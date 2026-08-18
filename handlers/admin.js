@@ -663,7 +663,11 @@ module.exports = function registerAdminHandlers(bot) {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
 
-    const products = await getSellProducts(false);
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+
+    let products;
+    try { products = await getSellProducts(false); }
+    catch (e) { return ctx.reply('⚠️ خطا: ' + e.message); }
     let msg = '🎟 **مدیریت محصولات فروش**\n\n';
     if (products.length === 0) {
       msg += '❌ هیچ محصولی تعریف نشده.';
