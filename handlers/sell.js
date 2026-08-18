@@ -4,6 +4,7 @@ const { sessions, fillTemplate } = require('../utils');
 const { pool, getUser, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { tryAutoFulfillSell } = require('../exchangeEngine');
+const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
 
 module.exports = function registerSellHandlers(bot) {
