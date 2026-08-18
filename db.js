@@ -833,6 +833,7 @@ async function initDb() {
     // orders
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT',
+    'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_hash TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS voucher_code TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
