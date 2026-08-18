@@ -822,6 +822,7 @@ async function initDb() {
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS manual_delivery INTEGER DEFAULT 1',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden INTEGER DEFAULT 0',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS min_amount NUMERIC DEFAULT 0',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
 
     // sell_products
