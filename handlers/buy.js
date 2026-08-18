@@ -83,7 +83,14 @@ module.exports = function registerBuyHandlers(bot) {
     if (maxAmount > 0 && amount > maxAmount) {
       return ctx.reply(`❌ حداکثر مبلغ خرید ${maxAmount.toLocaleString('en-US')} تومان است. دوباره وارد کنید:`);
     }
-
+    const limitCheck = await checkDailyLimit(ctx.from.id, amount);
+    if (!limitCheck.ok) {
+      delete sessions[ctx.from.id];
+      return ctx.reply(
+        `🔒 سقف احراز هویت نقره‌ای شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان در روز است.\nبرای افزایش سقف معاملات، احراز هویت طلایی را انجام دهید.`,
+        { reply_markup: { inline_keyboard: [[{ text: '👑 احراز هویت طلایی', callback_data: 'profile_verification' }]] } }
+      );
+      }
     const product = await getProductByKey(session.data.productType);
     let commission = 0, finalAmount = amount;
     if (product) {
