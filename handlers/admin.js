@@ -659,15 +659,11 @@ module.exports = function registerAdminHandlers(bot) {
   // ============================================
   // مدیریت محصولات فروش
   // ============================================
-  bot.action('admin_products_sell', async (ctx) => {
+bot.action('admin_products_sell', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
 
-    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
-
-    let products;
-    try { products = await getSellProducts(false); }
-    catch (e) { return ctx.reply('⚠️ خطا: ' + e.message); }
+    const products = await getSellProducts(false);
     let msg = '🎟 **مدیریت محصولات فروش**\n\n';
     if (products.length === 0) {
       msg += '❌ هیچ محصولی تعریف نشده.';
