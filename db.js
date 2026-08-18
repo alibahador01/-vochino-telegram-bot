@@ -953,6 +953,7 @@ async function initDb() {
         ('bonus_referral_percent', '0', NOW()),
         ('referral_wagering_multiplier', '1', NOW()),
         ('gold_daily_limit', '10000000', NOW()),
+        ('silver_daily_limit', '2000000', NOW()),
         ('bonus_referral_activated_at', NULL, NOW())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `);
