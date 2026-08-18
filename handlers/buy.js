@@ -49,6 +49,10 @@ module.exports = function registerBuyHandlers(bot) {
     ctx.answerCbQuery();
     const product = await getProductByKey(key);
     if (!product || !product.active) return ctx.reply('❌ این محصول در دسترس نیست.');
+    const user = await getUser(ctx.from.id);
+    if (!user || !user.verification_status || user.verification_status === 'none') {
+      return startVerification(ctx, 'buy', key);
+  }
 
     sessions[ctx.from.id] = {
       flow: 'buy',
