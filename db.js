@@ -653,6 +653,7 @@ async function initDb() {
       key TEXT UNIQUE,
       name TEXT,
       unit_price NUMERIC,
+      min_amount NUMERIC DEFAULT 0,
       sample_code TEXT,
       commission_type TEXT DEFAULT 'none',
       commission_value NUMERIC DEFAULT 0,
