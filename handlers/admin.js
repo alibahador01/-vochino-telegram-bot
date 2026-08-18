@@ -1325,7 +1325,8 @@ bot.action('admin_products_sell', async (ctx) => {
     }
 
     // افزودن محصول فروش
-    if (session.step === 'waiting_unit_price') {
+    if (session.flow === 'admin_add_product_sell') {
+      if (session.step === 'waiting_unit_price') {
         const price = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
         if (isNaN(price) || price <= 0) return ctx.reply('❌ نامعتبر.');
         session.data.unitPrice = price;
