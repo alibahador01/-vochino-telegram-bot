@@ -1325,33 +1325,34 @@ bot.action('admin_products_sell', async (ctx) => {
     }
 
     // افزودن محصول فروش
-    if (session.flow === 'admin_add_product_sell') {
-      if (session.step === 'waiting_name') {
-        session.data.name = ctx.message.text.trim();
-        session.step = 'waiting_unit_price';
-        return ctx.reply('💰 قیمت واحد را وارد کنید:');
-      }
-      if (session.step === 'waiting_unit_price') {
+    if (session.step === 'waiting_unit_price') {
         const price = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
         if (isNaN(price) || price <= 0) return ctx.reply('❌ نامعتبر.');
         session.data.unitPrice = price;
+        session.step = 'waiting_min_amount';
+        return ctx.reply('💰 حداقل مبلغ فروش (تومان) را وارد کنید:');
+      }
+      if (session.step === 'waiting_min_amount') {
+        const minAmount = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
+        if (isNaN(minAmount) || minAmount < 0) return ctx.reply('❌ نامعتبر.');
+        session.data.minAmount = minAmount;
         session.step = 'waiting_sample_code';
         return ctx.reply('🎫 نمونه کد را وارد کنید:');
       }
       if (session.step === 'waiting_sample_code') {
         const sampleCode = ctx.message.text.trim();
-        const { name, unitPrice } = session.data;
+        const { name, unitPrice, minAmount } = session.data;
         const key = name.replace(/\s+/g, '_').toLowerCase();
         try {
           await pool.query(
-            'INSERT INTO sell_products (key, name, unit_price, sample_code, active, created_at) VALUES ($1,$2,$3,$4,1,NOW()) ON CONFLICT (key) DO UPDATE SET name=$2, unit_price=$3, sample_code=$4, active=1',
-            [key, name, unitPrice, sampleCode]
+            'INSERT INTO sell_products (key, name, unit_price, min_amount, sample_code, active, created_at) VALUES ($1,$2,$3,$4,$5,1,NOW()) ON CONFLICT (key) DO UPDATE SET name=$2, unit_price=$3, min_amount=$4, sample_code=$5, active=1',
+            [key, name, unitPrice, minAmount, sampleCode]
           );
           delete sessions[ctx.from.id];
           ctx.reply('✅ محصول فروش اضافه شد.');
         } catch (err) { ctx.reply('❌ خطا: ' + err.message); }
         return;
-      }
+          }
     }
 
     // تنظیم کارمزد فروش
