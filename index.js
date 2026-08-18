@@ -84,6 +84,7 @@ bot.use(session());
 
 // هندلرها
 require('./handlers/registration')(bot);
+require('./handlers/verification')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
 require('./handlers/sell')(bot);
