@@ -629,6 +629,7 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       tracking_code TEXT UNIQUE,
       delivered_code TEXT,
+      delivered_hash TEXT,
       provider_tx_id TEXT,
       voucher_code TEXT
     );`,
