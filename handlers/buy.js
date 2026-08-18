@@ -4,6 +4,7 @@ const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('
 const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
 const { calculateBuyFinal, tryAutoFulfillBuy } = require('../exchangeEngine');
+const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
 
 module.exports = function registerBuyHandlers(bot) {
