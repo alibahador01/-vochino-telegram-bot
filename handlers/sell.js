@@ -43,6 +43,18 @@ module.exports = function registerSellHandlers(bot) {
     ctx.answerCbQuery();
     const product = await getSellProductByKey(key);
     if (!product || !product.active) return ctx.reply('❌ این محصول فروش در دسترس نیست.');
+    const user = await getUser(ctx.from.id);
+    if (!user || !user.verification_status || user.verification_status === 'none') {
+      return startVerification(ctx, 'sell', key);
+    }
+
+    const limitCheck = await checkDailyLimit(ctx.from.id, Number(product.unit_price || 0));
+    if (!limitCheck.ok) {
+      return ctx.reply(
+        `🔒 سقف احراز هویت نقره‌ای شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان در روز است.\nبرای افزایش سقف معاملات، احراز هویت طلایی را انجام دهید.`,
+        { reply_markup: { inline_keyboard: [[{ text: '👑 احراز هویت طلایی', callback_data: 'profile_verification' }]] } }
+      );
+    }
 
     sessions[ctx.from.id] = {
       flow: 'sell',
