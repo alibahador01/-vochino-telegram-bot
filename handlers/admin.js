@@ -577,7 +577,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
 
     const products = await getProducts(false);
-    let msg = '🛍 **مدیریت محصولات خرید**\n\n';
+    let msg = '🛍 مدیریت محصولات خرید\n\n';
     if (products.length === 0) {
       msg += '❌ هیچ محصولی تعریف نشده.';
     } else {
@@ -587,7 +587,6 @@ module.exports = function registerAdminHandlers(bot) {
     }
 
     ctx.reply(msg, {
-      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [{ text: '➕ افزودن محصول جدید', callback_data: 'admin_add_product_buy' }],
@@ -651,9 +650,9 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
     const res = await pool.query('SELECT * FROM products ORDER BY id ASC');
     if (res.rows.length === 0) return ctx.reply('📋 هیچ محصولی نیست.');
-    let msg = '📋 **لیست خرید**\n\n';
+    let msg = '📋 لیست خرید\n\n';
     res.rows.forEach(p => msg += `🔹 ${p.name} (${p.key}) | حداقل: ${p.min_amount} ${p.price_type==='usd'?'دلار':'تومان'} | کارمزد: ${p.commission_type==='none'?'0':p.commission_value+(p.commission_type==='percentage'?'%':' تومان')} | ${p.active?'✅':'⛔️'}\n`);
-    ctx.reply(msg, { parse_mode: 'Markdown' });
+    ctx.reply(msg);
   });
 
   // ============================================
@@ -664,7 +663,7 @@ bot.action('admin_products_sell', async (ctx) => {
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
 
     const products = await getSellProducts(false);
-    let msg = '🎟 **مدیریت محصولات فروش**\n\n';
+    let msg = '🎟 مدیریت محصولات فروش\n\n';
     if (products.length === 0) {
       msg += '❌ هیچ محصولی تعریف نشده.';
     } else {
@@ -674,7 +673,6 @@ bot.action('admin_products_sell', async (ctx) => {
     }
 
     ctx.reply(msg, {
-      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [{ text: '➕ افزودن محصول فروش', callback_data: 'admin_add_product_sell' }],
@@ -738,9 +736,9 @@ bot.action('admin_products_sell', async (ctx) => {
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
     const res = await pool.query('SELECT * FROM sell_products ORDER BY id ASC');
     if (res.rows.length === 0) return ctx.reply('📋 هیچ محصول فروشی نیست.');
-    let msg = '📋 **لیست فروش**\n\n';
+    let msg = '📋 لیست فروش\n\n';
     res.rows.forEach(p => msg += `🔹 ${p.name} (${p.key}) | قیمت واحد: ${Number(p.unit_price).toLocaleString()} | کارمزد: ${p.commission_type==='none'?'0':p.commission_value+(p.commission_type==='percentage'?'%':' تومان')} | ${p.active?'✅':'⛔️'}\n`);
-    ctx.reply(msg, { parse_mode: 'Markdown' });
+    ctx.reply(msg);
   });
 
   // ============================================
