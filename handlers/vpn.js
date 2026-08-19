@@ -1,7 +1,11 @@
 // handlers/vpn.js
 const net = require('net');
+const path = require('path');
 const { pool, checkMembership, getSetting, setSetting, getUser, getReferrals } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+
+const VPN_BANNER_PATH = path.join(__dirname, '..', 'assets', 'vpn_banner.jpg');
+const VPN_SUBSCRIBE_URL = 'http://rebrand.ly/Vochino-Sports01';
 
 // ======================= helpers =======================
 
@@ -204,17 +208,26 @@ async function showVpnMenu(ctx) {
     [String(userId), 'active', expiresAt.toISOString(), dataLimit, trackingCode]
   );
 
-  const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + userId;
+  try {
+    await ctx.replyWithPhoto({ source: VPN_BANNER_PATH });
+  } catch (e) {}
 
-  ctx.reply(
-    `🎉 **تبریک! سرویس VPN رایگان شما فعال شد.**\n\n` +
-    `👤 نام کاربری: ${ctx.from.first_name || 'کاربر'}\n` +
-    `🆔 آیدی: ${userId}\n` +
-    `🔗 **لینک سابسکرایب:**\n\`${subUrl}\`\n\n` +
-    `📅 مدت اعتبار: ${defaultDays} روز\n` +
-    `📊 حجم: ${defaultVolumeGB} گیگابایت\n\n` +
-    `✅ لینک را کپی کنید یا از دکمه‌های مدیریت استفاده کنید.`,
-    { parse_mode: 'Markdown' }
+  await ctx.reply(
+    '╭━━━━ ❖ ━━━━╮\n' +
+    '       👑 ووچینو⁰۱\n' +
+    '╰━━━━ ❖ ━━━━╯\n' +
+    '✨ اشتراک شما آماده‌ست\n' +
+    '👇 دکمه زیر رو بزنید\n' +
+    '🔗 دریافت لینک اشتراک\n\n' +
+    `📅 زمان اشتراک: ${defaultDays} روزه\n` +
+    `📦 حجم اشتراک: ${defaultVolumeGB} گیگ`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'دریافت لینک اشتراک', url: VPN_SUBSCRIBE_URL }]
+        ]
+      }
+    }
   );
 
   ctx.reply(
