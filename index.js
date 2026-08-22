@@ -71,7 +71,7 @@ app.listen(PORT, () => {
 
 // ضدخواب
 if (process.env.NODE_ENV !== 'development') {
-  const antiSleep = new AntiSleepBot(process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com');
+  const antiSleep = new AntiSleepBot(process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com');
   antiSleep.startAll();
 } else {
   setInterval(() => {
