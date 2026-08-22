@@ -20,10 +20,11 @@ async function getUserById(telegramId) {
 
 async function createUser(telegramId, phone, fullName, cardNumber, language = 'fa', referrerId = null) {
   const res = await pool.query(
-    'INSERT INTO users (telegram_id, phone, full_name, card_number, language, referrer_id, registered_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *',
+    'INSERT INTO users (telegram_id, phone, full_name, card_number, language, referrer_id, registered_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) ON CONFLICT (telegram_id) DO NOTHING RETURNING *',
     [String(telegramId), phone, fullName, cardNumber, language, referrerId]
   );
-  return res.rows[0];
+  if (res.rows[0]) return res.rows[0];
+  return getUserById(telegramId);
 }
 
 async function updateUser(telegramId, data) {
