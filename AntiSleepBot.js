@@ -1,20 +1,19 @@
 // AntiSleepBot.js
+// ضد خواب دو لایه: رباب کتی💃 (لایه اصلی) + علی دیوانه🕺 (لایه پشتیبان)
 const http = require('http');
 const https = require('https');
-const { EventEmitter } = require('events');
 
-class AntiSleepBot extends EventEmitter {
+class AntiSleepBot {
     constructor(appUrl = 'https://your-app.onrender.com') {
-        super();
         this.appUrl = appUrl;
-        this.systemAlive = true;
-        this.wakeCount = 0;
-        this.lastActivity = null;
-        this.intervalMs = 4 * 60 * 1000; // هر ۴ دقیقه یک بار کافیه
-        console.log('🛡️ Anti-Sleep Bot آماده (نسخه سبک)');
+        this.lastPingAt = Date.now();
+        this.primaryIntervalMs = 5 * 60 * 1000;   // رباب کتی: هر ۵ دقیقه
+        this.watchdogCheckMs = 60 * 1000;         // علی دیوانه: هر ۱ دقیقه فقط چک می‌کند
+        this.overdueMs = 6 * 60 * 1000;           // اگر بیش از ۶ دقیقه از آخرین پینگ گذشت، دیر مانده حساب می‌شود
+        this.alive = true;
     }
 
-    pingMyself() {
+    ping(who) {
         try {
             const url = new URL('/health', this.appUrl);
             const requester = url.protocol === 'https:' ? https : http;
@@ -25,30 +24,48 @@ class AntiSleepBot extends EventEmitter {
                 method: 'GET',
                 timeout: 5000
             }, (res) => {
-                this.wakeCount++;
-                this.lastActivity = new Date();
-                console.log(`🎯 پینگ سلامت: ${res.statusCode}`);
+                this.lastPingAt = Date.now();
+                console.log(`💃🕺 ${who} بیدارم! (${res.statusCode})`);
                 res.resume();
             });
-            req.on('error', (err) => console.log(`پینگ ناموفق: ${err.message}`));
+            req.on('error', (err) => console.log(`⚠️ ${who} پینگ ناموفق: ${err.message}`));
             req.on('timeout', () => req.destroy());
             req.end();
         } catch (e) {}
     }
 
-    startAll() {
-        console.log('✅ Anti-Sleep فعال شد (یک تایمر، هر ۲ دقیقه)');
+    // لایه اول - رباب کتی💃: هر ۵ دقیقه یک‌بار وارد می‌شود
+    startPrimary() {
         const tick = () => {
-            if (!this.systemAlive) return;
-            this.pingMyself();
-            setTimeout(tick, this.intervalMs);
+            if (!this.alive) return;
+            this.ping('رباب کتی💃');
+            setTimeout(tick, this.primaryIntervalMs);
         };
-        setTimeout(tick, 10000); // اولین پینگ ۱۵ ثانیه بعد از بوت
+        setTimeout(tick, 10000);
+    }
+
+    // لایه دوم - علی دیوانه🕺: فقط چک می‌کند، تا وقتی رباب کتی سر وقت باشد کاری نمی‌کند
+    startWatchdog() {
+        const check = () => {
+            if (!this.alive) return;
+            const overdue = Date.now() - this.lastPingAt > this.overdueMs;
+            if (overdue) {
+                console.log('🕺 رباب کتی دیر کرد، علی دیوانه وارد صحنه شد!');
+                this.ping('علی دیوانه🕺');
+            }
+            setTimeout(check, this.watchdogCheckMs);
+        };
+        setTimeout(check, this.watchdogCheckMs);
+    }
+
+    startAll() {
+        console.log('✅ ضد خواب دو لایه فعال شد (رباب کتی💃 + علی دیوانه🕺)');
+        this.startPrimary();
+        this.startWatchdog();
     }
 
     stop() {
-        console.log('🛑 خاموش شدن Anti-Sleep...');
-        this.systemAlive = false;
+        this.alive = false;
     }
 }
 
