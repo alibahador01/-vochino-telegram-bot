@@ -7,10 +7,9 @@ const { pool, checkMembership, getSetting, setSetting, getUser, getReferrals } =
 const { ADMIN_IDS } = require('../constants');
 
 const VPN_BANNER_PATH = path.join(__dirname, '..', 'assets', 'vpn_banner.jpg');
-const VPN_SUBSCRIBE_URL = 'http://rebrand.ly/Vochino-Sports01';
 const VPN_QR_BOX = { x0: 0.3076, y0: 0.3861, x1: 0.7158, y1: 0.6589 };
-
-// ======================= ساخت بنر + بارکد واقعی وسط جای سفید =======================
+const VPN_DASHBOARD_BASE = 'https://alibahador01.github.io/VochinoSports01';
+const RENEW_THRESHOLD_BYTES = 1 * 1024 * 1024 * 1024; // 1GB
 
 async function buildBannerWithQR(qrText) {
   const img = await Jimp.read(VPN_BANNER_PATH);
@@ -27,7 +26,14 @@ async function buildBannerWithQR(qrText) {
   return img.getBufferAsync(Jimp.MIME_JPEG);
 }
 
-// ======================= helpers =======================
+function getFeedUrl(userId) {
+  return (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + userId;
+}
+
+async function getDashboardUrl(userId) {
+  const base = await getSetting('vpn_dashboard_url', VPN_DASHBOARD_BASE);
+  return base + '?user_id=' + userId;
+}
 
 async function ensureVpnSchema() {
   const alterQueries = [
@@ -43,7 +49,6 @@ async function ensureVpnSchema() {
       console.log('خطا در افزودن ستون vpn_servers:', e.message);
     }
   }
-
   const subAlter = [
     `ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_used BIGINT DEFAULT 0`
   ];
@@ -69,13 +74,11 @@ function pingServer(server, timeoutMs) {
 
 async function healthCheckServer(server) {
   const LATENCY_UNSTABLE_MS = 2500;
-
   let attempt = await pingServer(server, 4000);
   if (!attempt.ok) {
     await new Promise(r => setTimeout(r, 600));
     attempt = await pingServer(server, 4000);
   }
-
   if (!attempt.ok) return { healthy: false, unstable: false, latency: null };
   if (attempt.latency > LATENCY_UNSTABLE_MS) return { healthy: false, unstable: true, latency: attempt.latency };
   return { healthy: true, unstable: false, latency: attempt.latency };
@@ -93,7 +96,6 @@ async function runHealthCheck(bot) {
       console.log(`⏳ سرور ${server.name} در حالت خنک‌سازی است`);
       continue;
     }
-
     const result = await healthCheckServer(server);
     let newFailures = server.consecutive_failures || 0;
     let newStatus = server.health_status;
@@ -120,7 +122,6 @@ async function runHealthCheck(bot) {
         `UPDATE vpn_servers SET is_active=false, cool_down_until=$1 WHERE id=$2`,
         [coolUntil, server.id]
       );
-
       if (server.priority === 1) {
         const backup = await pool.query(
           `SELECT * FROM vpn_servers
@@ -130,12 +131,10 @@ async function runHealthCheck(bot) {
            ORDER BY priority ASC, avg_latency_ms ASC, id ASC LIMIT 1`,
           [server.id]
         );
-
         if (backup.rows[0]) {
           await pool.query(`UPDATE vpn_servers SET priority=1 WHERE id=$1`, [backup.rows[0].id]);
           await pool.query(`UPDATE vpn_servers SET priority=2 WHERE id=$1`, [server.id]);
           console.log(`🔄 سوییچ خودکار: ${backup.rows[0].name} اکنون primary است`);
-
           try {
             await bot.telegram.sendMessage(
               ADMIN_IDS[0],
@@ -163,9 +162,25 @@ function startHealthCheckTimer(bot) {
   }, intervalSeconds * 1000);
 }
 
-// ======================= نمایش منوی VPN به کاربر =======================
+async function getLatestSub(userId) {
+  const res = await pool.query(
+    "SELECT * FROM vpn_subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+    [String(userId)]
+  );
+  return res.rows[0] || null;
+}
 
-async function showVpnMenu(ctx) {
+function canGetNewSub(sub) {
+  if (!sub) return true;
+  if (sub.status !== 'active') return true;
+  if (new Date(sub.expires_at) <= new Date()) return true;
+  const used = Number(sub.data_used || 0);
+  const limit = Number(sub.data_limit || 0);
+  if (limit > 0 && (limit - used) <= RENEW_THRESHOLD_BYTES) return true;
+  return false;
+}
+
+async function sendSpecialOffer(ctx) {
   ctx.answerCbQuery();
   try { await ctx.deleteMessage(); } catch (e) {}
 
@@ -179,67 +194,19 @@ async function showVpnMenu(ctx) {
   const isMember = await checkMembership(ctx);
   if (!isMember) return ctx.reply('⚠️ لطفاً ابتدا در کانال اجباری عضو شوید.');
 
-  const activeSub = await pool.query(
-    "SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active' AND expires_at > NOW()",
-    [String(userId)]
-  );
+  const existingSub = await getLatestSub(userId);
 
-  if (activeSub.rows.length > 0) {
-    const sub = activeSub.rows[0];
-    const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
-    const dataUsed = sub.data_used || 0;
-    const dataLimit = sub.data_limit || 5 * 1024 * 1024 * 1024;
-    const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + userId;
-
+  if (!canGetNewSub(existingSub)) {
+    const dataLimit = Number(existingSub.data_limit || 0);
+    const dataUsed = Number(existingSub.data_used || 0);
+    const remainingGB = ((dataLimit - dataUsed) / (1024 * 1024 * 1024)).toFixed(2);
     return ctx.reply(
-      `🌐 **سرویس VPN فعال شما**\n\n` +
-      `📅 روزهای باقی‌مانده: ${daysLeft} روز\n` +
-      `📊 مصرف داده: ${(dataUsed / (1024 * 1024)).toFixed(2)} مگابایت از ${(dataLimit / (1024 * 1024 * 1024)).toFixed(0)} گیگابایت\n` +
-      `🔗 لینک اشتراک:\n\`${subUrl}\`\n\n` +
-      `برای دریافت QR Code یا مدیریت، از دکمه‌های زیر استفاده کنید:`,
+      `⚠️ شما هنوز حجم فعال دارید، لطفاً آن را مصرف کنید.\n\n📊 حجم باقی‌مانده: ${remainingGB} گیگ\n🔖 کد پیگیری: \`${existingSub.tracking_code}\``,
       {
         parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '📷 دریافت QR Code', callback_data: 'vpn_qr' }],
-            [{ text: '🌐 استعلام حجم', callback_data: 'vpn_status' }],
-            [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
-          ]
-        }
+        reply_markup: { inline_keyboard: [[{ text: '🟢 دریافت لینک اشتراک', callback_data: 'vpn_get_link:' + existingSub.tracking_code }]] }
       }
     );
-  }
-
-  const maxFreeAttempts = parseInt(await getSetting('vpn_max_free_attempts', '1'), 10);
-  const invitesForUnlock = parseInt(await getSetting('vpn_invites_for_unlock', '2'), 10);
-
-  const usedAttemptsRes = await pool.query(
-    "SELECT COUNT(*)::int AS cnt FROM vpn_subscriptions WHERE user_id = $1 AND status IN ('active','expired')",
-    [String(userId)]
-  );
-  const usedAttempts = usedAttemptsRes.rows[0].cnt;
-
-  if (usedAttempts >= maxFreeAttempts) {
-    const referrals = await getReferrals(userId);
-    const extraUnlocks = Math.max(0, usedAttempts - maxFreeAttempts + 1);
-    const neededReferrals = extraUnlocks * invitesForUnlock;
-
-    if (referrals < neededReferrals) {
-      const remaining = neededReferrals - referrals;
-      return ctx.reply(
-        `⚠️ شما حداکثر ${maxFreeAttempts} بار سرویس رایگان دریافت کرده‌اید.\n\n` +
-        `برای دریافت مجدد، باید ${remaining} نفر دیگر را دعوت کنید.\n` +
-        `👥 دعوت‌های فعلی شما: ${referrals} نفر`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🔗 دریافت لینک دعوت', callback_data: 'wallet_referral' }],
-              [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
-            ]
-          }
-        }
-      );
-    }
   }
 
   const defaultVolumeGB = parseInt(await getSetting('vpn_default_volume_gb', '5'), 10);
@@ -250,81 +217,77 @@ async function showVpnMenu(ctx) {
   const trackingCode = 'VPN-' + Math.floor(100000 + Math.random() * 900000);
 
   await pool.query(
-    'INSERT INTO vpn_subscriptions (user_id, status, expires_at, data_limit, tracking_code, created_at) VALUES ($1, $2, $3, $4, $5, NOW())',
+    'INSERT INTO vpn_subscriptions (user_id, status, expires_at, data_limit, data_used, tracking_code, created_at) VALUES ($1, $2, $3, $4, 0, $5, NOW())',
     [String(userId), 'active', expiresAt.toISOString(), dataLimit, trackingCode]
   );
 
-  const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + userId;
+  const waitMsg = await ctx.reply('⏳ در حال آماده‌سازی اشتراک اختصاصی شما...');
+  await new Promise(r => setTimeout(r, 900));
+  try { await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id); } catch (e) {}
+
+  const feedUrl = getFeedUrl(userId);
+  const caption =
+    '╭─── ✧ ویژه ووچینو⁰¹ ✧ ───╮\n\n' +
+    `🌐 اشتراک ${defaultVolumeGB} گیگ | اعتبار ${defaultDays} روز\n\n` +
+    'با رسیدن مصرف به ۱ گیگ، امکان دریافت اشتراک رایگان مجدد برای شما فعال می‌شود.\n\n' +
+    `🔖 کد پیگیری: ${trackingCode}\n\n` +
+    '◆ برای دریافت لینک اشتراک، کلیک کنید';
 
   try {
-    const bannerWithQr = await buildBannerWithQR(subUrl);
-    await ctx.replyWithPhoto({ source: bannerWithQr });
+    const bannerWithQr = await buildBannerWithQR(feedUrl);
+    await ctx.replyWithPhoto({ source: bannerWithQr }, {
+      caption,
+      reply_markup: { inline_keyboard: [[{ text: '🟢 دریافت لینک اشتراک', callback_data: 'vpn_get_link:' + trackingCode }]] }
+    });
   } catch (e) {
     console.log('خطا در ساخت بارکد روی بنر:', e.message);
-    try { await ctx.replyWithPhoto({ source: VPN_BANNER_PATH }); } catch (e2) {}
+    await ctx.reply(caption, {
+      reply_markup: { inline_keyboard: [[{ text: '🟢 دریافت لینک اشتراک', callback_data: 'vpn_get_link:' + trackingCode }]] }
+    });
   }
+}
+
+async function sendSubscriptionLink(ctx, trackingCode) {
+  ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  const res = await pool.query(
+    "SELECT * FROM vpn_subscriptions WHERE tracking_code = $1 AND user_id = $2",
+    [trackingCode, String(userId)]
+  );
+  const sub = res.rows[0];
+  if (!sub) return ctx.reply('⚠️ اشتراک یافت نشد.');
+
+  const dashboardUrl = await getDashboardUrl(userId);
 
   await ctx.reply(
-    '╭━━━━ ❖ ━━━━╮\n' +
-    '       👑 ووچینو⁰۱\n' +
-    '╰━━━━ ❖ ━━━━╯\n' +
-    '✨ اشتراک شما آماده‌ست\n' +
-    '👇 دکمه زیر رو بزنید\n' +
-    '🔗 دریافت لینک اشتراک\n\n' +
-    `📅 زمان اشتراک: ${defaultDays} روزه\n` +
-    `📦 حجم اشتراک: ${defaultVolumeGB} گیگ`,
+    `🔗 لینک اشتراک اختصاصی شما آماده است:\n\n` +
+    `📖 راهنمای اتصال:\n` +
+    `۱. یکی از اپلیکیشن‌های V2rayNG / Happ / Streisand را نصب کنید\n` +
+    `۲. روی دکمه زیر بزنید و از داشبورد، کانفیگ مدنظرتان را کپی کنید\n` +
+    `۳. کانفیگ را داخل اپلیکیشن Import کنید و وصل شوید\n\n` +
+    `🔖 کد پیگیری: \`${trackingCode}\``,
     {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: 'دریافت لینک اشتراک', url: VPN_SUBSCRIBE_URL }]
-        ]
-      }
-    }
-  );
-
-  ctx.reply(
-    '🌐 **سرویس VPN شما فعال شد.**\n\nبرای مدیریت از دکمه‌های زیر استفاده کنید:',
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '📷 دریافت QR Code', callback_data: 'vpn_qr' }],
-          [{ text: '🌐 استعلام حجم', callback_data: 'vpn_status' }],
-          [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
-        ]
-      }
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🌐 باز کردن داشبورد اشتراک', web_app: { url: dashboardUrl } }]] }
     }
   );
 }
 
-// ======================= رجیستر هندلرها =======================
-
 function registerVPNHandlers(bot) {
   ensureVpnSchema().then(() => startHealthCheckTimer(bot)).catch(console.error);
 
-  bot.action('menu_special', async (ctx) => {
-    await showVpnMenu(ctx);
-  });
+  bot.action('menu_special', sendSpecialOffer);
 
-  bot.action('vpn_qr', async (ctx) => {
-    ctx.answerCbQuery();
-    const subUrl = (process.env.BASE_URL || 'https://yourdomain.com') + '/sub/' + ctx.from.id;
-    try {
-      const bannerWithQr = await buildBannerWithQR(subUrl);
-      await ctx.replyWithPhoto({ source: bannerWithQr });
-    } catch (e) {
-      ctx.reply(`🔗 لینک سابسکرایب شما:\n\`${subUrl}\``, { parse_mode: 'Markdown' });
-    }
+  bot.action(/^vpn_get_link:(.+)$/, async (ctx) => {
+    await sendSubscriptionLink(ctx, ctx.match[1]);
   });
 
   bot.action('vpn_status', async (ctx) => {
     ctx.answerCbQuery();
-    const service = await pool.query(
-      "SELECT * FROM vpn_subscriptions WHERE user_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-      [String(ctx.from.id)]
-    );
-    if (!service.rows[0]) return ctx.reply('❌ سرویس فعالی یافت نشد.');
+    const sub = await getLatestSub(ctx.from.id);
+    if (!sub || sub.status !== 'active') return ctx.reply('❌ سرویس فعالی یافت نشد.');
 
-    const sub = service.rows[0];
     const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at) - new Date()) / (1000 * 60 * 60 * 24)));
     const dataUsed = sub.data_used || 0;
     const dataLimit = sub.data_limit || 5 * 1024 * 1024 * 1024;
@@ -341,4 +304,4 @@ function registerVPNHandlers(bot) {
 }
 
 module.exports = registerVPNHandlers;
-module.exports.showVpnMenu = registerVPNHandlers.showVpnMenu = showVpnMenu;
+module.exports.showVpnMenu = registerVPNHandlers.showVpnMenu = sendSpecialOffer;
