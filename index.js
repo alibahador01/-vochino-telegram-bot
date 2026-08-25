@@ -63,6 +63,84 @@ app.get('/sub/:userId', async (req, res) => {
   }
 });
 
+// ==================== API واقعی برای داشبورد سایت ====================
+app.get('/api/dashboard/:userId', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const userId = req.params.userId;
+  try {
+    const userRes = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [userId]);
+    if (!userRes.rows[0]) return res.status(404).json({ error: 'user not found' });
+    const u = userRes.rows[0];
+
+    const subRes = await pool.query(
+      "SELECT * FROM vpn_subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [userId]
+    );
+    const sub = subRes.rows[0] || null;
+
+    const serversRes = await pool.query(
+      `SELECT * FROM vpn_servers WHERE is_active = true ORDER BY priority ASC`
+    );
+
+    const guessProtocol = (text) => {
+      if (!text) return '';
+      if (text.startsWith('vless://')) return 'VLESS';
+      if (text.startsWith('vmess://')) return 'V2Ray';
+      if (text.startsWith('trojan://')) return 'Trojan';
+      if (text.startsWith('ss://')) return 'Shadowsocks';
+      return 'Config';
+    };
+
+    const configs = serversRes.rows
+      .filter(s => s.config_text && s.config_text.trim().length > 0)
+      .map(s => ({
+        country: s.name || 'Server',
+        city: '',
+        flag: '🌐',
+        protocol: guessProtocol(s.config_text.trim()),
+        url: s.config_text.trim(),
+        status: s.health_status === 'healthy' ? 'online' : 'offline'
+      }));
+
+    let subscription = { remainingDays: 0, totalDays: 0, expireDate: '—', status: 'none' };
+    let traffic = { used: '0 GB', total: '0 GB', remaining: '0 GB', percentage: 0 };
+
+    if (sub) {
+      const now = new Date();
+      const expires = new Date(sub.expires_at);
+      const created = new Date(sub.created_at);
+      const remainingDays = Math.max(0, Math.ceil((expires - now) / (1000 * 60 * 60 * 24)));
+      const totalDays = Math.max(1, Math.ceil((expires - created) / (1000 * 60 * 60 * 24)));
+      subscription = {
+        remainingDays,
+        totalDays,
+        expireDate: expires.toISOString().slice(0, 10),
+        status: sub.status
+      };
+      const dataUsed = Number(sub.data_used || 0);
+      const dataLimit = Number(sub.data_limit || 0);
+      const percentage = dataLimit > 0 ? Math.round((dataUsed / dataLimit) * 100) : 0;
+      traffic = {
+        used: (dataUsed / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
+        total: (dataLimit / (1024 * 1024 * 1024)).toFixed(0) + ' GB',
+        remaining: Math.max(0, (dataLimit - dataUsed) / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
+        percentage
+      };
+    }
+
+    res.json({
+      user: { username: u.full_name || u.username || userId, id: userId, hash: '', avatar: null },
+      subscription,
+      traffic,
+      configs
+    });
+  } catch (err) {
+    console.error('خطا در API داشبورد:', err);
+    res.status(500).json({ error: 'server error' });
+  }
+});
+
+</parameter>
 app.get('*', (req, res) => res.send('Vochino Bot Active'));
 
 app.listen(PORT, () => {
