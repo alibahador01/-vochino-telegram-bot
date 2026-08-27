@@ -40,35 +40,29 @@ async function sendTracked(ctx, session, text, extra) {
 function showMainMenu(ctx) {
   const isAdmin = ADMIN_IDS.includes(Number(ctx.from.id));
 
-  // دکمه‌های اصلی به‌ترتیب (همه کاربران)
   const buttons = [...mainMenuButtons];
 
-  // اضافه‌کردن دکمه ادمین برای ادمین‌ها
   if (isAdmin) {
     buttons.push(ADMIN_BUTTON);
   }
 
-  // ساخت ردیف‌ها: دوتایی به جز دکمه‌ی آخر که وسط می‌آید
   const rows = [];
   for (let i = 0; i < buttons.length; i += 2) {
     if (i + 1 < buttons.length) {
-      // دو دکمه در یک ردیف
       rows.push([
         { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key },
         { text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key }
       ]);
     } else {
-      // دکمه تک (پشتیبانی یا ادمین) – در وسط
       rows.push([
         { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key }
       ]);
     }
   }
 
-  // اگر دکمه آخر به‌خاطر فرد بودن تعداد، در ردیف آخر تنهاست، آن را وسط نمایش می‌دهیم.
-  // همچنین اگر تعداد دکمه‌ها زوج باشد، آخرین ردیف دو دکمه دارد و مشکلی نیست.
-
   const headerText =
+    '╭─ ✦ 👑 Vochino⁰¹ ✦─╮\n' +
+    '╰─ ✦ ────── ✦ ─╯\n\n' +
     '⚜️ مرجع تخصصی معاملات ووچر| Vochino⁰¹\n' +
     '🔹 سرعت بالا در نقدشوندگی\n' +
     '🔹️ پشتیبانی آنلاین و لحظه‌ای\n' +
@@ -78,7 +72,6 @@ function showMainMenu(ctx) {
   ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 }
 
-// سایر توابع بدون تغییر (sendMessageToUser, sendBroadcast, ...)
 async function sendMessageToUser(bot, userId, text, extra = {}) {
   try {
     const sent = await bot.telegram.sendMessage(userId, text, extra);
