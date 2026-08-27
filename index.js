@@ -140,7 +140,6 @@ app.get('/api/dashboard/:userId', async (req, res) => {
   }
 });
 
-</parameter>
 app.get('*', (req, res) => res.send('Vochino Bot Active'));
 
 app.listen(PORT, () => {
