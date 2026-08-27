@@ -171,6 +171,7 @@ require('./handlers/orderAdmin')(bot);
 require('./handlers/admin')(bot);
 require('./handlers/adminBonus')(bot);
 require('./handlers/misc')(bot);
+require('./handlers/aiSupport')(bot);
 require('./handlers/profile')(bot);
 require('./handlers/vpn')(bot);
 require('./handlers/currencyFeed')(bot);
