@@ -10,9 +10,6 @@ function isAdmin(telegramId) {
 
 module.exports = function registerMiscHandlers(bot) {
 
-  // ============================================
-  // بازگشت به منوی اصلی
-  // ============================================
   bot.action('back_main_menu', async (ctx) => {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
@@ -20,9 +17,6 @@ module.exports = function registerMiscHandlers(bot) {
     showMainMenu(ctx);
   });
 
-  // ============================================
-  // لغو عملیات جاری
-  // ============================================
   bot.action('cancel_flow', async (ctx) => {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
@@ -30,23 +24,14 @@ module.exports = function registerMiscHandlers(bot) {
     showMainMenu(ctx);
   });
 
-  // ============================================
-  // دکمه‌های منوی اصلی (همه callbackها)
-  // ============================================
-
-  // ✨ خرید (منوی buy) – به handlers/buy.js واگذار می‌شود
   bot.action('menu_buy', async (ctx) => {
     ctx.answerCbQuery();
-    // ریدایرکت به هندلر خرید
     return ctx.deleteMessage().then(() => ctx.answerCbQuery()).catch(() => {});
-    // (در واقع بهتر است خود buy handlers مستقیماً callback را بگیرند، اما اینجا صرفاً برای هماهنگی)
   });
 
-  // ✨ فروش (sell)
   bot.action('menu_sell', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    // ریدایرکت به هندلر فروش (از آنجا که buy و sell جدا هستند، اینجا صرفاً منو را نشان می‌دهیم)
     const { getSellProducts } = require('../db');
     const products = await getSellProducts(true);
     const t = texts.fa;
@@ -55,32 +40,17 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply(t.sellMenuTitle, { reply_markup: { inline_keyboard: buttons } });
   });
 
-  // 🧳 جیب (wallet)
   bot.action('menu_wallet', async (ctx) => {
     ctx.answerCbQuery();
-    // به هندلر wallet ارجاع می‌دهیم (قبلاً در wallet.js)
     try { await ctx.deleteMessage(); } catch (e) {}
-    // با صدا زدن همان handler که در wallet.js ثبت شده، چون اینجا require شده
-    return require('./wallet').showWalletMenu(ctx); // یک تابع کمکی در wallet.js صادر می‌کنیم
+    return require('./wallet').showWalletMenu(ctx);
   });
 
-  // 💎 بونوس (bonus) – بازی‌ها
   bot.action('menu_bonus', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    // رفتن به منوی بازی (game handlers)
     const gameHandler = require('./game');
-    // در game.js یک تابع کمکی برای شروع بازی‌ها تعریف کرده‌ایم
     return gameHandler.showBonusMenu(ctx);
-  });
-
-  // 🎁 ویژه ووچینو⁰۱ (special) – اینجا VPN و فیلترشکن
-  bot.action('menu_special', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    // انتقال به بخش VPN (فایل handlers/vpn.js)
-    const vpnHandler = require('./vpn');
-    return vpnHandler.showVpnMenu(ctx);
   });
 
   // 🌐 وب‌سایت ووچینو⁰۱ – مستقیم لینک را باز کن
@@ -95,7 +65,6 @@ module.exports = function registerMiscHandlers(bot) {
     });
   });
 
-  // 📥 پشتیبانی (support) – تیکتینگ
   bot.action('menu_support', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -112,9 +81,6 @@ module.exports = function registerMiscHandlers(bot) {
     });
   });
 
-  // ============================================
-  // تیکت جدید
-  // ============================================
   bot.action('support_new_ticket', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -127,7 +93,6 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('📝 **تیکت جدید**\n\nلطفاً **موضوع** پیام خود را بنویسید:');
   });
 
-  // مشاهده تیکت‌های قبلی
   bot.action('support_my_tickets', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -144,7 +109,6 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply(msg, { parse_mode: 'Markdown' });
   });
 
-  // سوالات متداول
   bot.action('support_faq', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -157,9 +121,6 @@ module.exports = function registerMiscHandlers(bot) {
     );
   });
 
-  // ============================================
-  // پردازش متن‌های ورودی تیکت
-  // ============================================
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session) return next();
@@ -180,7 +141,6 @@ module.exports = function registerMiscHandlers(bot) {
           'INSERT INTO tickets (telegram_id, subject, message, status, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())',
           [String(ctx.from.id), session.data.subject, message, 'open']
         );
-        // اطلاع‌رسانی به ادمین‌ها
         for (const adminId of ADMIN_IDS) {
           try {
             await ctx.telegram.sendMessage(
@@ -206,9 +166,6 @@ module.exports = function registerMiscHandlers(bot) {
     return next();
   });
 
-  // ============================================
-  // پاسخ ادمین به تیکت
-  // ============================================
   bot.action(/^ticket_reply_(.+)/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('⛔ دسترسی محدود');
     const targetId = ctx.match[1];
@@ -225,7 +182,6 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.reply('✅ تیکت بسته شد.');
   });
 
-  // پردازش پاسخ ادمین
   bot.on('text', async (ctx, next) => {
     const session = sessions[ctx.from.id];
     if (!session || session.flow !== 'admin_ticket_reply' || session.step !== 'waiting_message') return next();
