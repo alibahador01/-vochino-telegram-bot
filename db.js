@@ -780,6 +780,34 @@ async function initDb() {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW(),
       processed_at TIMESTAMP
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_support_tickets (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      ticket_code TEXT UNIQUE,
+      order_tracking_code TEXT,
+      question TEXT,
+      admin_response TEXT,
+      status TEXT DEFAULT 'open',
+      reminder_sent BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      answered_at TIMESTAMP
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_support_conversations (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT REFERENCES users(telegram_id),
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_support_knowledge (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
     );`
   ];
 
