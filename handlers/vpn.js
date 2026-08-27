@@ -234,10 +234,27 @@ async function sendSubscriptionLink(ctx, trackingCode) {
   );
 }
 
+async function sendComingSoon(ctx) {
+  ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
+  const text =
+    '╭─ ✦ 👑 Vochino⁰¹ ✦ ─╮\n' +
+    '         🛡️ ویژه ووچینو⁰¹\n' +
+    '╰─ ✦ ────────── ✦ ─╯\n\n' +
+    'سرویس اشتراک رایگان ووچینو⁰¹\n' +
+    'در حال آماده‌سازی نهایی است.\n\n' +
+    '⚡ پس از فعال‌سازی، می‌توانید\n' +
+    'اشتراک ۵ گیگ یک‌ماهه خود را دریافت کنید.\n\n' +
+    '💎 کیفیت و اعتبار، قبل از سرعت.';
+  await ctx.reply(text);
+}
+
 function registerVPNHandlers(bot) {
   ensureVpnSchema().then(() => startHealthCheckTimer(bot)).catch(console.error);
 
-  bot.action('menu_special', sendSpecialOffer);
+  // موقتاً «آماده‌سازی» نشان داده می‌شود؛ sendSpecialOffer دست‌نخورده و کامل زیر همین فایل باقی می‌ماند
+  // تا وقتی سرور VPN فعال شد، فقط همین خط زیر به sendSpecialOffer برگردانده شود.
+  bot.action('menu_special', sendComingSoon);
   bot.action(/^vpn_get_link:(.+)$/, async (ctx) => { await sendSubscriptionLink(ctx, ctx.match[1]); });
   bot.action('vpn_noop', async (ctx) => { ctx.answerCbQuery(); });
 
