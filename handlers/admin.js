@@ -66,6 +66,7 @@ module.exports = function registerAdminHandlers(bot) {
             [{ text: '🔎 جستجوی کد پیگیری', callback_data: 'admin_find' }],
             [{ text: '👤 اطلاعات یک کاربر', callback_data: 'admin_userinfo' }],
             [{ text: '🎮 تنظیمات بازی', callback_data: 'admin_game_settings' }],
+            [{ text: '🐽 پشتیبانی هوشمند (AI)', callback_data: 'admin_ai_support' }],
             [{ text: '👥 تنظیمات رفرال', callback_data: 'admin_referral_settings' }],
             [{ text: '💳 حداقل برداشت', callback_data: 'admin_min_withdraw' }],
             [{ text: '🌐 مدیریت فیلترشکن (VPN)', callback_data: 'admin_vpn_panel' }],
