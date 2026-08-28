@@ -4,8 +4,6 @@ const { pool, getUser, getSetting, setSetting } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 
 const HEADER = '╭─ ✦ Vochino⁰¹ ✦ ─╮\n🐽 دستیار هوشمند ووچینو⁰¹\n╰─ ✦ ───── ✦ ─╯\n\n';
-const CONTACT_PHRASE = '>>ارتباط با مدیریت<<';
-const FOOTER = `\n\n💡 اگر مشکلتون حل نشد، 📩 \`${CONTACT_PHRASE}\` رو ارسال کنید.\n📞 در اولین فرصت با شما تماس گرفته میشه.`;
 
 function isAdmin(id) { return ADMIN_IDS.includes(Number(id)); }
 
@@ -32,7 +30,13 @@ async function buildSystemPrompt() {
     'اگر کاربر توهین کرد، وارد دعوا نشو، آروم و حرفه‌ای جواب بده. ' +
     'راهنمایی‌هات رو فقط بر اساس دانشی که اینجا در اختیارت گذاشته شده بده:\n\n' +
     (knowledge || '(فعلاً محتوای دانش خاصی ثبت نشده — بر اساس دانش عمومی درباره سرویس‌های خرید/فروش ووچر و کیف پول دیجیتال کمک کن.)') +
-    (custom ? ('\n\nنکات اضافی از ادمین:\n' + custom) : '')
+    (custom ? ('\n\nنکات اضافی از ادمین:\n' + custom) : '') +
+    '\n\n🔹 **دستورالعمل ارجاع به پشتیبانی (تیکت):**\n' +
+    '• اگر کاربر مشکل یا سوالی دارد که با دانش موجود قابل پاسخ نیست، یا نیاز به بررسی انسانی دارد (مثلاً اشکال در پرداخت، مغایرت در ووچر، مشکلات فنی، یا هر موضوعی که نیاز به مداخله مدیریت دارد)، در انتهای پاسخ خود عبارت `[NEED_SUPPORT]` را قرار بده.\n' +
+    '• اگر کاربر به‌صراحت درخواست تیکت یا ارتباط با مدیریت کرد، ابتدا محترمانه توضیح بده که می‌توانی کمک کنی، ولی اگر اصرار داشت، عبارت `[NEED_SUPPORT]` را قرار بده.\n' +
+    '• در مواردی که پاسخ کامل و بدون نیاز به پشتیبانی است، عبارت `[NEED_SUPPORT]` را قرار نده.\n' +
+    '• هیچ‌گاه عبارت «ارتباط با مدیریت» را به‌صورت متن ثابت در پاسخ خود قرار نده؛ فقط در صورت نیاز، نشانه `[NEED_SUPPORT]` را اضافه کن.\n' +
+    '• پاسخ خود را با دقت و بر اساس درک درست از نیاز کاربر تنظیم کن تا کاربر احساس نکند بی‌دلیل به مدیریت ارجاع داده می‌شود.'
   );
 }
 
@@ -82,12 +86,12 @@ async function askGemini(telegramId, userText) {
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
       console.log('Gemini error details:', JSON.stringify(data).slice(0, 500));
-      return { ok: false, text: '⚠️ در حال حاضر امکان پاسخ‌گویی نیست، کمی بعد دوباره امتحان کنید یا از «ارتباط با مدیریت» استفاده کنید.' };
+      return { ok: false, text: '⚠️ در حال حاضر امکان پاسخ‌گویی نیست، کمی بعد دوباره امتحان کنید یا از گزینه ارتباط با مدیریت استفاده کنید.' };
     }
     return { ok: true, text: text.trim() };
   } catch (e) {
     console.log('Gemini fetch error:', e.message);
-    return { ok: false, text: '⚠️ خطا در ارتباط با دستیار هوشمند. لطفاً بعداً دوباره امتحان کنید یا از «ارتباط با مدیریت» استفاده کنید.' };
+    return { ok: false, text: '⚠️ خطا در ارتباط با دستیار هوشمند. لطفاً بعداً دوباره امتحان کنید یا از گزینه ارتباط با مدیریت استفاده کنید.' };
   }
 }
 
@@ -138,6 +142,22 @@ function registerAiSupportHandlers(bot) {
     }
     if (msg.length > 3900) msg = msg.slice(-3900);
     ctx.reply(msg);
+  });
+
+  // شروع فرآیند تیکت از طریق دکمه (ارتباط با مدیریت)
+  bot.action('ai_start_ticket', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const userId = ctx.from.id;
+    sessions[userId] = { flow: 'ai_ticket', step: 'waiting_order_code', data: {} };
+    const user = await getUser(userId);
+    const msg =
+      HEADER +
+      '📩 **ارتباط با مدیریت**\n\n' +
+      'حتماً، برای اینکه مدیریت بتواند دقیق‌تر موضوع شما را بررسی کند، لطفاً ابتدا **کد پیگیری مربوط به سفارش یا تراکنش** را ارسال کنید.\n' +
+      'سپس در پیام بعدی، مشکل خود را کامل توضیح دهید.\n' +
+      'پس از بررسی، در اولین فرصت با شما تماس گرفته می‌شود.';
+    ctx.reply(msg, { parse_mode: 'Markdown' });
   });
 
   bot.action(/^ai_ticket_reply_(\d+)/, async (ctx) => {
@@ -342,26 +362,78 @@ function registerAiSupportHandlers(bot) {
     if (session.flow === 'ai_chat' && session.step === 'chatting') {
       const text = ctx.message.text.trim();
 
-      if (text.includes('ارتباط با مدیریت')) {
-        sessions[userId] = { flow: 'ai_ticket', step: 'waiting_order_code', data: {} };
-        return ctx.reply(HEADER + '🎫 لطفاً کد پیگیری سفارش خود را ارسال کنید.:');
+      // اگر کاربر مستقیماً درخواست تیکت کرد (با عبارت "ارتباط با مدیریت" یا مشابه)
+      if (text.includes('ارتباط با مدیریت') || text.includes('تیکت') || text.includes('پشتیبانی') || text.includes('مدیریت')) {
+        // بررسی کنیم که آیا واقعاً درخواست تیکت هست یا صرفاً کلمه تیکت در سوال آمده
+        // اگر درخواست تیکت بود، کاربر رو به سیستم تیکت هدایت کنیم
+        // برای سادگی، اگر عبارت "ارتباط با مدیریت" یا "تیکت" یا "پشتیبانی" در متن بود، فرض می‌کنیم درخواست تیکت هست.
+        // اما برای جلوگیری از تشخیص اشتباه، بهتره از هوش مصنوعی استفاده کنیم.
+        // در اینجا یک روش ساده: اگر عبارت "ارتباط با مدیریت" دقیقاً یا با کمی تغییر بود، هدایت به تیکت.
+        // همچنین اگر کاربر گفت "می‌خوام تیکت بزنم" یا مشابه.
+        // برای دقت بیشتر، می‌تونیم از هوش مصنوعی کمک بگیریم که تشخیص بده آیا درخواست تیکت هست یا نه.
+        // اما در اینجا به دلیل سادگی، اگر عبارت "ارتباط با مدیریت" در متن باشه، فرض می‌کنیم درخواست تیکت هست.
+        // همچنین اگر کاربر گفت "تیکت" یا "پشتیبانی" و متن حاکی از درخواست کمک داشت.
+        // بهتره که از هوش مصنوعی بخوایم که تشخیص بده، اما برای سرعت، یک تشخیص ساده انجام می‌دیم.
+        // اما برای اطمینان بیشتر، اگر کاربر گفت "ارتباط با مدیریت" یا "می‌خوام تیکت بزنم" یا "با پشتیبانی صحبت کنم"، هدایت به تیکت.
+        const ticketKeywords = ['ارتباط با مدیریت', 'تیکت', 'پشتیبانی', 'با مدیریت صحبت کنم', 'می‌خوام تیکت', 'درخواست تیکت'];
+        const isTicketRequest = ticketKeywords.some(kw => text.includes(kw));
+        if (isTicketRequest) {
+          // هدایت به سیستم تیکت
+          sessions[userId] = { flow: 'ai_ticket', step: 'waiting_order_code', data: {} };
+          const msg =
+            HEADER +
+            '📩 **ارتباط با مدیریت**\n\n' +
+            'حتماً، برای اینکه مدیریت بتواند دقیق‌تر موضوع شما را بررسی کند، لطفاً ابتدا **کد پیگیری مربوط به سفارش یا تراکنش** را ارسال کنید.\n' +
+            'سپس در پیام بعدی، مشکل خود را کامل توضیح دهید.\n' +
+            'پس از بررسی، در اولین فرصت با شما تماس گرفته می‌شود.';
+          return ctx.reply(msg, { parse_mode: 'Markdown' });
+        }
       }
 
+      // ذخیره پیام کاربر در تاریخچه
       await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'user', text]);
       const result = await askGemini(userId, text);
-      await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'assistant', result.text]);
-      
-      return ctx.reply(HEADER + result.text + FOOTER);
+      const responseText = result.text;
+
+      // ذخیره پاسخ در تاریخچه
+      await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'assistant', responseText]);
+
+      // بررسی وجود نشانه NEED_SUPPORT در پاسخ
+      const needSupport = responseText.includes('[NEED_SUPPORT]');
+      let finalText = responseText.replace(/\[NEED_SUPPORT\]/g, '').trim();
+
+      // اگر نیاز به پشتیبانی بود، دکمه تیکت نمایش داده می‌شود
+      if (needSupport) {
+        return ctx.reply(HEADER + finalText, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📩 ارتباط با مدیریت', callback_data: 'ai_start_ticket' }]
+            ]
+          }
+        });
+      } else {
+        // پاسخ عادی بدون دکمه
+        return ctx.reply(HEADER + finalText);
+      }
     }
 
+    // ---- فرآیند تیکت ----
     if (session.flow === 'ai_ticket' && session.step === 'waiting_order_code') {
-      session.data.orderCode = ctx.message.text.trim();
+      // کاربر کد پیگیری را ارسال کرده
+      const orderCode = ctx.message.text.trim();
+      if (orderCode.length < 3) {
+        return ctx.reply('❌ لطفاً یک کد پیگیری معتبر وارد کنید (حداقل ۳ کاراکتر).');
+      }
+      session.data.orderCode = orderCode;
       session.step = 'waiting_question';
       return ctx.reply(HEADER + '💬 لطفاً مشکل خود را به‌طور کامل توضیح دهید.');
     }
 
     if (session.flow === 'ai_ticket' && session.step === 'waiting_question') {
       const question = ctx.message.text.trim();
+      if (question.length < 5) {
+        return ctx.reply('❌ لطفاً مشکل خود را با حداقل ۵ کاراکتر توضیح دهید.');
+      }
       const ticketCode = genTicketCode();
       const ins = await pool.query(
         'INSERT INTO ai_support_tickets (telegram_id, ticket_code, order_tracking_code, question, status, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,NOW(),NOW()) RETURNING *',
