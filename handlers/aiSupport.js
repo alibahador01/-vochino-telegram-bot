@@ -41,26 +41,39 @@ async function askGemini(telegramId, userText) {
   if (!apiKey) return { ok: false, text: '⚠️ دستیار هوشمند فعلاً تنظیم نشده. لطفاً از گزینه «ارتباط با مدیریت» استفاده کنید.' };
 
   const historyRes = await pool.query(
-    'SELECT role, content FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC LIMIT 16',
+    'SELECT role, content FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC LIMIT 10',
     [String(telegramId)]
   );
-  const history = historyRes.rows.reverse();
+  const rawHistory = historyRes.rows.reverse();
 
   const systemPrompt = await buildSystemPrompt();
-  const contents = history.map(h => ({
-    role: h.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: h.content }]
-  }));
-  contents.push({ role: 'user', parts: [{ text: userText }] });
+  
+  // اصلاح ساختار نوبت‌ها برای جلوگیری از ارور گوگل
+  const contents = [];
+  let lastRole = null;
+
+  for (const h of rawHistory) {
+    const role = h.role === 'assistant' ? 'model' : 'user';
+    if (role !== lastRole) {
+      contents.push({ role, parts: [{ text: h.content }] });
+      lastRole = role;
+    }
+  }
+
+  if (lastRole === 'user') {
+    contents[contents.length - 1].parts[0].text += `\n${userText}`;
+  } else {
+    contents.push({ role: 'user', parts: [{ text: userText }] });
+  }
 
   try {
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
+          systemInstruction: { parts: [{ text: systemPrompt }] },
           contents,
           generationConfig: { temperature: 0.6, maxOutputTokens: 700 }
         })
@@ -69,7 +82,7 @@ async function askGemini(telegramId, userText) {
     const data = await resp.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
-      console.log('Gemini error:', JSON.stringify(data).slice(0, 500));
+      console.log('Gemini error details:', JSON.stringify(data).slice(0, 500));
       return { ok: false, text: '⚠️ در حال حاضر امکان پاسخ‌گویی نیست، کمی بعد دوباره امتحان کنید یا از «ارتباط با مدیریت» استفاده کنید.' };
     }
     return { ok: true, text: text.trim() };
@@ -281,7 +294,6 @@ function registerAiSupportHandlers(bot) {
     const userId = ctx.from.id;
     const session = sessions[userId];
 
-    // اگر کاربر تیکت پاسخ‌داده‌شده دارد و پیام جدیدی می‌فرستد، تیکت را دوباره فعال کن
     if (!session) {
       reactivateTicketIfAny(userId).catch(() => {});
       return next();
@@ -339,7 +351,8 @@ function registerAiSupportHandlers(bot) {
       await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'user', text]);
       const result = await askGemini(userId, text);
       await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'assistant', result.text]);
-      return ctx.reply(HEADER + result.text + FOOTER, { parse_mode: 'Markdown' });
+      
+      return ctx.reply(HEADER + result.text + FOOTER);
     }
 
     if (session.flow === 'ai_ticket' && session.step === 'waiting_order_code') {
@@ -414,7 +427,7 @@ function startReminderTimer(bot) {
     }
   }
   check().catch(() => {});
-  setInterval(() => check().catch(() => {}), 30 * 60 * 1000); // هر ۳۰ دقیقه چک می‌شود
+  setInterval(() => check().catch(() => {}), 30 * 60 * 1000);
 }
 
 module.exports = function (bot) {
