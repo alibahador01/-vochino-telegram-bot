@@ -509,12 +509,38 @@ async function updateAdminLevel(telegramId, level) {
   return res.rows[0] || null;
 }
 
-// ==================== هوش مصنوعی (Gemini) ====================
+// ==================== هوش مصنوعی (Gemini) - اصلاح شده ====================
+/**
+ * دریافت یک مقدار از تنظیمات AI با اولویت مشخص:
+ * - برای کلیدهای 'api_key' یا 'gemini_api_key' ابتدا از دیتابیس و در صورت نبودن، از متغیر محیطی GEMINI_API_KEY استفاده می‌کند.
+ * - برای سایر کلیدها فقط از دیتابیس خوانده می‌شود.
+ */
 async function getAiConfig(key, defaultValue = null) {
+  // کلیدهای مربوط به API Key
+  const apiKeyKeys = ['api_key', 'gemini_api_key'];
+  if (apiKeyKeys.includes(key)) {
+    // ابتدا از دیتابیس بخوان
+    const dbRes = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
+    if (dbRes.rows.length > 0 && dbRes.rows[0].value) {
+      return dbRes.rows[0].value;
+    }
+    // اگر در دیتابیس نبود، از environment variable بخوان
+    const envValue = process.env.GEMINI_API_KEY;
+    if (envValue) {
+      return envValue;
+    }
+    // در غیر این صورت مقدار پیش‌فرض برگردان
+    return defaultValue;
+  }
+
+  // برای کلیدهای دیگر فقط از دیتابیس
   const res = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
   return res.rows[0] ? res.rows[0].value : defaultValue;
 }
 
+/**
+ * ذخیره یا بروزرسانی یک مقدار در تنظیمات AI
+ */
 async function setAiConfig(key, value) {
   await pool.query(
     'INSERT INTO ai_config (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
@@ -522,11 +548,19 @@ async function setAiConfig(key, value) {
   );
 }
 
+/**
+ * دریافت همه تنظیمات AI به صورت یک شیء
+ * اگر کلید api_key در دیتابیس وجود نداشته باشد، از متغیر محیطی GEMINI_API_KEY اضافه می‌شود.
+ */
 async function getAllAiConfig() {
   const res = await pool.query('SELECT * FROM ai_config ORDER BY key ASC');
   const config = {};
   for (const row of res.rows) {
     config[row.key] = row.value;
+  }
+  // اگر کلید api_key در دیتابیس نبود، از env اضافه کن
+  if (!config['api_key'] && process.env.GEMINI_API_KEY) {
+    config['api_key'] = process.env.GEMINI_API_KEY;
   }
   return config;
 }
@@ -780,34 +814,6 @@ async function initDb() {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW(),
       processed_at TIMESTAMP
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_support_tickets (
-      id SERIAL PRIMARY KEY,
-      telegram_id TEXT REFERENCES users(telegram_id),
-      ticket_code TEXT UNIQUE,
-      order_tracking_code TEXT,
-      question TEXT,
-      admin_response TEXT,
-      status TEXT DEFAULT 'open',
-      reminder_sent BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      answered_at TIMESTAMP
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_support_conversations (
-      id SERIAL PRIMARY KEY,
-      telegram_id TEXT REFERENCES users(telegram_id),
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_support_knowledge (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL,
-      active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
     );`
   ];
 
@@ -1126,7 +1132,6 @@ module.exports = {
   updateBotText,
   getBotTextCategories,
   sendRatesToChannel,
-  // توابع جدید اضافه شده
   getAllAdmins,
   getAdmin,
   addAdmin,
