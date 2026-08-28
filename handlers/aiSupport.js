@@ -48,7 +48,6 @@ async function askGemini(telegramId, userText) {
 
   const systemPrompt = await buildSystemPrompt();
   
-  // اصلاح ساختار نوبت‌ها برای جلوگیری از ارور گوگل
   const contents = [];
   let lastRole = null;
 
@@ -68,7 +67,7 @@ async function askGemini(telegramId, userText) {
 
   try {
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
