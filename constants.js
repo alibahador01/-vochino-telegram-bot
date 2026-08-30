@@ -13,13 +13,13 @@ const DEPOSIT_CARDS = [
 ];
 
 const mainMenuButtons = [
-  { key: 'buy',     text: '✨ خرید ✨' },
-  { key: 'sell',    text: '✨ فروش ✨' },
+  { key: 'buy',     text: '✨ خرید' },
+  { key: 'sell',    text: '✨ فروش' },
   { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
-  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰¹' },
-  { key: 'support', text: '🎧 پشتیبانی آنلاین' }
+  { key: 'website', text: '🐽 AI هوشینو⁰¹' },  // تغییر از وب‌سایت به هوشینو⁰¹
+  { key: 'support', text: '🧠 پشتیبانی هوشینو⁰¹ }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
@@ -58,15 +58,44 @@ const ADMIN_LEVELS = {
 };
 
 const GEMINI_API_CONFIG = {
-  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خلاصه و کوتاه بده تا کاربران راحت شوند.',
+  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت انسانی حرفه‌ای واقعی بده تا کاربران راحت شوند.',
   USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
   SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
   SUPPORT_MENU_BUTTONS: [
-    { key: 'ai_support',    text: '🤖 پشتیبانی هوشمند' },
+    { key: 'ai_support',    text: '🤖 پشتیبانی هوشینو⁰¹ },
     { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
     { key: 'back_main',     text: '🔙 بازگشت' }
   ]
 };
+
+// ==================== 🧠 هوشینو⁰¹ (Omni-Assistant) ====================
+const AI_HEADERS = {
+  general: `╭─ ✦Vochino01✦ ─╮\n   🐽 گفتگوی AI هوشینو⁰¹\n╰─ ✦ ──── ✦ ─╯`,
+  sports: `╭─ ⚽️ Vochino01 ⚽️ ─╮\n   🐽 تحلیل AI هوشینو⁰¹\n╰─ ✦ ───── ✦ ─╯`,
+  fixtures: `╭─ ✦Vochino01✦ ─╮\n   📅 جدول امروز هوشینو⁰¹\n╰─ ✦ ──── ✦ ─╯`
+};
+
+const AI_MODES = {
+  GENERAL: 'general',
+  SPORTS: 'sports',
+  FIXTURES: 'fixtures'
+};
+
+const AI_KEY_ENV_MAP = {
+  support: 'GEMINI_SUPPORT_KEY',
+  general: 'GEMINI_GENERAL_KEY',
+  sports: 'GEMINI_SPORTS_KEY',
+  fixtures: 'GEMINI_FIXTURES_KEY'
+};
+
+const AI_THEMES = [
+  { key: 'blue',  emoji: '🔵', label: 'آبی' },
+  { key: 'green', emoji: '🟢', label: 'سبز' },
+  { key: 'red',   emoji: '🔴', label: 'قرمز' },
+  { key: 'gold',  emoji: '👑', label: 'طلایی' }
+];
+
+const AI_DEFAULT_THEME = 'blue';
 
 module.exports = {
   ADMIN_IDS,
@@ -83,5 +112,10 @@ module.exports = {
   PRICE_TYPES,
   GAME_TYPES,
   ADMIN_LEVELS,
-  GEMINI_API_CONFIG
+  GEMINI_API_CONFIG,
+  AI_HEADERS,
+  AI_MODES,
+  AI_KEY_ENV_MAP,
+  AI_THEMES,
+  AI_DEFAULT_THEME
 };
