@@ -1,224 +1,184 @@
 // textManager.js
-// سیستم کش و مدیریت متن‌های ربات
-const { getAllBotTexts, getBotTextByKey, updateBotText } = require('./db');
+const { pool } = require('./db');
 
-// کش در حافظه
-let textsCache = {};
-let cacheLoaded = false;
+// کش در حافظه برای متن‌های ربات
+let textCache = new Map(); // key -> { key, category, value, description, updated_at }
 
 /**
- * بارگذاری تمام متن‌ها از دیتابیس و ذخیره در کش
- * فقط یک‌بار موقع روشن‌شدن ربات صدا زده می‌شود
+ * بارگذاری همه متن‌ها از دیتابیس به کش
+ * @returns {Promise<boolean>} موفقیت یا شکست
  */
 async function loadTextsCache() {
   try {
-    const allTexts = await getAllBotTexts();
-    const newCache = {};
-    
-    for (const row of allTexts) {
-      newCache[row.key] = {
-        value: row.value,
+    const res = await pool.query('SELECT key, category, value, description, updated_at FROM bot_texts');
+    textCache.clear();
+    for (const row of res.rows) {
+      textCache.set(row.key, {
+        key: row.key,
         category: row.category,
-        description: row.description || ''
-      };
+        value: row.value,
+        description: row.description || '',
+        updated_at: row.updated_at
+      });
     }
-    
-    textsCache = newCache;
-    cacheLoaded = true;
-    console.log(`✅ کش متن‌ها بارگذاری شد (${Object.keys(textsCache).length} متن)`);
+    console.log(`✅ ${textCache.size} متن در کش بارگذاری شد.`);
     return true;
-  } catch (err) {
-    console.error('❌ خطا در بارگذاری کش متن‌ها:', err.message);
+  } catch (e) {
+    console.log('❌ خطا در بارگذاری کش متن‌ها:', e.message);
     return false;
   }
 }
 
 /**
- * دریافت یک متن از کش
- * @param {string} key - کلید متن
- * @param {string} defaultValue - مقدار پیش‌فرض اگر کلید وجود نداشت
+ * دریافت یک متن از کش با مقدار پیش‌فرض
+ * @param {string} key کلید متن
+ * @param {string} defaultValue مقدار پیش‌فرض در صورت نبودن
  * @returns {string}
  */
 function getText(key, defaultValue = '') {
-  if (!cacheLoaded) {
-    console.warn('⚠️ کش هنوز بارگذاری نشده، مقدار پیش‌فرض برگردانده شد');
-    return defaultValue;
-  }
-  
-  if (textsCache[key]) {
-    return textsCache[key].value;
-  }
-  
-  console.warn(`⚠️ کلید "${key}" در کش یافت نشد`);
-  return defaultValue;
-}
-
-/**
- * دریافت تمام متن‌های یک دسته‌بندی خاص
- * @param {string} category 
- * @returns {Array}
- */
-function getTextsByCategory(category) {
-  if (!cacheLoaded) return [];
-  
-  const result = [];
-  for (const key in textsCache) {
-    if (textsCache[key].category === category) {
-      result.push({
-        key,
-        value: textsCache[key].value,
-        description: textsCache[key].description
-      });
-    }
-  }
-  return result;
-}
-
-/**
- * جستجوی متن در کش
- * @param {string} searchTerm 
- * @returns {Array}
- */
-function searchTextsInCache(searchTerm) {
-  if (!cacheLoaded) return [];
-  
-  const term = searchTerm.toLowerCase();
-  const result = [];
-  
-  for (const key in textsCache) {
-    const item = textsCache[key];
-    if (
-      key.toLowerCase().includes(term) ||
-      item.value.toLowerCase().includes(term) ||
-      item.category.toLowerCase().includes(term)
-    ) {
-      result.push({
-        key,
-        value: item.value,
-        category: item.category,
-        description: item.description
-      });
-    }
-  }
-  return result;
-}
-
-/**
- * استخراج placeholder های یک متن
- * @param {string} text 
- * @returns {Array} آرایه‌ای از placeholder ها
- */
-function extractPlaceholders(text) {
-  const regex = /\{(\w+)\}/g;
-  const matches = [];
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    if (!matches.includes(match[1])) {
-      matches.push(match[1]);
-    }
-  }
-  return matches;
-}
-
-/**
- * بررسی صحت placeholder ها بین متن قدیم و جدید
- * @param {string} oldText 
- * @param {string} newText 
- * @returns {object} { valid: boolean, missing: Array, extra: Array }
- */
-function validatePlaceholders(oldText, newText) {
-  const oldPlaceholders = extractPlaceholders(oldText);
-  const newPlaceholders = extractPlaceholders(newText);
-  
-  const missing = oldPlaceholders.filter(p => !newPlaceholders.includes(p));
-  const extra = newPlaceholders.filter(p => !oldPlaceholders.includes(p));
-  
-  return {
-    valid: missing.length === 0,
-    missing,
-    extra
-  };
-}
-
-/**
- * آپدیت یک متن در دیتابیس و کش
- * @param {string} key 
- * @param {string} newValue 
- * @returns {object} result
- */
-async function refreshText(key, newValue) {
-  try {
-    // آپدیت در دیتابیس
-    const updated = await updateBotText(key, newValue);
-    
-    if (!updated) {
-      return { success: false, error: 'کلید در دیتابیس یافت نشد' };
-    }
-    
-    // آپدیت کش
-    textsCache[key] = {
-      value: newValue,
-      category: updated.category,
-      description: updated.description || ''
-    };
-    
-    return { success: true, data: updated };
-  } catch (err) {
-    console.error(`❌ خطا در آپدیت متن ${key}:`, err.message);
-    return { success: false, error: err.message };
-  }
+  const item = textCache.get(key);
+  return item ? item.value : defaultValue;
 }
 
 /**
  * دریافت اطلاعات کامل یک متن از کش
- * @param {string} key 
- * @returns {object|null}
+ * @param {string} key
+ * @returns {object|null} {key, category, value, placeholders: string[]}
  */
 function getTextInfo(key) {
-  if (!cacheLoaded || !textsCache[key]) return null;
-  
+  const item = textCache.get(key);
+  if (!item) return null;
+  const placeholders = extractPlaceholders(item.value);
   return {
-    key,
-    value: textsCache[key].value,
-    category: textsCache[key].category,
-    description: textsCache[key].description,
-    placeholders: extractPlaceholders(textsCache[key].value)
+    key: item.key,
+    category: item.category,
+    value: item.value,
+    placeholders
   };
 }
 
 /**
- * دریافت لیست تمام دسته‌بندی‌ها
- * @returns {Array}
+ * استخراج placeholder های {xxx} از یک متن
+ * @param {string} text
+ * @returns {string[]} آرایه‌ای از نام‌های placeholder بدون { }
+ */
+function extractPlaceholders(text) {
+  if (!text) return [];
+  const matches = text.match(/\{(\w+)\}/g);
+  if (!matches) return [];
+  return [...new Set(matches.map(m => m.slice(1, -1)))];
+}
+
+/**
+ * دریافت همه متن‌های یک دسته‌بندی
+ * @param {string} category
+ * @returns {Array<{key, category, value}>}
+ */
+function getTextsByCategory(category) {
+  const result = [];
+  for (const item of textCache.values()) {
+    if (item.category === category) {
+      result.push({ key: item.key, category: item.category, value: item.value });
+    }
+  }
+  return result;
+}
+
+/**
+ * دریافت لیست همه دسته‌بندی‌های موجود
+ * @returns {string[]}
  */
 function getAllCategories() {
-  if (!cacheLoaded) return [];
-  
   const categories = new Set();
-  for (const key in textsCache) {
-    categories.add(textsCache[key].category);
+  for (const item of textCache.values()) {
+    categories.add(item.category);
   }
   return Array.from(categories).sort();
 }
 
 /**
- * فرمت‌کردن یک متن برای نمایش به ادمین (placeholder ها با 🔒 مشخص شوند)
- * @param {string} text 
+ * جستجوی کلیدواژه در بین متن‌های کش
+ * @param {string} searchTerm
+ * @returns {Array<{key, category, value}>}
+ */
+function searchTextsInCache(searchTerm) {
+  const term = searchTerm.toLowerCase();
+  const results = [];
+  for (const item of textCache.values()) {
+    if (item.key.toLowerCase().includes(term) || item.value.toLowerCase().includes(term)) {
+      results.push({ key: item.key, category: item.category, value: item.value });
+    }
+  }
+  return results;
+}
+
+/**
+ * اعتبارسنجی placeholder ها: اطمینان از حفظ placeholder های متن قبلی در متن جدید
+ * @param {string} oldValue
+ * @param {string} newValue
+ * @returns {{valid: boolean, missing: string[]}}
+ */
+function validatePlaceholders(oldValue, newValue) {
+  const oldPlaceholders = extractPlaceholders(oldValue);
+  const newPlaceholders = extractPlaceholders(newValue);
+  const missing = oldPlaceholders.filter(p => !newPlaceholders.includes(p));
+  return {
+    valid: missing.length === 0,
+    missing
+  };
+}
+
+/**
+ * بروزرسانی متن در دیتابیس و کش
+ * @param {string} key
+ * @param {string} newValue
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function refreshText(key, newValue) {
+  try {
+    const res = await pool.query(
+      'UPDATE bot_texts SET value = $2, updated_at = NOW() WHERE key = $1 RETURNING key, category, value, updated_at',
+      [key, newValue]
+    );
+    if (res.rows.length === 0) {
+      return { success: false, error: 'متن یافت نشد.' };
+    }
+    const row = res.rows[0];
+    textCache.set(key, {
+      key: row.key,
+      category: row.category,
+      value: row.value,
+      description: '', // description is not updated
+      updated_at: row.updated_at
+    });
+    return { success: true };
+  } catch (e) {
+    console.log('❌ خطا در بروزرسانی متن:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * فرمت‌دهی متن برای نمایش در پنل ادمین (جلوگیری از تفسیر HTML)
+ * @param {string} value
  * @returns {string}
  */
-function formatTextForDisplay(text) {
-  return text.replace(/\{(\w+)\}/g, '🔒{$1}🔒');
+function formatTextForDisplay(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 module.exports = {
   loadTextsCache,
   getText,
+  getTextInfo,
   getTextsByCategory,
+  getAllCategories,
   searchTextsInCache,
-  extractPlaceholders,
   validatePlaceholders,
   refreshText,
-  getTextInfo,
-  getAllCategories,
   formatTextForDisplay,
-  isCacheLoaded: () => cacheLoaded
+  extractPlaceholders
 };
