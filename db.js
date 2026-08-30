@@ -512,15 +512,19 @@ async function updateAdminLevel(telegramId, level) {
 // ==================== هوش مصنوعی (Gemini) - اصلاح شده ====================
 /**
  * دریافت یک مقدار از تنظیمات AI با اولویت مشخص:
- * - برای کلیدهای مربوط به API Key ابتدا از دیتابیس و در صورت نبودن، از متغیر محیطی استفاده می‌کند.
+ * - برای کلیدهای 'api_key' یا 'gemini_api_key' ابتدا از دیتابیس و در صورت نبودن، از متغیر محیطی GEMINI_API_KEY استفاده می‌کند.
+ * - برای سایر کلیدها فقط از دیتابیس خوانده می‌شود.
  */
 async function getAiConfig(key, defaultValue = null) {
+  // کلیدهای مربوط به API Key
   const apiKeyKeys = ['api_key', 'gemini_api_key', 'gemini_support_key', 'gemini_general_key', 'gemini_sports_key', 'gemini_fixtures_key'];
   if (apiKeyKeys.includes(key)) {
+    // ابتدا از دیتابیس بخوان
     const dbRes = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
     if (dbRes.rows.length > 0 && dbRes.rows[0].value) {
       return dbRes.rows[0].value;
     }
+    // اگر در دیتابیس نبود، از environment variable بخوان
     const envMap = {
       'api_key': process.env.GEMINI_API_KEY,
       'gemini_api_key': process.env.GEMINI_API_KEY,
@@ -533,9 +537,11 @@ async function getAiConfig(key, defaultValue = null) {
     if (envValue) {
       return envValue;
     }
+    // در غیر این صورت مقدار پیش‌فرض برگردان
     return defaultValue;
   }
 
+  // برای کلیدهای دیگر فقط از دیتابیس
   const res = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
   return res.rows[0] ? res.rows[0].value : defaultValue;
 }
@@ -576,6 +582,7 @@ async function addAiConversationMessage(telegramId, role, content) {
     'INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1, $2, $3, NOW())',
     [String(telegramId), role, content]
   );
+  // Sliding window: keep only last 15 messages
   await pool.query(
     `DELETE FROM ai_support_conversations WHERE id IN (
       SELECT id FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC OFFSET $2
@@ -681,6 +688,7 @@ async function sendRatesToChannel(bot) {
 // ==================== مقداردهی اولیه ====================
 async function initDb() {
   const tables = [
+    // ================= جداول اصلی (بدون تغییر) =================
     `CREATE TABLE IF NOT EXISTS users (
       telegram_id TEXT PRIMARY KEY,
       phone TEXT,
@@ -873,7 +881,7 @@ async function initDb() {
       tracking_code TEXT UNIQUE,
       created_at TIMESTAMP DEFAULT NOW()
     );`,
-    // ==================== جداول هوش مصنوعی ====================
+    // ================= جداول هوش مصنوعی (اضافه‌شده) =================
     `CREATE TABLE IF NOT EXISTS bot_texts (
       key TEXT PRIMARY KEY,
       category TEXT NOT NULL,
@@ -950,7 +958,7 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در ایجاد جدول:', e.message); }
   }
 
-  // اصلاح ستون‌های missing
+  // ==================== اصلاح ستون‌های missing ====================
   const alterQueries = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT',
@@ -1037,6 +1045,7 @@ async function initDb() {
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS name TEXT DEFAULT \'\'',
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
     'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+    // ستون‌های جداول جدید هوشینو
     'ALTER TABLE ai_support_knowledge ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE',
     'ALTER TABLE ai_support_knowledge ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
     'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT \'user\'',
@@ -1060,7 +1069,7 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون:', e.message); }
   }
 
-  // تنظیمات پیش‌فرض
+  // --- تنظیمات پیش‌فرض ---
   try {
     await pool.query(`
       INSERT INTO settings (key, value, updated_at) VALUES 
@@ -1107,6 +1116,7 @@ async function initDb() {
         ('gold_daily_limit', '10000000', NOW()),
         ('silver_daily_limit', '2000000', NOW()),
         ('bonus_referral_activated_at', NULL, NOW()),
+        -- تنظیمات جدید هوشینو
         ('gemini_api_key', '', NOW()),
         ('gemini_general_key', '', NOW()),
         ('gemini_sports_key', '', NOW()),
@@ -1118,7 +1128,7 @@ async function initDb() {
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
 
-  // کانال پیش‌فرض
+  // --- کانال پیش‌فرض ---
   try {
     const existingChannel = await pool.query('SELECT chat_id FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
     if (existingChannel.rows.length === 0) {
@@ -1129,7 +1139,7 @@ async function initDb() {
     }
   } catch (e) { console.log('خطا در کانال پیش‌فرض:', e.message); }
 
-  // محصولات پیش‌فرض
+  // --- محصولات پیش‌فرض ---
   const buyProducts = [
     { key: 'voucher', name: '🎟 یوووچر', min_amount: 1, price_type: 'usd', active: 1, hidden: 0 },
     { key: 'hotvoucher', name: '🎟 هات ووچر', min_amount: 50000, price_type: 'toman', active: 1, hidden: 0 },
@@ -1175,7 +1185,7 @@ async function initDb() {
     } catch (e) {}
   }
 
-  // متون پیش‌فرض bot_texts
+  // --- متون پیش‌فرض bot_texts ---
   try {
     const cnt = await pool.query('SELECT COUNT(*)::int AS c FROM bot_texts');
     if (cnt.rows[0].c === 0) {
