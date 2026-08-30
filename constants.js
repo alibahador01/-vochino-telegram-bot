@@ -19,7 +19,7 @@ const mainMenuButtons = [
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
   { key: 'website', text: '🐽 AI هوشینو⁰¹' },  // تغییر از وب‌سایت به هوشینو⁰¹
-  { key: 'support', text: '🧠 پشتیبانی هوشینو⁰¹}
+  { key: 'support', text: '🧠 پشتیبانی هوشینو⁰¹ }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
