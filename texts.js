@@ -121,6 +121,22 @@ const texts = {
     // ==================== رفرال / معرفی ====================
     referralTitle: t('referralTitle', '👥 دعوت دوستان'),
     referralLink: t('referralLink', '🔗 لینک دعوت شما:\n{link}\n\n👥 تعداد دعوت: {count} نفر\n💰 پاداش هر دعوت: {bonus} تومان'),
+
+    // ==================== 🧠 هوشینو⁰¹ (Omni-Assistant) ====================
+    omniMenuTitle: t('omniMenuTitle', '🧠 هوشینو⁰¹ برتر\n\nیکی از گزینه‌های زیر را انتخاب کنید:'),
+    omniGeneralButton: t('omniGeneralButton', '🐽 گفتگوی AI هوشینو⁰¹'),
+    omniSportsButton: t('omniSportsButton', '⚽ تحلیل AI هوشینو⁰¹'),
+    omniFixturesButton: t('omniFixturesButton', '📅 جدول امروز هوشینو⁰¹'),
+    omniBackButton: t('omniBackButton', '🔙 بازگشت به منوی اصلی'),
+    omniResetButton: t('omniResetButton', '🔄 شروع گفتگوی جدید'),
+    omniProcessing: t('omniProcessing', '🤖 در حال پردازش...'),
+    omniError: t('omniError', '⚠️ خطا در پردازش درخواست. لطفاً دوباره تلاش کنید.'),
+    omniGeneralPrompt: t('omniGeneralPrompt', '💬 سلام! من هوشینو⁰¹ هستم.\nسوالت رو بپرس یا عکس/ویس بفرست.'),
+    omniSportsPrompt: t('omniSportsPrompt', '⚽ تحلیلگر ورزشی هوشینو⁰¹ در خدمت شماست.\nمسابقه یا تیم مورد نظرت رو بگو.'),
+    omniFixturesPrompt: t('omniFixturesPrompt', '📅 جدول امروز مسابقات رو می‌خوای؟ بگو کدوم لیگ؟'),
+    omniResetSuccess: t('omniResetSuccess', '🔄 گفتگو از نو شروع شد.'),
+    omniNoApiKey: t('omniNoApiKey', '⚠️ کلید API هوش مصنوعی تنظیم نشده است.'),
+    omniAdminFlushed: t('omniAdminFlushed', '🧹 تمام گفتگوهای کاربران پاک شد.')
   }
 };
 
