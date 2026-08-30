@@ -517,7 +517,7 @@ async function updateAdminLevel(telegramId, level) {
  */
 async function getAiConfig(key, defaultValue = null) {
   // کلیدهای مربوط به API Key
-  const apiKeyKeys = ['api_key', 'gemini_api_key'];
+  const apiKeyKeys = ['api_key', 'gemini_api_key', 'gemini_support_key', 'gemini_general_key', 'gemini_sports_key', 'gemini_fixtures_key'];
   if (apiKeyKeys.includes(key)) {
     // ابتدا از دیتابیس بخوان
     const dbRes = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
@@ -525,7 +525,15 @@ async function getAiConfig(key, defaultValue = null) {
       return dbRes.rows[0].value;
     }
     // اگر در دیتابیس نبود، از environment variable بخوان
-    const envValue = process.env.GEMINI_API_KEY;
+    const envMap = {
+      'api_key': process.env.GEMINI_API_KEY,
+      'gemini_api_key': process.env.GEMINI_API_KEY,
+      'gemini_support_key': process.env.GEMINI_SUPPORT_KEY,
+      'gemini_general_key': process.env.GEMINI_GENERAL_KEY,
+      'gemini_sports_key': process.env.GEMINI_SPORTS_KEY,
+      'gemini_fixtures_key': process.env.GEMINI_FIXTURES_KEY
+    };
+    const envValue = envMap[key];
     if (envValue) {
       return envValue;
     }
@@ -563,6 +571,104 @@ async function getAllAiConfig() {
     config['api_key'] = process.env.GEMINI_API_KEY;
   }
   return config;
+}
+
+// ==================== هوشینو⁰¹ : حافظه و مکالمه ====================
+const AI_MEMORY_LIMIT = 15;
+const AI_INACTIVITY_HOURS = 48;
+
+async function getAiConversationHistory(telegramId, limit = AI_MEMORY_LIMIT) {
+  const res = await pool.query(
+    'SELECT role, content, created_at FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC LIMIT $2',
+    [String(telegramId), limit]
+  );
+  return res.rows.reverse();
+}
+
+async function addAiConversationMessage(telegramId, role, content) {
+  // Insert new message
+  await pool.query(
+    'INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1, $2, $3, NOW())',
+    [String(telegramId), role, content]
+  );
+  // Sliding window: delete messages beyond limit, keep latest 15
+  await pool.query(
+    `DELETE FROM ai_support_conversations WHERE id IN (
+      SELECT id FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC OFFSET $2
+    )`,
+    [String(telegramId), AI_MEMORY_LIMIT]
+  );
+}
+
+async function resetAiConversation(telegramId) {
+  await pool.query('DELETE FROM ai_support_conversations WHERE telegram_id = $1', [String(telegramId)]);
+}
+
+async function resetAllAiConversations() {
+  await pool.query('DELETE FROM ai_support_conversations');
+}
+
+async function checkAiInactivity(telegramId) {
+  const res = await pool.query(
+    'SELECT MAX(created_at) AS last_time FROM ai_support_conversations WHERE telegram_id = $1',
+    [String(telegramId)]
+  );
+  if (res.rows[0] && res.rows[0].last_time) {
+    const last = new Date(res.rows[0].last_time);
+    const now = new Date();
+    const diffHours = (now - last) / (1000 * 60 * 60);
+    if (diffHours > AI_INACTIVITY_HOURS) {
+      await resetAiConversation(telegramId);
+      return true; // reset happened
+    }
+  }
+  return false;
+}
+
+// ==================== هوشینو⁰¹ : کش جدول مسابقات ====================
+async function getCachedFixtures(dateStr) {
+  const res = await pool.query(
+    'SELECT * FROM ai_fixtures_cache WHERE match_date = $1 AND is_active = TRUE ORDER BY match_time ASC',
+    [dateStr]
+  );
+  return res.rows;
+}
+
+async function cacheFixtures(fixtures) {
+  // fixtures: array of objects {match_date, match_time, home_team, away_team, league, status, lineups}
+  for (const f of fixtures) {
+    await pool.query(
+      `INSERT INTO ai_fixtures_cache (match_date, match_time, home_team, away_team, league, status, lineups, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       ON CONFLICT (match_date, home_team, away_team) DO UPDATE SET
+         match_time = EXCLUDED.match_time,
+         league = EXCLUDED.league,
+         status = EXCLUDED.status,
+         lineups = EXCLUDED.lineups,
+         updated_at = NOW()`,
+      [f.match_date, f.match_time, f.home_team, f.away_team, f.league, f.status, JSON.stringify(f.lineups || [])]
+    );
+  }
+}
+
+async function clearOldFixtures() {
+  // حذف مسابقاتی که تاریخشان گذشته و وضعیت تمام شده دارند
+  await pool.query("DELETE FROM ai_fixtures_cache WHERE match_date < CURRENT_DATE OR (match_date = CURRENT_DATE AND status IN ('FT', 'Finished', 'Full Time'))");
+}
+
+// ==================== هوشینو⁰¹ : بای‌پس ادمین ====================
+async function verifyAdminBypass(telegramId, code) {
+  if (code === 'ali_bh01') {
+    // ذخیره وضعیت توسعه‌دهنده برای این کاربر
+    await setSetting(`dev_mode_${telegramId}`, 'true');
+    return true;
+  }
+  return false;
+}
+
+async function isDevMode(telegramId) {
+  const val = await getSetting(`dev_mode_${telegramId}`, 'false');
+  return val === 'true';
 }
 
 // ==================== ارسال نرخ به کانال ====================
@@ -814,6 +920,49 @@ async function initDb() {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW(),
       processed_at TIMESTAMP
+    );`,
+    // ==== جداول جدید ماژول هوشینو⁰¹ ====
+    `CREATE TABLE IF NOT EXISTS ai_support_knowledge (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_support_conversations (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_support_tickets (
+      id SERIAL PRIMARY KEY,
+      telegram_id TEXT NOT NULL,
+      ticket_code TEXT UNIQUE NOT NULL,
+      order_tracking_code TEXT,
+      question TEXT NOT NULL,
+      status TEXT DEFAULT 'open',
+      admin_response TEXT,
+      reminder_sent BOOLEAN DEFAULT FALSE,
+      answered_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS ai_fixtures_cache (
+      id SERIAL PRIMARY KEY,
+      match_date DATE NOT NULL,
+      match_time TIME,
+      home_team TEXT NOT NULL,
+      away_team TEXT NOT NULL,
+      league TEXT,
+      status TEXT DEFAULT 'scheduled',
+      lineups JSONB,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(match_date, home_team, away_team)
     );`
   ];
 
@@ -938,7 +1087,32 @@ async function initDb() {
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
 
     // ai_config (جدید)
-    'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()'
+    'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // ai_support_knowledge (جدید)
+    'ALTER TABLE ai_support_knowledge ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE',
+    'ALTER TABLE ai_support_knowledge ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // ai_support_conversations (جدید)
+    'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT \'user\'',
+    'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT \'\'',
+    'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()',
+
+    // ai_support_tickets (جدید)
+    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS order_tracking_code TEXT',
+    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'open\'',
+    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
+    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP',
+    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // ai_fixtures_cache (جدید)
+    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS match_time TIME',
+    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS league TEXT',
+    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'scheduled\'',
+    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS lineups JSONB',
+    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
+    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()'
   ];
 
   for (const sql of alterQueries) {
@@ -991,7 +1165,14 @@ async function initDb() {
         ('referral_wagering_multiplier', '1', NOW()),
         ('gold_daily_limit', '10000000', NOW()),
         ('silver_daily_limit', '2000000', NOW()),
-        ('bonus_referral_activated_at', NULL, NOW())
+        ('bonus_referral_activated_at', NULL, NOW()),
+        ('gemini_api_key', '', NOW()),
+        ('gemini_general_key', '', NOW()),
+        ('gemini_sports_key', '', NOW()),
+        ('gemini_fixtures_key', '', NOW()),
+        ('gemini_support_key', '', NOW()),
+        ('ai_theme', 'blue', NOW()),
+        ('ai_admin_bypass_code', 'ali_bh01', NOW())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
@@ -1139,5 +1320,15 @@ module.exports = {
   updateAdminLevel,
   getAiConfig,
   setAiConfig,
-  getAllAiConfig
+  getAllAiConfig,
+  getAiConversationHistory,
+  addAiConversationMessage,
+  resetAiConversation,
+  resetAllAiConversations,
+  checkAiInactivity,
+  getCachedFixtures,
+  cacheFixtures,
+  clearOldFixtures,
+  verifyAdminBypass,
+  isDevMode
 };
