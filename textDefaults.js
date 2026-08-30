@@ -47,4 +47,20 @@ module.exports = [
   // رفرال
   { key: 'referralTitle', category: 'referral', value: '👥 دعوت دوستان' },
   { key: 'referralLink', category: 'referral', value: '🔗 لینک دعوت شما:\n{link}\n\n👥 تعداد دعوت: {count} نفر\n💰 پاداش هر دعوت: {bonus} تومان' },
+
+  // ==================== 🧠 هوشینو⁰¹ (Omni-Assistant) ====================
+  { key: 'omniMenuTitle', category: 'omni', value: '🧠 هوشینو⁰¹ برتر\n\nیکی از گزینه‌های زیر را انتخاب کنید:' },
+  { key: 'omniGeneralButton', category: 'omni', value: '🐽 گفتگوی AI هوشینو⁰¹' },
+  { key: 'omniSportsButton', category: 'omni', value: '⚽ تحلیل AI هوشینو⁰¹' },
+  { key: 'omniFixturesButton', category: 'omni', value: '📅 جدول امروز هوشینو⁰¹' },
+  { key: 'omniBackButton', category: 'omni', value: '🔙 بازگشت به منوی اصلی' },
+  { key: 'omniResetButton', category: 'omni', value: '🔄 شروع گفتگوی جدید' },
+  { key: 'omniProcessing', category: 'omni', value: '🤖 در حال پردازش...' },
+  { key: 'omniError', category: 'omni', value: '⚠️ خطا در پردازش درخواست. لطفاً دوباره تلاش کنید.' },
+  { key: 'omniGeneralPrompt', category: 'omni', value: '💬 سلام! من هوشینو⁰¹ هستم.\nسوالت رو بپرس یا عکس/ویس بفرست.' },
+  { key: 'omniSportsPrompt', category: 'omni', value: '⚽ تحلیلگر ورزشی هوشینو⁰¹ در خدمت شماست.\nمسابقه یا تیم مورد نظرت رو بگو.' },
+  { key: 'omniFixturesPrompt', category: 'omni', value: '📅 جدول امروز مسابقات رو می‌خوای؟ بگو کدوم لیگ؟' },
+  { key: 'omniResetSuccess', category: 'omni', value: '🔄 گفتگو از نو شروع شد.' },
+  { key: 'omniNoApiKey', category: 'omni', value: '⚠️ کلید API هوش مصنوعی تنظیم نشده است.' },
+  { key: 'omniAdminFlushed', category: 'omni', value: '🧹 تمام گفتگوهای کاربران پاک شد.' }
 ];
