@@ -18,8 +18,8 @@ const mainMenuButtons = [
   { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
-  { key: 'website', text: '🐽 AI هوشینو⁰¹' },  // تغییر از وب‌سایت به هوشینو⁰¹
-  { key: 'support', text: '🧠 پشتیبانی هوشینو⁰¹ }
+  { key: 'website', text: '🐽 هوشینو⁰¹ برتر' },
+  { key: 'support', text: '🧠 پشتیبانی هوشینو⁰¹' }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
@@ -58,11 +58,11 @@ const ADMIN_LEVELS = {
 };
 
 const GEMINI_API_CONFIG = {
-  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت انسانی حرفه‌ای واقعی بده تا کاربران راحت شوند.',
+  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خلاصه و کوتاه بده تا کاربران راحت شوند.',
   USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
   SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
   SUPPORT_MENU_BUTTONS: [
-    { key: 'ai_support',    text: '🤖 پشتیبانی هوشینو⁰¹ },
+    { key: 'ai_support',    text: '🤖 پشتیبانی هوشمند' },
     { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
     { key: 'back_main',     text: '🔙 بازگشت' }
   ]
@@ -97,6 +97,15 @@ const AI_THEMES = [
 
 const AI_DEFAULT_THEME = 'blue';
 
+// ==================== کلیدهای سرویس‌های خارجی (برای پنل ادمین) ====================
+const EXTERNAL_API_KEYS = {
+  TAVILY: 'tavily_api_key',
+  GROQ: 'groq_api_key',
+  API_FOOTBALL: 'api_football_key',
+  THESPORTSDB: 'thesportsdb_key',
+  ODDS_API: 'odds_api_key'
+};
+
 module.exports = {
   ADMIN_IDS,
   SUPER_ADMIN_ID,
@@ -117,5 +126,6 @@ module.exports = {
   AI_MODES,
   AI_KEY_ENV_MAP,
   AI_THEMES,
-  AI_DEFAULT_THEME
+  AI_DEFAULT_THEME,
+  EXTERNAL_API_KEYS
 };
