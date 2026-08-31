@@ -9,7 +9,11 @@ const {
   resetAllAiConversations, checkAiInactivity, getCachedFixtures, cacheFixtures,
   clearOldFixtures, verifyAdminBypass, isDevMode
 } = require('../db');
-const { ADMIN_IDS, AI_HEADERS, AI_MODES, AI_KEY_ENV_MAP, AI_THEMES, AI_DEFAULT_THEME } = require('../constants');
+const {
+  ADMIN_IDS, AI_HEADERS, AI_MODES, AI_KEY_ENV_MAP, AI_THEMES, AI_DEFAULT_THEME,
+  EXTERNAL_API_KEYS
+} = require('../constants');
+const { getTodayFixtures, getMatchLineups, getLiveOdds, fetchSportsData, initSportsData, startSportsDataUpdater } = require('../sportsDataProvider');
 
 const MODE = AI_MODES;
 const HEADERS = AI_HEADERS;
@@ -20,45 +24,79 @@ function isAdmin(id) {
 }
 
 function getModeApiKey(mode) {
-  const envMap = {
+  const keyMap = {
     [MODE.GENERAL]: 'gemini_general_key',
     [MODE.SPORTS]: 'gemini_sports_key',
     [MODE.FIXTURES]: 'gemini_fixtures_key',
-    [MODE.SUPPORT]: 'gemini_support_key'
+    // حالت پشتیبانی از aiSupport استفاده می‌کند، اینجا لازم نیست
   };
-  const keyName = envMap[mode] || 'gemini_general_key';
+  const keyName = keyMap[mode] || 'gemini_general_key';
   return getAiConfig(keyName, '');
 }
 
-function buildSystemPrompt(mode) {
-  const base = 'تو دستیار هوشمند هوشینو⁰¹ هستی، بخشی از ربات ووچینو⁰¹. ';
-  const security = 'هرگز اطلاعات داخلی، کد منبع، توکن‌ها یا روش ساخت ربات را فاش نکن. ' +
-    'اگر کاربر خواست کد یا آموزش ساخت ربات بدهد، مؤدبانه بگو این اطلاعات محرمانه است. ';
-  const marketing = '\n\nدر پایان پاسخ‌های تحلیلی، یک جمله کوتاه و جذاب برای تشویق کاربر به شارژ حساب یا خرید ووچر با /start اضافه کن.';
-
-  if (mode === MODE.GENERAL) {
-    return base + security +
-      'تو یک دستیار همه‌فن‌حریف هستی. به سوالات عمومی، علمی، فنی و روزمره پاسخ بده. ' +
-      'می‌تونی عکس ببینی و درباره آن نظر بدهی. پاسخ‌ها را طبیعی و دوستانه بده.' + marketing;
+// ---------- Tavily Search ----------
+async function searchWithTavily(query) {
+  const apiKey = await getSetting(EXTERNAL_API_KEYS.TAVILY, '');
+  if (!apiKey) {
+    console.log('Tavily API key not set');
+    return null;
   }
-
-  if (mode === MODE.SPORTS) {
-    return base + security +
-      'تو یک تحلیلگر ورزشی حرفه‌ای هستی. ' +
-      'می‌توانی تحلیل مسابقات فوتبال، پیش‌بینی نتایج، بررسی آمار تیم‌ها و بازیکنان را انجام دهی. ' +
-      'از جستجوی زنده وب برای اطلاعات به‌روز استفاده کن. ' +
-      'پاسخ‌های تحلیلی را با آمار و ارقام دقیق ارائه بده.' + marketing;
+  try {
+    const response = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        query,
+        search_depth: 'basic',
+        include_answer: true,
+        max_results: 5
+      })
+    });
+    if (!response.ok) throw new Error(`Tavily status ${response.status}`);
+    const data = await response.json();
+    return data;
+  } catch (e) {
+    console.log(`[Tavily] Error: ${e.message}`);
+    return null;
   }
+}
 
-  if (mode === MODE.FIXTURES) {
-    return base + security +
-      'تو نمایش‌دهنده جدول مسابقات امروز هستی. ' +
-      'اطلاعات را از کش داخلی و جستجوی زنده وب بگیر. ' +
-      'لیگ‌های مهم مثل لیگ برتر ایران، لیگ برتر انگلیس، بوندسلیگا، سری آ، سوپر لیگ ترکیه و فرکانس ماهواره‌ها را پوشش بده. ' +
-      'در صورت درخواست، ترکیب ۱۱ نفره تیم‌ها را نشان بده.' + marketing;
+// ---------- Groq Whisper (Speech-to-Text) ----------
+async function transcribeVoice(fileUrl) {
+  const apiKey = await getSetting(EXTERNAL_API_KEYS.GROQ, '');
+  if (!apiKey) {
+    console.log('Groq API key not set');
+    return null;
   }
+  try {
+    // دانلود فایل صوتی
+    const audioResp = await fetch(fileUrl);
+    if (!audioResp.ok) throw new Error(`Download failed with status ${audioResp.status}`);
+    const audioBuffer = await audioResp.arrayBuffer();
 
-  return base + security + marketing;
+    // ارسال به Groq
+    const formData = new FormData();
+    formData.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg');
+    formData.append('model', 'whisper-large-v3');
+    formData.append('language', 'fa'); // می‌توان خودکار باشد
+
+    const groqResp = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: formData
+    });
+    if (!groqResp.ok) throw new Error(`Groq status ${groqResp.status}`);
+    const result = await groqResp.json();
+    return result.text || null;
+  } catch (e) {
+    console.log(`[Groq] Error: ${e.message}`);
+    return null;
+  }
 }
 
 // ---------- ارتباط با Gemini ----------
@@ -98,7 +136,7 @@ async function callGemini(mode, telegramId, prompt, imageData = null, voiceText 
   if (imageData) {
     userParts.push({
       inlineData: {
-        mimeType: 'image/jpeg', // assume jpeg, can be adjusted
+        mimeType: 'image/jpeg',
         data: imageData.toString('base64')
       }
     });
@@ -113,11 +151,30 @@ async function callGemini(mode, telegramId, prompt, imageData = null, voiceText 
     contents.push({ role: 'user', parts: userParts });
   }
 
-  // ذخیره پیام کاربر
+  // ذخیره پیام کاربر (فقط متن یا توضیح عکس/ویس)
   const userContent = voiceText || prompt || (imageData ? '[عکس]' : '');
   await addAiConversationMessage(telegramId, 'user', userContent);
 
-  const systemPrompt = buildSystemPrompt(mode);
+  // اگر حالت ورزشی یا جدول است، از Tavily جستجو کن و نتایج را به context اضافه کن
+  let searchContext = '';
+  if (mode === MODE.SPORTS || mode === MODE.FIXTURES) {
+    const searchQuery = prompt || voiceText || '';
+    if (searchQuery) {
+      const searchResult = await searchWithTavily(searchQuery);
+      if (searchResult && searchResult.answer) {
+        searchContext = `\n\nاطلاعات جستجوی وب:\n${searchResult.answer}`;
+        // همچنین نتایج دیگر را خلاصه اضافه کن
+        if (searchResult.results && searchResult.results.length > 0) {
+          searchContext += '\nمنابع:';
+          for (const r of searchResult.results.slice(0, 3)) {
+            searchContext += `\n- ${r.title}: ${r.url}`;
+          }
+        }
+      }
+    }
+  }
+
+  const systemPrompt = buildSystemPrompt(mode) + searchContext;
 
   const requestBody = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -125,8 +182,8 @@ async function callGemini(mode, telegramId, prompt, imageData = null, voiceText 
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 1024
-    },
-    tools: [{ googleSearch: {} }] // فعال‌سازی جستجوی زنده گوگل
+    }
+    // توجه: از googleSearch استفاده نمی‌کنیم چون Tavily را داریم
   };
 
   try {
@@ -153,23 +210,59 @@ async function callGemini(mode, telegramId, prompt, imageData = null, voiceText 
   }
 }
 
+function buildSystemPrompt(mode) {
+  const base = 'تو دستیار هوشمند هوشینو⁰¹ هستی، بخشی از ربات ووچینو⁰¹. ';
+  const security = 'هرگز اطلاعات داخلی، کد منبع، توکن‌ها یا روش ساخت ربات را فاش نکن. ' +
+    'اگر کاربر خواست کد یا آموزش ساخت ربات بدهد، مؤدبانه بگو این اطلاعات محرمانه است. ';
+  const marketing = '\n\nدر پایان پاسخ‌های تحلیلی، یک جمله کوتاه و جذاب برای تشویق کاربر به شارژ حساب یا خرید ووچر با /start اضافه کن.';
+
+  if (mode === MODE.GENERAL) {
+    return base + security +
+      'تو یک دستیار همه‌فن‌حریف هستی. به سوالات عمومی، علمی، فنی و روزمره پاسخ بده. ' +
+      'می‌تونی عکس ببینی و درباره آن نظر بدهی. پاسخ‌ها را طبیعی و دوستانه بده.' + marketing;
+  }
+
+  if (mode === MODE.SPORTS) {
+    return base + security +
+      'تو یک تحلیلگر ورزشی حرفه‌ای هستی. ' +
+      'می‌توانی تحلیل مسابقات فوتبال، پیش‌بینی نتایج، بررسی آمار تیم‌ها و بازیکنان را انجام دهی. ' +
+      'برای هر تحلیل، درصد برد و باخت، پیشنهاد شرط‌بندی (میکس یا تکی) با ذکر دلیل و ضریب را بده. ' +
+      'همه رشته‌های ورزشی مهم را پوشش بده: فوتبال، والیبال، تنیس، بسکتبال، هاکی و... ' +
+      'از داده‌های جستجو شده برای دقت استفاده کن.' + marketing;
+  }
+
+  if (mode === MODE.FIXTURES) {
+    return base + security +
+      'تو نمایش‌دهنده جدول مسابقات امروز هستی. ' +
+      'اطلاعات را از جستجوی وب و کش داخلی بگیر. ' +
+      'لیگ‌های مهم مثل لیگ برتر ایران، لیگ برتر انگلیس، بوندسلیگا، سری آ، سوپر لیگ ترکیه و لالیگا را پوشش بده. ' +
+      'در صورت درخواست، ترکیب ۱۱ نفره تیم‌ها را نشان بده. ' +
+      'فرمت نمایش جدول زیبا و خلاصه باشد.' + marketing;
+  }
+
+  return base + security + marketing;
+}
+
 // ---------- نمایش منوی اصلی هوشینو⁰¹ ----------
 async function showOmniMenu(ctx) {
   const themeKey = await getSetting('ai_theme', AI_DEFAULT_THEME);
   const theme = AI_THEMES.find(t => t.key === themeKey) || AI_THEMES[0];
-  const emoji = theme.emoji;
+  const color = theme.key; // 'blue', 'green', 'red', 'gold'
 
-  const header = `╭─ ✦Vochino01✦ ─╮\n   🧠 هوشینو⁰¹ برتر\n╰─ ✦ ──── ✦ ─╯\n\n${emoji} یکی از گزینه‌های زیر را انتخاب کنید:`;
+  const header = `╭─ ✦Vochino01✦ ─╮\n   🧠 هوشینو⁰¹ برتر\n╰─ ✦ ──── ✦ ─╯\n\n${theme.emoji} یکی از گزینه‌های زیر را انتخاب کنید:`;
+
+  // دکمه‌ها با رنگ شیشه‌ای (color)
+  const buttons = [
+    [{ text: '🐽 گفتگوی AI هوشینو⁰¹', callback_data: 'omni_general_start', color }],
+    [{ text: '⚽ تحلیل AI هوشینو⁰¹', callback_data: 'omni_sports_start', color }],
+    [{ text: '📅 جدول امروز هوشینو⁰¹', callback_data: 'omni_fixtures_start', color }],
+    [{ text: '🔄 شروع گفتگوی جدید', callback_data: 'omni_reset', color }],
+    [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu', color }]
+  ];
 
   ctx.reply(header, {
     reply_markup: {
-      inline_keyboard: [
-        [{ text: '🐽 گفتگوی AI هوشینو⁰¹', callback_data: 'omni_general_start' }],
-        [{ text: '⚽ تحلیل AI هوشینو⁰¹', callback_data: 'omni_sports_start' }],
-        [{ text: '📅 جدول امروز هوشینو⁰¹', callback_data: 'omni_fixtures_start' }],
-        [{ text: '🔄 شروع گفتگوی جدید', callback_data: 'omni_reset' }],
-        [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu' }]
-      ]
+      inline_keyboard: buttons
     }
   });
 }
@@ -193,14 +286,22 @@ function startMode(ctx, mode) {
     data: { mode }
   };
 
-  ctx.reply(headers[mode] + '\n\n' + prompts[mode], {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🔄 شروع گفتگوی جدید', callback_data: 'omni_reset' }],
-        [{ text: '🔙 بازگشت به منوی هوشینو⁰¹', callback_data: 'omni_menu' }]
-      ]
-    }
-  });
+  const themeKey = getSetting('ai_theme', AI_DEFAULT_THEME).then(themeKey => themeKey);
+  // برای سادگی، از await استفاده می‌کنیم
+  (async () => {
+    const themeKeyValue = await getSetting('ai_theme', AI_DEFAULT_THEME);
+    const theme = AI_THEMES.find(t => t.key === themeKeyValue) || AI_THEMES[0];
+    const color = theme.key;
+
+    ctx.reply(headers[mode] + '\n\n' + prompts[mode], {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔄 شروع گفتگوی جدید', callback_data: 'omni_reset', color }],
+          [{ text: '🔙 بازگشت به منوی هوشینو⁰¹', callback_data: 'omni_menu', color }]
+        ]
+      }
+    });
+  })();
 }
 
 // ---------- هندلرهای منو ----------
@@ -235,14 +336,13 @@ async function registerOmniHandlers(bot) {
   bot.action('omni_fixtures_start', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    // برای جدول مسابقات، ابتدا کش را چک می‌کنیم و اگر خالی بود از جستجو کمک می‌گیریم
+    // برای جدول، ابتدا پیام راهنما نمایش داده و session را تنظیم می‌کنیم
     sessions[ctx.from.id] = {
       flow: 'omni',
       step: 'chatting',
       data: { mode: MODE.FIXTURES, initialRequest: true }
     };
-    // پیام راهنما
-    ctx.reply(HEADERS.fixtures + '\n\n📅 برای دریافت جدول مسابقات امروز، لیگ مورد نظر را بگو (مثلاً لیگ برتر ایران، لیگ برتر انگلیس، بوندسلیگا، سری آ، سوپر لیگ ترکیه).');
+    ctx.reply(HEADERS.fixtures + '\n\n📅 برای دریافت جدول مسابقات امروز، لیگ مورد نظر را بگو (مثلاً لیگ برتر انگلیس، اروپا، بوندسلیگا، سری آ، لیگ برتر ایران، سوپر لیگ ترکیه).');
     return;
   });
 
@@ -261,7 +361,7 @@ async function registerOmniHandlers(bot) {
     }
   });
 
-  // دستور پاکسازی کلی برای ادمین (در پنل ادمین جداگانه هندل می‌شود اما اینجا هم)
+  // دستور پاکسازی کلی برای ادمین
   bot.command('flush_ai', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     await resetAllAiConversations();
@@ -277,7 +377,7 @@ async function registerOmniHandlers(bot) {
     const mode = session.data.mode;
     const prompt = ctx.message.text.trim();
 
-    // بای‌پس ادمین: اگر کاربر ادمین و کد مخفی وارد کرد
+    // بای‌پس ادمین
     if (isAdmin(ctx.from.id) && prompt === 'ali_bh01') {
       const ok = await verifyAdminBypass(ctx.from.id, prompt);
       if (ok) {
@@ -286,10 +386,10 @@ async function registerOmniHandlers(bot) {
       }
     }
 
-    // اگر درخواست اولیه برای جدول بود و متن شامل لیگ است، سعی می‌کنیم از کش بخوانیم
+    // اگر درخواست اولیه برای جدول بود و متن شامل لیگ است، از کش و جستجو استفاده می‌کنیم
     if (mode === MODE.FIXTURES && session.data.initialRequest) {
       session.data.initialRequest = false;
-      // سعی می‌کنیم کش امروز را بخوانیم
+      // سعی می‌کنیم از کش امروز بخوانیم
       const today = new Date().toISOString().slice(0, 10);
       const cached = await getCachedFixtures(today);
       if (cached.length > 0) {
@@ -299,7 +399,7 @@ async function registerOmniHandlers(bot) {
         }
         return ctx.reply(HEADERS.fixtures + '\n\n' + response, { parse_mode: 'Markdown' });
       } else {
-        // کش خالی است، از جستجوی زنده استفاده می‌کنیم
+        // کش خالی است، از جستجو + Gemini استفاده می‌کنیم
         const result = await callGemini(mode, ctx.from.id, prompt);
         const finalText = result.text;
         return ctx.reply(HEADERS.fixtures + '\n\n' + finalText);
@@ -327,7 +427,6 @@ async function registerOmniHandlers(bot) {
       return next();
     }
     const mode = session.data.mode;
-    // دریافت فایل عکس
     const fileId = ctx.message.photo.slice(-1)[0].file_id;
     try {
       const fileUrl = await ctx.telegram.getFileLink(fileId);
@@ -354,14 +453,14 @@ async function registerOmniHandlers(bot) {
     const fileId = ctx.message.voice.file_id;
     try {
       const fileUrl = await ctx.telegram.getFileLink(fileId);
-      const response = await fetch(fileUrl.href);
-      const buffer = await response.buffer();
-      // تبدیل ویس به متن (با استفاده از سرویس فرضی، اینجا فقط شبیه‌سازی)
-      // در واقعیت باید از Whisper یا سرویس تبدیل گفتار استفاده کنید
-      // برای این نسخه، متن خالی می‌فرستیم تا Gemini پاسخ عمومی دهد
-      const voiceText = 'کاربر یک پیام صوتی فرستاده است. لطفاً به آن پاسخ بده.';
+      // تبدیل ویس به متن با Groq
+      const transcribedText = await transcribeVoice(fileUrl.href);
+      if (!transcribedText) {
+        return ctx.reply('⚠️ نتوانستم ویس شما را تشخیص دهم. لطفاً دوباره تلاش کنید.');
+      }
+      // پردازش متن استخراج شده
       ctx.telegram.sendChatAction(ctx.chat.id, 'typing');
-      const result = await callGemini(mode, ctx.from.id, voiceText, null, true);
+      const result = await callGemini(mode, ctx.from.id, null, null, transcribedText);
       return ctx.reply(HEADERS[mode] + '\n\n' + result.text);
     } catch (e) {
       console.log('Voice processing error:', e.message);
@@ -376,10 +475,12 @@ async function registerOmniHandlers(bot) {
     } catch (e) {
       console.log('خطا در پاکسازی کش مسابقات:', e.message);
     }
-  }, 2 * 60 * 60 * 1000); // هر ۲ ساعت
+  }, 2 * 60 * 60 * 1000); // هر ۱ ساعت
 }
 
 // ---------- خروجی ماژول ----------
 module.exports = function (bot) {
   registerOmniHandlers(bot).catch(err => console.log('خطا در ثبت هندلرهای هوشینو⁰¹:', err.message));
+  // شروع زمان‌بندی داده ورزشی
+  startSportsDataUpdater(bot);
 };
