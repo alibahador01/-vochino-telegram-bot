@@ -4,6 +4,7 @@
 // با کش هوشمند در دیتابیس، مصرف API را به حداقل می‌رساند
 
 const { pool, getSetting, setSetting } = require('./db');
+const { EXTERNAL_API_KEYS } = require('./constants');
 
 // ==================== ساختار جدول کش ====================
 // برای ذخیره موقت داده‌های مختلف (مسابقات، ترکیب، ضرایب، آمار) از یک جدول key-value با TTL استفاده می‌کنیم
@@ -111,7 +112,7 @@ async function fetchFromSofascore(leagueId) {
  * دریافت داده از API-Football (RapidAPI)
  */
 async function fetchFromApiFootball(leagueId, season) {
-  const apiKey = await getSetting('api_football_key', '');
+  const apiKey = await getSetting(EXTERNAL_API_KEYS.API_FOOTBALL, '');
   if (!apiKey) return null;
   try {
     const url = `https://api-football-v1.p.rapidapi.com/v3/fixtures?league=${leagueId}&season=${season || new Date().getFullYear()}`;
@@ -134,7 +135,7 @@ async function fetchFromApiFootball(leagueId, season) {
  * دریافت داده از TheSportsDB (رایگان با کلید اختیاری)
  */
 async function fetchFromTheSportsDB(leagueId) {
-  const apiKey = await getSetting('thesportsdb_key', '3'); // کلید عمومی رایگان
+  const apiKey = await getSetting(EXTERNAL_API_KEYS.THESPORTSDB, '3'); // کلید عمومی رایگان
   try {
     const url = `https://www.thesportsdb.com/api/v1/json/${apiKey}/eventsnextleague.php?id=${leagueId}`;
     const resp = await fetch(url);
@@ -151,7 +152,7 @@ async function fetchFromTheSportsDB(leagueId) {
  * دریافت ضرایب از The Odds API (رایگان با کلید)
  */
 async function fetchFromTheOddsAPI(sportKey = 'soccer') {
-  const apiKey = await getSetting('odds_api_key', '');
+  const apiKey = await getSetting(EXTERNAL_API_KEYS.ODDS_API, '');
   if (!apiKey) return null;
   try {
     const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds/?apiKey=${apiKey}&regions=eu`;
