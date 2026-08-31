@@ -1,5 +1,6 @@
 // utils.js
 const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS } = require('./constants');
+const { getSetting } = require('./db');
 
 const sessions = {};
 
@@ -37,7 +38,7 @@ async function sendTracked(ctx, session, text, extra) {
  * ویژه ووچینو⁰۱ (چپ) - وب‌سایت (راست)
  * پشتیبانی (وسط)
  */
-function showMainMenu(ctx) {
+async function showMainMenu(ctx) {
   const isAdmin = ADMIN_IDS.includes(Number(ctx.from.id));
 
   const buttons = [...mainMenuButtons];
@@ -60,16 +61,32 @@ function showMainMenu(ctx) {
     }
   }
 
-const headerText =
-  '╭─ ✦ Vochino⁰¹✦─╮\n' +
-  '          👑 ووچینو⁰¹\n' +
-  '╰─ ✦ ──── ✦ ─╯\n\n' +
-  '⚜ مرجع تخصصی معاملات | ووچر\n' +
-  '🔹 سرعت بالا در نقدشوندگی\n' +
-  '🐽 پشتیبانی آنلاین و لحظه‌ای\n' +
-  '🔹 محیطی امن برای تمامی تراکنش‌ها\n' +
-  '👇🏼 جهت ادامه، گزینه مورد نظر را انتخاب کنید';
-ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
+  const headerText =
+    '╭─ ✦ Vochino⁰¹✦─╮\n' +
+    '          👑 ووچینو⁰¹\n' +
+    '╰─ ✦ ──── ✦ ─╯\n\n' +
+    '⚜ مرجع تخصصی معاملات | ووچر\n' +
+    '🔹 سرعت بالا در نقدشوندگی\n' +
+    '🐽 پشتیبانی آنلاین و لحظه‌ای\n' +
+    '🔹 محیطی امن برای تمامی تراکنش‌ها\n' +
+    '👇🏼 جهت ادامه، گزینه مورد نظر را انتخاب کنید';
+
+  const sent = await ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
+
+  // تلاش برای واکنش شناور روی پیام منو با ایموجی تنظیم‌شده در پنل ادمین
+  try {
+    const reactionEmoji = await getSetting('start_reaction', '🎉');
+    if (reactionEmoji && reactionEmoji.trim() !== '') {
+      await ctx.telegram.callApi('setMessageReaction', {
+        chat_id: ctx.chat.id,
+        message_id: sent.message_id,
+        reaction: [{ type: 'emoji', emoji: reactionEmoji.trim() }]
+      });
+    }
+  } catch (e) {
+    // خطای setMessageReaction نادیده گرفته می‌شود
+    console.log('[setMessageReaction] Not supported or error:', e.message);
+  }
 }
 
 async function sendMessageToUser(bot, userId, text, extra = {}) {
