@@ -73,14 +73,17 @@ async function showMainMenu(ctx) {
 
   const sent = await ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 
-  // تلاش برای واکنش شناور روی پیام منو با ایموجی تنظیم‌شده در پنل ادمین
+  // تلاش برای واکنش شناور روی پیام /start خودِ کاربر با ایموجی تنظیم‌شده در پنل ادمین
   try {
     const reactionEmoji = await getSetting('start_reaction', '🎉');
+    // آیدی پیامی که باید رویش ری‌اکشن بخورد: پیام /start کاربر (نه پیام منویی که بات فرستاد)
+    const targetMessageId = (ctx.message && ctx.message.message_id) || sent.message_id;
     if (reactionEmoji && reactionEmoji.trim() !== '') {
       await ctx.telegram.callApi('setMessageReaction', {
         chat_id: ctx.chat.id,
-        message_id: sent.message_id,
-        reaction: [{ type: 'emoji', emoji: reactionEmoji.trim() }]
+        message_id: targetMessageId,
+        reaction: [{ type: 'emoji', emoji: reactionEmoji.trim() }],
+        is_big: true // <- همین پارامتر است که ری‌اکشن را «شناور/بزرگ» نمایش می‌دهد
       });
     }
   } catch (e) {
