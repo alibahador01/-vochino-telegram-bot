@@ -18,6 +18,15 @@ const { getTodayFixtures, getMatchLineups, getLiveOdds, fetchSportsData, initSpo
 const MODE = AI_MODES;
 const HEADERS = AI_HEADERS;
 
+// می‌سازد یک دکمه‌ی inline که رنگ واقعی‌اش را از فیلد رسمی تلگرام "style" می‌گیرد
+// (نه "color" که تلگرام اصلاً نمی‌شناسدش و بی‌صدا نادیده‌اش می‌گیرد).
+// اگر theme.style مقدار نداشته باشد (حالت "اصلی")، فیلد style اصلاً به دکمه اضافه نمی‌شود.
+function themedButton(text, callback_data, theme) {
+  const btn = { text, callback_data };
+  if (theme && theme.style) btn.style = theme.style;
+  return btn;
+}
+
 // ---------- توابع کمکی ----------
 function isAdmin(id) {
   return ADMIN_IDS.includes(Number(id));
@@ -247,17 +256,16 @@ function buildSystemPrompt(mode) {
 async function showOmniMenu(ctx) {
   const themeKey = await getSetting('ai_theme', AI_DEFAULT_THEME);
   const theme = AI_THEMES.find(t => t.key === themeKey) || AI_THEMES[0];
-  const color = theme.key; // 'blue', 'green', 'red', 'gold'
 
   const header = `╭─ ✦Vochino01✦ ─╮\n   🧠 هوشینو⁰¹ برتر\n╰─ ✦ ──── ✦ ─╯\n\n${theme.emoji} یکی از گزینه‌های زیر را انتخاب کنید:`;
 
-  // دکمه‌ها با رنگ شیشه‌ای (color)
+  // دکمه‌ها با رنگ شیشه‌ای واقعی (فیلد style طبق Bot API 9.4)
   const buttons = [
-    [{ text: '🐽 گفتگوی AI هوشینو⁰¹', callback_data: 'omni_general_start', color }],
-    [{ text: '⚽ تحلیل AI هوشینو⁰¹', callback_data: 'omni_sports_start', color }],
-    [{ text: '📅 جدول امروز هوشینو⁰¹', callback_data: 'omni_fixtures_start', color }],
-    [{ text: '🔄 شروع گفتگوی جدید', callback_data: 'omni_reset', color }],
-    [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu', color }]
+    [themedButton('🐽 گفتگوی AI هوشینو⁰¹', 'omni_general_start', theme)],
+    [themedButton('⚽ تحلیل AI هوشینو⁰¹', 'omni_sports_start', theme)],
+    [themedButton('📅 جدول امروز هوشینو⁰¹', 'omni_fixtures_start', theme)],
+    [themedButton('🔄 شروع گفتگوی جدید', 'omni_reset', theme)],
+    [themedButton('🔙 بازگشت به منوی اصلی', 'back_main_menu', theme)]
   ];
 
   ctx.reply(header, {
@@ -286,18 +294,15 @@ function startMode(ctx, mode) {
     data: { mode }
   };
 
-  const themeKey = getSetting('ai_theme', AI_DEFAULT_THEME).then(themeKey => themeKey);
-  // برای سادگی، از await استفاده می‌کنیم
   (async () => {
     const themeKeyValue = await getSetting('ai_theme', AI_DEFAULT_THEME);
     const theme = AI_THEMES.find(t => t.key === themeKeyValue) || AI_THEMES[0];
-    const color = theme.key;
 
     ctx.reply(headers[mode] + '\n\n' + prompts[mode], {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🔄 شروع گفتگوی جدید', callback_data: 'omni_reset', color }],
-          [{ text: '🔙 بازگشت به منوی هوشینو⁰¹', callback_data: 'omni_menu', color }]
+          [themedButton('🔄 شروع گفتگوی جدید', 'omni_reset', theme)],
+          [themedButton('🔙 بازگشت به منوی هوشینو⁰¹', 'omni_menu', theme)]
         ]
       }
     });
