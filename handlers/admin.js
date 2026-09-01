@@ -15,7 +15,7 @@ const {
   getAllCategories, getTextInfo, getTextsByCategory, searchTextsInCache,
   validatePlaceholders, refreshText, formatTextForDisplay
 } = require('../textManager');
-const { ADMIN_IDS, MIN_WITHDRAW, AI_THEMES, AI_DEFAULT_THEME } = require('../constants');
+const { ADMIN_IDS, MIN_WITHDRAW, AI_THEMES, AI_DEFAULT_THEME, ALLOWED_REACTIONS } = require('../constants');
 const { calculateSellPayout, isAutoExecutionEnabled } = require('../exchangeEngine');
 
 function isAdmin(telegramId) {
@@ -309,8 +309,9 @@ bot.action('admin_reaction_manager', async (ctx) => {
   ctx.answerCbQuery();
   try { await ctx.deleteMessage(); } catch (e) {}
 
-  // لیست ایموجی‌های مجاز برای ری‌اکشن شناور
-  const allowedEmojis = ['❤️', '🔥', '🎉', '👏', '💯', '🤩', '⚡', '🏆', '💀', '🐆', '🦋', '⚘', '⭐', '🌧'];
+  // لیست ایموجی‌های مجاز برای ری‌اکشن شناور (زیرمجموعه‌ای پرکاربرد از ALLOWED_REACTIONS واقعی تلگرام)
+  // نکته: قبلاً اینجا چند ایموجی نامعتبر بود (💀 🐆 🦋 ⚘ ⭐ 🌧) که تلگرام اصلاً قبولشون نمی‌کرد
+  const allowedEmojis = ['❤️', '🔥', '🎉', '👏', '💯', '🤩', '⚡', '🏆', '😍', '👍', '👎', '🥰', '😱', '💔', '🎃', '🗿'];
   const currentReaction = await getSetting('start_reaction', '🎉');
 
   let msg = '❤️ **مدیریت ایموجی ری‌اکشن شناور**\n\n';
@@ -1804,6 +1805,9 @@ bot.on('text', async (ctx, next) => {
     if (session.flow === 'admin_set_reaction' && session.step === 'waiting_value') {
       const emoji = ctx.message.text.trim();
       if (!emoji) return ctx.reply('❌ ایموجی نامعتبر.');
+      if (!ALLOWED_REACTIONS.includes(emoji)) {
+        return ctx.reply('❌ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست. یکی از ایموجی‌های استاندارد را بفرست (مثلاً ❤️ 🔥 🎉 👍).');
+      }
       await setSetting('start_reaction', emoji);
       delete sessions[ctx.from.id];
       ctx.reply('✅ ایموجی به ' + emoji + ' تغییر یافت.');
