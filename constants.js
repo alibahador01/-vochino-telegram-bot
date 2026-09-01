@@ -5,7 +5,15 @@ const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 const DEFAULT_USD_RATE = 60000;
 
-const ALLOWED_REACTIONS = [];
+// لیست کامل و به‌روز ایموجی‌هایی که تلگرام برای «ری‌اکشن روی پیام» (setMessageReaction) قبول می‌کند.
+// هر ایموجی خارج از این لیست، خطای REACTION_INVALID می‌دهد.
+const ALLOWED_REACTIONS = [
+  '👍', '👎', '❤️', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🤬', '😢', '🎉', '🤩', '🤮', '💩',
+  '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳', '❤️‍🔥', '🌚', '🌭', '💯', '🤣', '⚡', '🍌', '🏆',
+  '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈', '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈',
+  '😇', '😨', '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿', '🆒', '💘', '🙉', '🦄',
+  '😘', '💊', '🙊', '😎', '👾', '🤷‍♂️', '🤷', '🤷‍♀️', '😡'
+];
 
 const DEPOSIT_CARDS = [
   { number: '6219861819068106', owner: 'علی بهادر' },
@@ -88,14 +96,18 @@ const AI_KEY_ENV_MAP = {
   fixtures: 'GEMINI_FIXTURES_KEY'
 };
 
+// رنگ واقعی دکمه شیشه‌ای (inline keyboard) در Bot API با فیلد "style" کنترل می‌شود
+// (نه "color")، و فقط ۳ مقدار رسمی دارد: primary (آبی)، success (سبز)، danger (قرمز).
+// طلایی/gold به‌صورت رسمی توسط تلگرام پشتیبانی نمی‌شود؛ اگر style اصلاً ست نشود،
+// دکمه به همان حالت پیش‌فرض/خاکستری خودش (🔘 اصلی) برمی‌گردد.
 const AI_THEMES = [
-  { key: 'blue',  emoji: '🔵', label: 'آبی' },
-  { key: 'green', emoji: '🟢', label: 'سبز' },
-  { key: 'red',   emoji: '🔴', label: 'قرمز' },
-  { key: 'gold',  emoji: '👑', label: 'طلایی' }
+  { key: 'blue',    style: 'primary', emoji: '🔵', label: 'آبی' },
+  { key: 'green',   style: 'success', emoji: '🟢', label: 'سبز' },
+  { key: 'red',     style: 'danger',  emoji: '🔴', label: 'قرمز' },
+  { key: 'default', style: null,      emoji: '🔘', label: 'اصلی (بدون رنگ)' }
 ];
 
-const AI_DEFAULT_THEME = 'blue';
+const AI_DEFAULT_THEME = 'default';
 
 // ==================== کلیدهای سرویس‌های خارجی (برای پنل ادمین) ====================
 const EXTERNAL_API_KEYS = {
