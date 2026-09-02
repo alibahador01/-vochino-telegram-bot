@@ -5,15 +5,7 @@ const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 const DEFAULT_USD_RATE = 60000;
 
-// لیست کامل و به‌روز ایموجی‌هایی که تلگرام برای «ری‌اکشن روی پیام» (setMessageReaction) قبول می‌کند.
-// هر ایموجی خارج از این لیست، خطای REACTION_INVALID می‌دهد.
-const ALLOWED_REACTIONS = [
-  '👍', '👎', '❤️', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🤬', '😢', '🎉', '🤩', '🤮', '💩',
-  '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳', '❤️‍🔥', '🌚', '🌭', '💯', '🤣', '⚡', '🍌', '🏆',
-  '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈', '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈',
-  '😇', '😨', '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿', '🆒', '💘', '🙉', '🦄',
-  '😘', '💊', '🙊', '😎', '👾', '🤷‍♂️', '🤷', '🤷‍♀️', '😡'
-];
+const ALLOWED_REACTIONS = [];
 
 const DEPOSIT_CARDS = [
   { number: '6219861819068106', owner: 'علی بهادر' },
@@ -26,8 +18,8 @@ const mainMenuButtons = [
   { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
-  { key: 'website', text: '🐽 هوشینو⁰¹ برتر' },
-  { key: 'support', text: '🧠 پشتیبانی هوشینو⁰¹' }
+  { key: 'website', text: '🐽 ⁰¹برترAIهوشینو },
+  { key: 'support', text: '🐽 هوشینو⁰¹AIپشتیبانی }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
@@ -65,41 +57,6 @@ const ADMIN_LEVELS = {
   MANAGER: 3
 };
 
-const GEMINI_API_CONFIG = {
-  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خلاصه و کوتاه بده تا کاربران راحت شوند.',
-  USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
-  SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
-  SUPPORT_MENU_BUTTONS: [
-    { key: 'ai_support',    text: '🤖 پشتیبانی هوشمند' },
-    { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
-    { key: 'back_main',     text: '🔙 بازگشت' }
-  ]
-};
-
-// ==================== 🧠 هوشینو⁰¹ (Omni-Assistant) ====================
-const AI_HEADERS = {
-  general: `╭─ ✦Vochino01✦ ─╮\n   🐽 گفتگوی AI هوشینو⁰¹\n╰─ ✦ ──── ✦ ─╯`,
-  sports: `╭─ ⚽️ Vochino01 ⚽️ ─╮\n   🐽 تحلیل AI هوشینو⁰¹\n╰─ ✦ ───── ✦ ─╯`,
-  fixtures: `╭─ ✦Vochino01✦ ─╮\n   📅 جدول امروز هوشینو⁰¹\n╰─ ✦ ──── ✦ ─╯`
-};
-
-const AI_MODES = {
-  GENERAL: 'general',
-  SPORTS: 'sports',
-  FIXTURES: 'fixtures'
-};
-
-const AI_KEY_ENV_MAP = {
-  support: 'GEMINI_SUPPORT_KEY',
-  general: 'GEMINI_GENERAL_KEY',
-  sports: 'GEMINI_SPORTS_KEY',
-  fixtures: 'GEMINI_FIXTURES_KEY'
-};
-
-// رنگ واقعی دکمه شیشه‌ای (inline keyboard) در Bot API با فیلد "style" کنترل می‌شود
-// (نه "color")، و فقط ۳ مقدار رسمی دارد: primary (آبی)، success (سبز)، danger (قرمز).
-// طلایی/gold به‌صورت رسمی توسط تلگرام پشتیبانی نمی‌شود؛ اگر style اصلاً ست نشود،
-// دکمه به همان حالت پیش‌فرض/خاکستری خودش (🔘 اصلی) برمی‌گردد.
 const AI_THEMES = [
   { key: 'blue',    style: 'primary', emoji: '🔵', label: 'آبی' },
   { key: 'green',   style: 'success', emoji: '🟢', label: 'سبز' },
@@ -109,13 +66,15 @@ const AI_THEMES = [
 
 const AI_DEFAULT_THEME = 'default';
 
-// ==================== کلیدهای سرویس‌های خارجی (برای پنل ادمین) ====================
-const EXTERNAL_API_KEYS = {
-  TAVILY: 'tavily_api_key',
-  GROQ: 'groq_api_key',
-  API_FOOTBALL: 'api_football_key',
-  THESPORTSDB: 'thesportsdb_key',
-  ODDS_API: 'odds_api_key'
+const GEMINI_API_CONFIG = {
+  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خلاصه و کوتاه بده تا کاربران راحت شوند.',
+  USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
+  SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
+  SUPPORT_MENU_BUTTONS: [
+    { key: 'ai_support',    text: '🤖 پشتیبانی هوشمند' },
+    { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
+    { key: 'back_main',     text: '🔙 بازگشت' }
+  ]
 };
 
 module.exports = {
@@ -133,11 +92,7 @@ module.exports = {
   PRICE_TYPES,
   GAME_TYPES,
   ADMIN_LEVELS,
-  GEMINI_API_CONFIG,
-  AI_HEADERS,
-  AI_MODES,
-  AI_KEY_ENV_MAP,
   AI_THEMES,
   AI_DEFAULT_THEME,
-  EXTERNAL_API_KEYS
+  GEMINI_API_CONFIG
 };
