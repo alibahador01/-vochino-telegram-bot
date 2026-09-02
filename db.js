@@ -517,7 +517,7 @@ async function updateAdminLevel(telegramId, level) {
  */
 async function getAiConfig(key, defaultValue = null) {
   // کلیدهای مربوط به API Key
-  const apiKeyKeys = ['api_key', 'gemini_api_key', 'gemini_support_key', 'gemini_general_key', 'gemini_sports_key', 'gemini_fixtures_key'];
+  const apiKeyKeys = ['api_key', 'gemini_api_key'];
   if (apiKeyKeys.includes(key)) {
     // ابتدا از دیتابیس بخوان
     const dbRes = await pool.query('SELECT value FROM ai_config WHERE key = $1', [key]);
@@ -525,15 +525,7 @@ async function getAiConfig(key, defaultValue = null) {
       return dbRes.rows[0].value;
     }
     // اگر در دیتابیس نبود، از environment variable بخوان
-    const envMap = {
-      'api_key': process.env.GEMINI_API_KEY,
-      'gemini_api_key': process.env.GEMINI_API_KEY,
-      'gemini_support_key': process.env.GEMINI_SUPPORT_KEY,
-      'gemini_general_key': process.env.GEMINI_GENERAL_KEY,
-      'gemini_sports_key': process.env.GEMINI_SPORTS_KEY,
-      'gemini_fixtures_key': process.env.GEMINI_FIXTURES_KEY
-    };
-    const envValue = envMap[key];
+    const envValue = process.env.GEMINI_API_KEY;
     if (envValue) {
       return envValue;
     }
@@ -546,6 +538,9 @@ async function getAiConfig(key, defaultValue = null) {
   return res.rows[0] ? res.rows[0].value : defaultValue;
 }
 
+/**
+ * ذخیره یا بروزرسانی یک مقدار در تنظیمات AI
+ */
 async function setAiConfig(key, value) {
   await pool.query(
     'INSERT INTO ai_config (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
@@ -553,110 +548,21 @@ async function setAiConfig(key, value) {
   );
 }
 
+/**
+ * دریافت همه تنظیمات AI به صورت یک شیء
+ * اگر کلید api_key در دیتابیس وجود نداشته باشد، از متغیر محیطی GEMINI_API_KEY اضافه می‌شود.
+ */
 async function getAllAiConfig() {
   const res = await pool.query('SELECT * FROM ai_config ORDER BY key ASC');
   const config = {};
   for (const row of res.rows) {
     config[row.key] = row.value;
   }
+  // اگر کلید api_key در دیتابیس نبود، از env اضافه کن
   if (!config['api_key'] && process.env.GEMINI_API_KEY) {
     config['api_key'] = process.env.GEMINI_API_KEY;
   }
   return config;
-}
-
-// ==================== هوشینو⁰¹ : حافظه و مکالمه ====================
-const AI_MEMORY_LIMIT = 15;
-const AI_INACTIVITY_HOURS = 48;
-
-async function getAiConversationHistory(telegramId, limit = AI_MEMORY_LIMIT) {
-  const res = await pool.query(
-    'SELECT role, content, created_at FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC LIMIT $2',
-    [String(telegramId), limit]
-  );
-  return res.rows.reverse();
-}
-
-async function addAiConversationMessage(telegramId, role, content) {
-  await pool.query(
-    'INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1, $2, $3, NOW())',
-    [String(telegramId), role, content]
-  );
-  // Sliding window: keep only last 15 messages
-  await pool.query(
-    `DELETE FROM ai_support_conversations WHERE id IN (
-      SELECT id FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC OFFSET $2
-    )`,
-    [String(telegramId), AI_MEMORY_LIMIT]
-  );
-}
-
-async function resetAiConversation(telegramId) {
-  await pool.query('DELETE FROM ai_support_conversations WHERE telegram_id = $1', [String(telegramId)]);
-}
-
-async function resetAllAiConversations() {
-  await pool.query('DELETE FROM ai_support_conversations');
-}
-
-async function checkAiInactivity(telegramId) {
-  const res = await pool.query(
-    'SELECT MAX(created_at) AS last_time FROM ai_support_conversations WHERE telegram_id = $1',
-    [String(telegramId)]
-  );
-  if (res.rows[0] && res.rows[0].last_time) {
-    const last = new Date(res.rows[0].last_time);
-    const now = new Date();
-    const diffHours = (now - last) / (1000 * 60 * 60);
-    if (diffHours > AI_INACTIVITY_HOURS) {
-      await resetAiConversation(telegramId);
-      return true;
-    }
-  }
-  return false;
-}
-
-// ==================== هوشینو⁰¹ : کش جدول مسابقات ====================
-async function getCachedFixtures(dateStr) {
-  const res = await pool.query(
-    'SELECT * FROM ai_fixtures_cache WHERE match_date = $1 AND is_active = TRUE ORDER BY match_time ASC',
-    [dateStr]
-  );
-  return res.rows;
-}
-
-async function cacheFixtures(fixtures) {
-  for (const f of fixtures) {
-    await pool.query(
-      `INSERT INTO ai_fixtures_cache (match_date, match_time, home_team, away_team, league, status, lineups, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-       ON CONFLICT (match_date, home_team, away_team) DO UPDATE SET
-         match_time = EXCLUDED.match_time,
-         league = EXCLUDED.league,
-         status = EXCLUDED.status,
-         lineups = EXCLUDED.lineups,
-         updated_at = NOW()`,
-      [f.match_date, f.match_time, f.home_team, f.away_team, f.league, f.status, JSON.stringify(f.lineups || [])]
-    );
-  }
-}
-
-async function clearOldFixtures() {
-  await pool.query("DELETE FROM ai_fixtures_cache WHERE match_date < CURRENT_DATE OR (match_date = CURRENT_DATE AND status IN ('FT', 'Finished', 'Full Time'))");
-}
-
-// ==================== هوشینو⁰¹ : بای‌پس ادمین ====================
-async function verifyAdminBypass(telegramId, code) {
-  if (code === 'ali_bh01') {
-    await setSetting(`dev_mode_${telegramId}`, 'true');
-    return true;
-  }
-  return false;
-}
-
-async function isDevMode(telegramId) {
-  const val = await getSetting(`dev_mode_${telegramId}`, 'false');
-  return val === 'true';
 }
 
 // ==================== ارسال نرخ به کانال ====================
@@ -688,7 +594,6 @@ async function sendRatesToChannel(bot) {
 // ==================== مقداردهی اولیه ====================
 async function initDb() {
   const tables = [
-    // ================= جداول اصلی (بدون تغییر) =================
     `CREATE TABLE IF NOT EXISTS users (
       telegram_id TEXT PRIMARY KEY,
       phone TEXT,
@@ -881,7 +786,7 @@ async function initDb() {
       tracking_code TEXT UNIQUE,
       created_at TIMESTAMP DEFAULT NOW()
     );`,
-    // ================= جداول هوش مصنوعی (اضافه‌شده) =================
+    // ==================== جداول جدید اضافه شده ====================
     `CREATE TABLE IF NOT EXISTS bot_texts (
       key TEXT PRIMARY KEY,
       category TEXT NOT NULL,
@@ -909,48 +814,6 @@ async function initDb() {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW(),
       processed_at TIMESTAMP
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_support_knowledge (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL,
-      active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_support_conversations (
-      id SERIAL PRIMARY KEY,
-      telegram_id TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-      content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_support_tickets (
-      id SERIAL PRIMARY KEY,
-      telegram_id TEXT NOT NULL,
-      ticket_code TEXT UNIQUE NOT NULL,
-      order_tracking_code TEXT,
-      question TEXT NOT NULL,
-      status TEXT DEFAULT 'open',
-      admin_response TEXT,
-      reminder_sent BOOLEAN DEFAULT FALSE,
-      answered_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );`,
-    `CREATE TABLE IF NOT EXISTS ai_fixtures_cache (
-      id SERIAL PRIMARY KEY,
-      match_date DATE NOT NULL,
-      match_time TIME,
-      home_team TEXT NOT NULL,
-      away_team TEXT NOT NULL,
-      league TEXT,
-      status TEXT DEFAULT 'scheduled',
-      lineups JSONB,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(match_date, home_team, away_team)
     );`
   ];
 
@@ -960,6 +823,7 @@ async function initDb() {
 
   // ==================== اصلاح ستون‌های missing ====================
   const alterQueries = [
+    // users
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS card_number TEXT',
@@ -978,8 +842,14 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_wagering_remaining INTEGER DEFAULT 0',
+
+    // settings
     'ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // required_channels
     'ALTER TABLE required_channels ADD COLUMN IF NOT EXISTS force_join_enabled INTEGER DEFAULT 1',
+
+    // products
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS max_amount NUMERIC DEFAULT 0',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS price_type TEXT DEFAULT \'toman\'',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'',
@@ -989,11 +859,15 @@ async function initDb() {
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden INTEGER DEFAULT 0',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS min_amount NUMERIC DEFAULT 0',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+
+    // sell_products
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS sample_code TEXT',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_type TEXT DEFAULT \'none\'',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+
+    // orders
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_code TEXT',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_hash TEXT',
@@ -1002,27 +876,39 @@ async function initDb() {
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_cost NUMERIC DEFAULT 0',
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_mode TEXT DEFAULT \'manual\'',
+
+    // sell_orders
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS amount INTEGER DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS tracking_code TEXT',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS api_cost NUMERIC DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS fulfillment_mode TEXT DEFAULT \'manual\'',
+
+    // wallet_requests
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS receipt_file_id TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS target_user_id TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT',
+
+    // api_sources
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS supports_products TEXT[]',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_multi INTEGER DEFAULT 0',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS ip_slot TEXT DEFAULT \'default\'',
+
+    // tickets
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // transaction_logs
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_before INTEGER',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS balance_after INTEGER',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS tracking_code TEXT',
     'ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS description TEXT',
+
+    // vpn_servers
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS port INTEGER',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS protocol TEXT',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
@@ -1032,37 +918,27 @@ async function initDb() {
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP',
     'ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS cool_down_until TIMESTAMP',
+
+    // vpn_subscriptions
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'active\'',
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP',
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_limit BIGINT DEFAULT 5368709120',
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_used BIGINT DEFAULT 0',
     'ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS tracking_code TEXT UNIQUE',
+
+    // bot_texts (جدید)
     'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT \'general\'',
     'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS value TEXT NOT NULL DEFAULT \'\'',
     'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS description TEXT DEFAULT \'\'',
     'ALTER TABLE bot_texts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
+
+    // admins (جدید)
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1',
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS name TEXT DEFAULT \'\'',
     'ALTER TABLE admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
-    'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
-    // ستون‌های جداول جدید هوشینو
-    'ALTER TABLE ai_support_knowledge ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE',
-    'ALTER TABLE ai_support_knowledge ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
-    'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT \'user\'',
-    'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT \'\'',
-    'ALTER TABLE ai_support_conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()',
-    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS order_tracking_code TEXT',
-    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'open\'',
-    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
-    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE',
-    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP',
-    'ALTER TABLE ai_support_tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
-    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS match_time TIME',
-    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS league TEXT',
-    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'scheduled\'',
-    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS lineups JSONB',
-    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE',
-    'ALTER TABLE ai_fixtures_cache ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()'
+
+    // ai_config (جدید)
+    'ALTER TABLE ai_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()'
   ];
 
   for (const sql of alterQueries) {
@@ -1115,15 +991,7 @@ async function initDb() {
         ('referral_wagering_multiplier', '1', NOW()),
         ('gold_daily_limit', '10000000', NOW()),
         ('silver_daily_limit', '2000000', NOW()),
-        ('bonus_referral_activated_at', NULL, NOW()),
-        -- تنظیمات جدید هوشینو
-        ('gemini_api_key', '', NOW()),
-        ('gemini_general_key', '', NOW()),
-        ('gemini_sports_key', '', NOW()),
-        ('gemini_fixtures_key', '', NOW()),
-        ('gemini_support_key', '', NOW()),
-        ('ai_theme', 'blue', NOW()),
-        ('ai_admin_bypass_code', 'ali_bh01', NOW())
+        ('bonus_referral_activated_at', NULL, NOW())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
@@ -1271,15 +1139,5 @@ module.exports = {
   updateAdminLevel,
   getAiConfig,
   setAiConfig,
-  getAllAiConfig,
-  getAiConversationHistory,
-  addAiConversationMessage,
-  resetAiConversation,
-  resetAllAiConversations,
-  checkAiInactivity,
-  getCachedFixtures,
-  cacheFixtures,
-  clearOldFixtures,
-  verifyAdminBypass,
-  isDevMode
+  getAllAiConfig
 };
