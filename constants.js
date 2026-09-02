@@ -13,13 +13,13 @@ const DEPOSIT_CARDS = [
 ];
 
 const mainMenuButtons = [
-  { key: 'buy',     text: '✨ خرید' },
-  { key: 'sell',    text: '✨ فروش' },
+  { key: 'buy',     text: '✨ خرید ✨' },
+  { key: 'sell',    text: '✨ فروش ✨' },
   { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
-  { key: 'website', text: '🐽 ⁰¹برترAIهوشینو },
-  { key: 'support', text: '🐽 هوشینو⁰¹AIپشتیبانی }
+  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰¹' },
+  { key: 'support', text: '🎧 پشتیبانی آنلاین' }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
