@@ -1,5 +1,5 @@
 // utils.js
-const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS } = require('./constants');
+const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS, AI_THEMES, AI_DEFAULT_THEME } = require('./constants');
 const { getSetting } = require('./db');
 
 const sessions = {};
@@ -47,16 +47,21 @@ async function showMainMenu(ctx) {
     buttons.push(ADMIN_BUTTON);
   }
 
+  // رنگ دکمه‌های شیشه‌ای منوی اصلی هم از همون تنظیم «تم دکمه‌ها»ی پنل ادمین خونده می‌شه
+  // (قبلاً این تنظیم فقط روی زیرمنوی هوشینو⁰¹ اعمال می‌شد، نه روی منوی اصلی خرید/فروش)
+  const themeKey = await getSetting('ai_theme', AI_DEFAULT_THEME);
+  const theme = AI_THEMES.find(t => t.key === themeKey) || AI_THEMES[0];
+
   const rows = [];
   for (let i = 0; i < buttons.length; i += 2) {
     if (i + 1 < buttons.length) {
       rows.push([
-        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key },
-        { text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key }
+        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key, ...(theme.style ? { style: theme.style } : {}) },
+        { text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key, ...(theme.style ? { style: theme.style } : {}) }
       ]);
     } else {
       rows.push([
-        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key }
+        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key, ...(theme.style ? { style: theme.style } : {}) }
       ]);
     }
   }
