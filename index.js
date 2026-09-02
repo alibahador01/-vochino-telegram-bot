@@ -172,8 +172,6 @@ require('./handlers/admin')(bot);
 require('./handlers/adminBonus')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
-// 🧠 ماژول هوشینو⁰¹ (Omni-Assistant)
-require('./handlers/omniAssistant')(bot);
 require('./handlers/profile')(bot);
 require('./handlers/vpn')(bot);
 require('./handlers/currencyFeed')(bot);
