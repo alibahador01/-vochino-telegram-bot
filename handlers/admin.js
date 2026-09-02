@@ -283,9 +283,9 @@ bot.action('admin_theme_manager', async (ctx) => {
   try { await ctx.deleteMessage(); } catch (e) {}
 
   const currentTheme = await getSetting('ai_theme', AI_DEFAULT_THEME);
-  let msg = '🎨 **مدیریت تم دکمه‌های هوشینو⁰¹**\n\n';
+  let msg = '🎨 **مدیریت تم رنگ دکمه‌های شیشه‌ای ربات**\n\n';
   msg += `تم فعلی: ${AI_THEMES.find(t => t.key === currentTheme)?.emoji} ${AI_THEMES.find(t => t.key === currentTheme)?.label || currentTheme}\n\n`;
-  msg += 'یک تم را انتخاب کنید:';
+  msg += 'یک تم را انتخاب کنید (روی منوی اصلی و هوشینو⁰¹ اعمال می‌شود):';
 
   const buttons = AI_THEMES.map(theme => [{
     text: `${theme.emoji} ${theme.label}${theme.key === currentTheme ? ' ✅' : ''}`,
