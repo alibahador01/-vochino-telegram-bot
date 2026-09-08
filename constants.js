@@ -74,7 +74,7 @@ const AI_THEMES = [
 const AI_DEFAULT_THEME = 'default';
 
 const GEMINI_API_CONFIG = {
-  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خوب راهنمایی کن و تا کاربران راحت شوند.',
+  SYSTEM_INSTRUCTION: ' به‌عنوان مشاور حرفه‌ای صرافی، پاسخ‌ها را کوتاه، روان و کاربردی بده؛ اما آن‌قدر توضیح بده که کاربر راهنمایی کامل بگیرد. از پاسخ‌های خیلی کوتاه یا خیلی طولانی خودداری کن..',
   USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
   SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
   SUPPORT_MENU_BUTTONS: [
