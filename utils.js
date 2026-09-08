@@ -1,7 +1,28 @@
 // utils.js
-const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS } = require('./constants');
+const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS, AI_THEMES, AI_DEFAULT_THEME } = require('./constants');
+const { getSetting } = require('./db');
 
 const sessions = {};
+
+/**
+ * ری‌اکشن روی یک پیام مشخص می‌گذارد (با ایموجی تنظیم‌شده در پنل ادمین).
+ * isBig=true یعنی حالت شناور/بزرگ (فقط برای /start)، isBig=false یعنی ری‌اکشن ساده (مثلاً بازگشت به منو).
+ * خطای این تابع هیچ‌وقت نباید کل فلو را متوقف کند، برای همین کاملاً safe است.
+ */
+async function reactToMessage(ctx, chatId, messageId, isBig) {
+  try {
+    const reactionEmoji = await getSetting('start_reaction', '🎉');
+    if (!reactionEmoji || !reactionEmoji.trim()) return;
+    await ctx.telegram.callApi('setMessageReaction', {
+      chat_id: chatId,
+      message_id: messageId,
+      reaction: [{ type: 'emoji', emoji: reactionEmoji.trim() }],
+      is_big: !!isBig
+    });
+  } catch (e) {
+    console.log('[setMessageReaction] رد شد یا پشتیبانی نمی‌شود:', e.message);
+  }
+}
 
 function generateTrackingCode() {
   const randomPart = Math.floor(100000 + Math.random() * 900000);
@@ -37,7 +58,7 @@ async function sendTracked(ctx, session, text, extra) {
  * ویژه ووچینو⁰۱ (چپ) - وب‌سایت (راست)
  * پشتیبانی (وسط)
  */
-function showMainMenu(ctx) {
+async function showMainMenu(ctx) {
   const isAdmin = ADMIN_IDS.includes(Number(ctx.from.id));
 
   const buttons = [...mainMenuButtons];
@@ -46,16 +67,21 @@ function showMainMenu(ctx) {
     buttons.push(ADMIN_BUTTON);
   }
 
+  // رنگ دکمه‌های شیشه‌ای منو از تنظیم «تم دکمه‌ها»ی پنل ادمین خونده می‌شه
+  const themeKey = await getSetting('ai_theme', AI_DEFAULT_THEME);
+  const theme = AI_THEMES.find(t => t.key === themeKey) || AI_THEMES[0];
+  const styleField = theme && theme.style ? { style: theme.style } : {};
+
   const rows = [];
   for (let i = 0; i < buttons.length; i += 2) {
     if (i + 1 < buttons.length) {
       rows.push([
-        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key },
-        { text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key }
+        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key, ...styleField },
+        { text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key, ...styleField }
       ]);
     } else {
       rows.push([
-        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key }
+        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key, ...styleField }
       ]);
     }
   }
@@ -69,7 +95,7 @@ const headerText =
   '🐽 پشتیبانی آنلاین و لحظه‌ای\n' +
   '🔹 محیطی امن برای تمامی تراکنش‌ها\n' +
   '👇🏼 جهت ادامه، گزینه مورد نظر را انتخاب کنید';
-ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
+return ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 }
 
 async function sendMessageToUser(bot, userId, text, extra = {}) {
@@ -121,6 +147,7 @@ module.exports = {
   fillTemplate,
   sendTracked,
   showMainMenu,
+  reactToMessage,
   sendMessageToUser,
   sendMessageToUserWithPhoto,
   sendBroadcast,
