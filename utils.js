@@ -87,16 +87,15 @@ async function showMainMenu(ctx) {
   }
 
 const headerText =
-  '╭─ ✦ Vochino⁰¹✦─╮\n' +
-  '          👑 ووچینو⁰¹\n' +
-  '╰─ ✦ ──── ✦ ─╯\n\n' +
+  '╭─𓆩𓆩ⓥⓞⓒⓗⓘⓝⓞ ⁰¹𓆪𓆪─╮\n' +
+  '   👑صرافی ووچینو⁰¹\n' +
+  '╰─✬┉┉💎 🏛 💎┉┉✬─╯\n\n' +
   '⚜ مرجع تخصصی معاملات | ووچر\n' +
   '🔹 سرعت بالا در نقدشوندگی\n' +
   '🐽 پشتیبانی آنلاین و لحظه‌ای\n' +
   '🔹 محیطی امن برای تمامی تراکنش‌ها\n' +
   '👇🏼 جهت ادامه، گزینه مورد نظر را انتخاب کنید';
 return ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
-}
 
 async function sendMessageToUser(bot, userId, text, extra = {}) {
   try {
