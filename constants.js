@@ -78,7 +78,7 @@ const GEMINI_API_CONFIG = {
   USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
   SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
   SUPPORT_MENU_BUTTONS: [
-    { key: 'ai_support',    text: '🤖 دستیار⁰¹ AI هوچینو },
+    { key: 'ai_support',    text: '🎧 هوچینو AI دستیار⁰¹' },
     { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
     { key: 'back_main',     text: '🔙 بازگشت' }
   ]
