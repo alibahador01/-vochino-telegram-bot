@@ -14,7 +14,7 @@ const {
   getAllCategories, getTextInfo, getTextsByCategory, searchTextsInCache,
   validatePlaceholders, refreshText, formatTextForDisplay
 } = require('../textManager');
-const { ADMIN_IDS, MIN_WITHDRAW, AI_THEMES, AI_DEFAULT_THEME } = require('../constants');
+const { ADMIN_IDS, MIN_WITHDRAW, AI_THEMES, AI_DEFAULT_THEME, ALLOWED_REACTIONS } = require('../constants');
 const { calculateSellPayout, isAutoExecutionEnabled } = require('../exchangeEngine');
 
 function isAdmin(telegramId) {
@@ -664,8 +664,30 @@ module.exports = function registerAdminHandlers(bot) {
   bot.action('admin_toggle_product_buy', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_toggle_product_buy', step: 'waiting_key', lang: 'fa' };
-    ctx.reply('🔄 **تغییر وضعیت محصول**\n\nلطفاً کلید محصول (product_key) را وارد کنید:');
+    return renderToggleProductBuyList(ctx);
+  });
+
+  async function renderToggleProductBuyList(ctx) {
+    const products = await getProducts(false);
+    if (products.length === 0) {
+      return ctx.reply('❌ هیچ محصولی تعریف نشده.', { reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'admin_products_buy' }]] } });
+    }
+    // به‌جای تایپ دستی کلید (که ریسک اشتباه‌زدن داره)، از دکمه استفاده می‌کنیم؛ روی هر دکمه وضعیت فعلی هم دیده می‌شه
+    const buttons = products.map(p => [{ text: `${p.active ? '✅' : '⛔️'} ${p.name} (${p.key})`, callback_data: 'admin_toggle_pb_' + p.key }]);
+    buttons.push([{ text: '🔙 بازگشت', callback_data: 'admin_products_buy' }]);
+    return ctx.reply('🔄 **تغییر وضعیت محصول خرید**\n\nروی محصول مورد نظر بزنید تا فعال/غیرفعال شود:', { reply_markup: { inline_keyboard: buttons } });
+  }
+
+  bot.action(/^admin_toggle_pb_(.+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const key = ctx.match[1];
+    const p = await getProductByKey(key);
+    if (!p) { ctx.answerCbQuery('❌ محصول یافت نشد'); return; }
+    const updated = await updateProduct(key, { active: p.active ? 0 : 1 });
+    if (!updated) { ctx.answerCbQuery('❌ به‌روزرسانی انجام نشد'); return; }
+    ctx.answerCbQuery(updated.active ? '✅ فعال شد' : '⛔️ غیرفعال شد');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return renderToggleProductBuyList(ctx);
   });
 
   bot.action('admin_list_products_buy', async (ctx) => {
@@ -750,8 +772,29 @@ bot.action('admin_products_sell', async (ctx) => {
   bot.action('admin_toggle_product_sell', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'admin_toggle_product_sell', step: 'waiting_key', lang: 'fa' };
-    ctx.reply('🔄 **تغییر وضعیت محصول فروش**\n\nلطفاً کلید محصول را وارد کنید:');
+    return renderToggleProductSellList(ctx);
+  });
+
+  async function renderToggleProductSellList(ctx) {
+    const products = await getSellProducts(false);
+    if (products.length === 0) {
+      return ctx.reply('❌ هیچ محصولی تعریف نشده.', { reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'admin_products_sell' }]] } });
+    }
+    const buttons = products.map(p => [{ text: `${p.active ? '✅' : '⛔️'} ${p.name} (${p.key})`, callback_data: 'admin_toggle_ps_' + p.key }]);
+    buttons.push([{ text: '🔙 بازگشت', callback_data: 'admin_products_sell' }]);
+    return ctx.reply('🔄 **تغییر وضعیت محصول فروش**\n\nروی محصول مورد نظر بزنید تا فعال/غیرفعال شود:', { reply_markup: { inline_keyboard: buttons } });
+  }
+
+  bot.action(/^admin_toggle_ps_(.+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const key = ctx.match[1];
+    const p = await getSellProductByKey(key);
+    if (!p) { ctx.answerCbQuery('❌ محصول یافت نشد'); return; }
+    const updated = await updateSellProduct(key, { active: p.active ? 0 : 1 });
+    if (!updated) { ctx.answerCbQuery('❌ به‌روزرسانی انجام نشد'); return; }
+    ctx.answerCbQuery(updated.active ? '✅ فعال شد' : '⛔️ غیرفعال شد');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return renderToggleProductSellList(ctx);
   });
 
   bot.action('admin_list_products_sell', async (ctx) => {
@@ -1632,6 +1675,9 @@ bot.action('admin_products_sell', async (ctx) => {
     if (session.flow === 'admin_set_reaction' && session.step === 'waiting_value') {
       const emoji = ctx.message.text.trim();
       if (!emoji) return ctx.reply('❌ ایموجی نامعتبر.');
+      if (!ALLOWED_REACTIONS.includes(emoji)) {
+        return ctx.reply('❌ این ایموجی جزو ری‌اکشن‌های مجاز تلگرام نیست. یکی از ایموجی‌های استاندارد را بفرست (مثلاً ❤️ 🔥 🎉 👍 ⚡).');
+      }
       await setSetting('start_reaction', emoji);
       delete sessions[ctx.from.id];
       ctx.reply('✅ ایموجی به ' + emoji + ' تغییر یافت.');
