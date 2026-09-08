@@ -5,7 +5,14 @@ const DAILY_LIMIT_TEXT = '2,000,000';
 const MIN_WITHDRAW = 100000;
 const DEFAULT_USD_RATE = 60000;
 
-const ALLOWED_REACTIONS = [];
+// لیست کامل ایموجی‌هایی که تلگرام برای ری‌اکشن روی پیام (setMessageReaction) قبول می‌کند
+const ALLOWED_REACTIONS = [
+  '👍', '👎', '❤️', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🤬', '😢', '🎉', '🤩', '🤮', '💩',
+  '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳', '❤️‍🔥', '🌚', '🌭', '💯', '🤣', '⚡', '🍌', '🏆',
+  '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈', '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈',
+  '😇', '😨', '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿', '🆒', '💘', '🙉', '🦄',
+  '😘', '💊', '🙊', '😎', '👾', '🤷‍♂️', '🤷', '🤷‍♀️', '😡'
+];
 
 const DEPOSIT_CARDS = [
   { number: '6219861819068106', owner: 'علی بهادر' },
@@ -13,13 +20,13 @@ const DEPOSIT_CARDS = [
 ];
 
 const mainMenuButtons = [
-  { key: 'buy',     text: '✨ خرید ✨' },
-  { key: 'sell',    text: '✨ فروش ✨' },
+  { key: 'buy',     text: '✨ خرید' },
+  { key: 'sell',    text: '✨ فروش' },
   { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
-  { key: 'website', text: '🌐 وب‌سایت ووچینو⁰¹' },
-  { key: 'support', text: '🎧 پشتیبانی آنلاین' }
+  { key: 'website', text: '🌐 وبسایت ووچینو⁰¹' },
+  { key: 'support', text: '🐽 ⁰¹دستار AI هوچینو' }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
@@ -67,11 +74,11 @@ const AI_THEMES = [
 const AI_DEFAULT_THEME = 'default';
 
 const GEMINI_API_CONFIG = {
-  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خلاصه و کوتاه بده تا کاربران راحت شوند.',
+  SYSTEM_INSTRUCTION: 'به عنوان یک مشاور صرافی، پاسخ‌های خود را به‌صورت خوب راهنمایی کن و تا کاربران راحت شوند.',
   USER_SUPPORT_BUTTON_TEXT: '📞 ارتباط با اپراتور',
   SUPPORT_OPERATOR_TELEGRAM_ID: process.env.SUPPORT_OPERATOR_TELEGRAM_ID,
   SUPPORT_MENU_BUTTONS: [
-    { key: 'ai_support',    text: '🤖 پشتیبانی هوشمند' },
+    { key: 'ai_support',    text: '🤖 دستیار⁰¹ AI هوچینو },
     { key: 'team_support',  text: '👤 پشتیبانی مجموعه' },
     { key: 'back_main',     text: '🔙 بازگشت' }
   ]
