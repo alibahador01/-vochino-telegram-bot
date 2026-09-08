@@ -1,6 +1,6 @@
 // handlers/registration.js
 const texts = require('../texts');
-const { sessions, showMainMenu } = require('../utils');
+const { sessions, showMainMenu, reactToMessage } = require('../utils');
 const { pool, getUser, createUser, updateUser, getSetting, checkMembership, getRequiredChannels } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { checkAndGrantBonuses } = require('./bonusEngine');
@@ -46,6 +46,10 @@ module.exports = function registerRegistrationHandlers(bot) {
     }
 
     // اگر ورود کامل شده → منو
+    // ری‌اکشن شناور روی پیام /start خودِ کاربر (فقط همینجا شناور/بزرگ است)
+    if (ctx.message && ctx.message.message_id) {
+      reactToMessage(ctx, ctx.chat.id, ctx.message.message_id, true);
+    }
     showMainMenu(ctx);
   });
 
