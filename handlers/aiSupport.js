@@ -3,7 +3,7 @@ const { sessions } = require('../utils');
 const { pool, getUser, getSetting, setSetting } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 
-const HEADER = '╭─𓆩𓆩ⓥⓞⓒⓗⓘⓝⓞ ⁰¹𓆪𓆪─╮\n  🐽هوچینو AI دستیار⁰¹\n╰─✬┉┉ 🎧🏛🎧 ┉┉✬─╯\n\n💠 دستیار هوشمند تحت نظارت متخصصان\n💠 وقتی نیاز باشد، یک انسان پاسخگوست\n\n';
+const HEADER = '╭𓆩𓆩ⓥⓞⓒⓗⓘⓝⓞ ⁰¹𓆪𓆪╮\n        🐽هوچینو AI دستیار⁰¹\n╰✬┉┉ 🎧🏛🎧 ┉┉✬╯\n\n';
 
 function isAdmin(id) { return ADMIN_IDS.includes(Number(id)); }
 
@@ -17,7 +17,7 @@ async function getKnowledgeText() {
   return res.rows.map(r => `### ${r.title}\n${r.content}`).join('\n\n');
 }
 
-async function buildSystemPrompt() {
+async function buildSystemPrompt(userName) {
   const knowledge = await getKnowledgeText();
   const custom = await getSetting('gemini_extra_prompt', '');
   return (
@@ -26,6 +26,7 @@ async function buildSystemPrompt() {
     'تو نماینده‌ی مستقیم این مجموعه‌ای، دقیقاً مثل یه همکار پشتیبانی باتجربه که کاملاً روی کار مسلطه، نه یه ربات خشک. ' +
     'وقتی جایی احساس کردی موضوع از عهده‌ت خارجه یا نیاز به بررسی انسانی داره، با اطمینان کاربر رو به یک متخصص واقعی وصل می‌کنی — ' +
     'این خودش نشونه‌ی اعتمادسازیه، نه ضعف. لحنت گرم، کمی شیرین و دوستانه باشه ولی هیچ‌وقت از حالت حرفه‌ای خارج نشو.\n\n' +
+    (userName ? `👤 اسم کاربری که داری باهاش صحبت می‌کنی: «${userName}» — طبیعی و گاه‌به‌گاه (نه در هر جمله) تو پاسخ‌هات ازش صدا بزن، مثل یه آدم واقعی که اسم مشتریش رو یادشه.\n\n` : '') +
     'قوانین جواب‌دادن:\n' +
     '• کوتاه ولی کامل جواب بده — نه یک یا دو خط خشک و بی‌روح، نه یک متن طولانی. حدود ۲ تا ۵ جمله‌ی کوتاه که واقعاً نیاز کاربر رو برطرف کنه کافیه.\n' +
     '• مثل یک انسان واقعی و باتجربه صحبت کن، مرحله‌به‌مرحله راهنمایی کن، نه فقط تکرار حرف کاربر.\n' +
@@ -51,19 +52,40 @@ async function buildSystemPrompt() {
   );
 }
 
-async function askGemini(telegramId, userText) {
-  const apiKey = await getSetting('gemini_api_key', '');
-  if (!apiKey) return { ok: false, text: '⚠️ هوچینو AI دستیار فعلاً تنظیم نشده. لطفاً از گزینه «ارتباط با مدیریت» استفاده کنید.' };
+async function ensureAiProvidersTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_providers (
+        id SERIAL PRIMARY KEY,
+        label TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        model_name TEXT NOT NULL DEFAULT 'gemini-3.7-flash',
+        is_active BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+  } catch (e) { console.log('خطا در ساخت جدول ai_providers:', e.message); }
+}
 
-  // تاریخچه‌ی گفتگوهای قبلی — فقط ۳ ردوبدل آخر (۳ پیام کاربر + ۳ پاسخ) نگه داشته می‌شود؛
-  // با اومدن پیام جدید، قدیمی‌ترین به‌صورت خودکار از این پنجره بیرون می‌ره (حافظه سبک و مرتب)
+async function getActiveProvider() {
+  const res = await pool.query('SELECT * FROM ai_providers WHERE is_active = true ORDER BY id DESC LIMIT 1');
+  if (res.rows[0]) return { apiKey: res.rows[0].api_key, model: res.rows[0].model_name, label: res.rows[0].label };
+  const legacyKey = await getSetting('gemini_api_key', '');
+  if (legacyKey) return { apiKey: legacyKey, model: 'gemini-3.7-flash', label: 'پیش‌فرض' };
+  return null;
+}
+
+async function askGemini(telegramId, userText, userName) {
+  const provider = await getActiveProvider();
+  if (!provider) return { ok: false, text: '⚠️ هوچینو AI دستیار فعلاً تنظیم نشده. لطفاً از گزینه «ارتباط با مدیریت» استفاده کنید.' };
+
   const historyRes = await pool.query(
     'SELECT role, content FROM ai_support_conversations WHERE telegram_id = $1 ORDER BY id DESC LIMIT 6',
     [String(telegramId)]
   );
   const rawHistory = historyRes.rows.reverse();
 
-  const systemPrompt = await buildSystemPrompt();
+  const systemPrompt = await buildSystemPrompt(userName);
 
   const contents = [];
   let lastRole = null;
@@ -76,7 +98,6 @@ async function askGemini(telegramId, userText) {
       contents[contents.length - 1].parts[0].text += '\n' + h.content;
     }
   }
-  // پیام فعلی فقط یک‌بار، جدا از تاریخچه اضافه میشه (نه تکراری)
   if (lastRole === 'user') {
     contents[contents.length - 1].parts[0].text += '\n' + userText;
   } else {
@@ -85,7 +106,7 @@ async function askGemini(telegramId, userText) {
 
   try {
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:generateContent?key=${provider.apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -94,9 +115,6 @@ async function askGemini(telegramId, userText) {
           contents,
           generationConfig: {
             maxOutputTokens: 700,
-            // نسخه‌های Gemini 3.x دیگه thinkingBudget رو نمی‌شناسن (نادیده گرفته می‌شه و مدل با
-            // حالت پیش‌فرض «فکر عمیق/HIGH» کار می‌کنه که همون کندی و ناتمام‌ماندن جواب رو باعث می‌شد).
-            // پارامتر درست thinkingLevel هست؛ "low" سریع‌ترین حالته و برای گفتگوی پشتیبانی کافیه.
             thinkingConfig: { thinkingLevel: 'low' }
           }
         })
@@ -117,7 +135,7 @@ async function askGemini(telegramId, userText) {
 
 async function showSupportMenu(ctx) {
   ctx.reply(
-    '╭─ ✦ Vochino⁰¹ ✦ ─╮\n📞 پشتیبانی ووچینو⁰¹\n🎧 ابتدا مشکل خود را با هوچینو AI دستیار مطرح کنید؛ اگر برطرف نشد، درخواست ارتباط با مدیریت را ثبت کنید.\n👇🏼 گزینه مورد نظر را انتخاب کنید:',
+    '╭─ ✦ Vochino⁰¹ ✦ ─╮\n💠 دستیار هوشمند تحت نظارت متخصصان\n💠 وقتی نیاز باشد، یک انسان پاسخگوست\n\n👇🏼 گزینه مورد نظر را انتخاب کنید :',
     {
       reply_markup: {
         inline_keyboard: [
@@ -141,7 +159,7 @@ function registerAiSupportHandlers(bot) {
   bot.action('ai_assistant_start', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'ai_chat', step: 'chatting', data: {} };
+    sessions[ctx.from.id] = { flow: 'ai_chat', step: 'chatting', data: { lastActivity: Date.now() } };
     ctx.reply(HEADER + '💬 مشکل یا سوالتون رو بنویسید، در خدمتتونم.');
   });
 
@@ -203,13 +221,13 @@ function registerAiSupportHandlers(bot) {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
     const openCount = (await pool.query("SELECT COUNT(*)::int c FROM ai_support_tickets WHERE status IN ('open','answered')")).rows[0].c;
-    const apiKey = await getSetting('gemini_api_key', '');
+    const activeProvider = await getActiveProvider();
     ctx.reply(
-      `🎧 مدیریت هوچینو AI دستیار\n\n🔑 کلید Gemini: ${apiKey ? '✅ تنظیم شده' : '❌ تنظیم نشده'}\n📥 تیکت‌های باز/در انتظار: ${openCount}`,
+      `🎧 مدیریت هوچینو AI دستیار\n\n🧩 مدل فعال: ${activeProvider ? '✅ ' + activeProvider.label + ' (' + activeProvider.model + ')' : '❌ هیچ مدلی تنظیم نشده'}\n📥 تیکت‌های باز/در انتظار: ${openCount}`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔑 تنظیم کلید Gemini', callback_data: 'ai_set_key' }],
+            [{ text: '🧩 مدیریت مدل‌های هوش مصنوعی', callback_data: 'ai_providers_list' }],
             [{ text: '📚 مدیریت دانش پشتیبانی', callback_data: 'ai_knowledge_list' }],
             [{ text: '📝 نکات اضافی برای Gemini', callback_data: 'ai_set_extra_prompt' }],
             [{ text: '🎫 تیکت‌های باز', callback_data: 'ai_tickets_open' }],
@@ -221,11 +239,60 @@ function registerAiSupportHandlers(bot) {
     );
   });
 
-  bot.action('ai_set_key', async (ctx) => {
+  bot.action('ai_providers_list', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'ai_set_key', step: 'waiting_value' };
-    ctx.reply('🔑 کلید API گوگل Gemini رو بفرستید (از aistudio.google.com/apikey رایگان می‌گیرید):');
+    const res = await pool.query('SELECT * FROM ai_providers ORDER BY id DESC');
+    const buttons = res.rows.map(r => [{ text: (r.is_active ? '✅ ' : '⚪ ') + r.label + ' — ' + r.model_name, callback_data: 'ai_provider_view_' + r.id }]);
+    buttons.push([{ text: '➕ افزودن مدل جدید', callback_data: 'ai_provider_add' }]);
+    buttons.push([{ text: '🔙 بازگشت', callback_data: 'admin_ai_support' }]);
+    ctx.reply('🧩 مدل‌های هوش مصنوعی ثبت‌شده (' + res.rows.length + ' مورد):\nهر کدوم رو می‌تونی فعال کنی و ببینی کدوم بهتر جواب می‌ده.', { reply_markup: { inline_keyboard: buttons } });
+  });
+
+  bot.action('ai_provider_add', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'ai_provider_add', step: 'waiting_label', data: {} };
+    ctx.reply('🏷 یه اسم دلخواه برای این مدل بذار (مثلاً: Gemini سریع، Gemini قوی):');
+  });
+
+  async function renderProviderItem(ctx, id) {
+    const row = (await pool.query('SELECT * FROM ai_providers WHERE id=$1', [id])).rows[0];
+    if (!row) return ctx.reply('یافت نشد.');
+    ctx.reply(`🧩 ${row.label}\n🤖 مدل: ${row.model_name}\n🔑 کلید: ...${row.api_key.slice(-6)}\nوضعیت: ${row.is_active ? '✅ فعال' : '⚪ غیرفعال'}`, {
+      reply_markup: { inline_keyboard: [
+        [{ text: row.is_active ? '⚪ در حال حاضر فعاله' : '✅ فعال‌سازی این مدل', callback_data: row.is_active ? 'noop' : 'ai_provider_activate_' + id }],
+        [{ text: '🗑 حذف این مدل', callback_data: 'ai_provider_del_' + id }],
+        [{ text: '🔙 بازگشت', callback_data: 'ai_providers_list' }]
+      ] }
+    });
+  }
+
+  bot.action(/^ai_provider_view_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    return renderProviderItem(ctx, ctx.match[1]);
+  });
+
+  bot.action('noop', async (ctx) => ctx.answerCbQuery());
+
+  bot.action(/^ai_provider_activate_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const id = ctx.match[1];
+    await pool.query('UPDATE ai_providers SET is_active = false');
+    await pool.query('UPDATE ai_providers SET is_active = true WHERE id=$1', [id]);
+    ctx.answerCbQuery('✅ فعال شد');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return renderProviderItem(ctx, id);
+  });
+
+  bot.action(/^ai_provider_del_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const id = ctx.match[1];
+    await pool.query('DELETE FROM ai_providers WHERE id=$1', [id]);
+    ctx.answerCbQuery('🗑 حذف شد');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    ctx.reply('🗑 مدل حذف شد.');
   });
 
   bot.action('ai_set_extra_prompt', async (ctx) => {
@@ -255,13 +322,26 @@ function registerAiSupportHandlers(bot) {
   async function renderKnowledgeItem(ctx, id) {
     const row = (await pool.query('SELECT * FROM ai_support_knowledge WHERE id=$1', [id])).rows[0];
     if (!row) return ctx.reply('یافت نشد.');
-    ctx.reply(`📌 ${row.title}\n\n${row.content}\n\nوضعیت: ${row.active ? '✅ فعال' : '⛔ غیرفعال'}`, {
-      reply_markup: { inline_keyboard: [
-        [{ text: row.active ? '⛔ غیرفعال کردن' : '✅ فعال کردن', callback_data: 'ai_knowledge_toggle_' + id }],
-        [{ text: '🗑 حذف', callback_data: 'ai_knowledge_del_' + id }],
-        [{ text: '🔙 بازگشت', callback_data: 'ai_knowledge_list' }]
-      ] }
-    });
+    const maxLen = 3500;
+    const shown = row.content.length > maxLen ? row.content.slice(0, maxLen) + '\n\n…(ادامه‌ی متن به‌خاطر محدودیت تلگرام نمایش داده نمی‌شه، ولی کامل تو دیتابیس و در اختیار هوچینوئه)' : row.content;
+    try {
+      await ctx.reply(`📌 ${row.title}\n\n${shown}\n\nوضعیت: ${row.active ? '✅ فعال' : '⛔ غیرفعال'}`, {
+        reply_markup: { inline_keyboard: [
+          [{ text: row.active ? '⛔ غیرفعال کردن' : '✅ فعال کردن', callback_data: 'ai_knowledge_toggle_' + id }],
+          [{ text: '🗑 حذف', callback_data: 'ai_knowledge_del_' + id }],
+          [{ text: '🔙 بازگشت', callback_data: 'ai_knowledge_list' }]
+        ] }
+      });
+    } catch (e) {
+      console.log('خطا در نمایش دانش:', e.message);
+      await ctx.reply('⚠️ این دانش خیلی طولانیه و تلگرام اجازه‌ی نمایش کاملش رو نمی‌ده، ولی خودش کامل ذخیره‌ست و هوچینو ازش استفاده می‌کنه.', {
+        reply_markup: { inline_keyboard: [
+          [{ text: row.active ? '⛔ غیرفعال کردن' : '✅ فعال کردن', callback_data: 'ai_knowledge_toggle_' + id }],
+          [{ text: '🗑 حذف', callback_data: 'ai_knowledge_del_' + id }],
+          [{ text: '🔙 بازگشت', callback_data: 'ai_knowledge_list' }]
+        ] }
+      });
+    }
   }
 
   bot.action(/^ai_knowledge_view_(\d+)/, async (ctx) => {
@@ -337,17 +417,34 @@ function registerAiSupportHandlers(bot) {
       return next();
     }
 
-    if (session.flow === 'ai_set_key' && session.step === 'waiting_value') {
-      const key = ctx.message.text.trim();
-      if (key.length < 10) return ctx.reply('❌ کلید نامعتبر است.');
-      await setSetting('gemini_api_key', key);
-      delete sessions[userId];
-      return ctx.reply('✅ کلید Gemini ذخیره شد.');
-    }
     if (session.flow === 'ai_set_extra_prompt' && session.step === 'waiting_value') {
       await setSetting('gemini_extra_prompt', ctx.message.text.trim());
       delete sessions[userId];
       return ctx.reply('✅ ذخیره شد.');
+    }
+    if (session.flow === 'ai_provider_add' && session.step === 'waiting_label') {
+      session.data.label = ctx.message.text.trim();
+      session.step = 'waiting_key';
+      return ctx.reply('🔑 حالا کلید API این مدل رو بفرست (مثلاً از aistudio.google.com/apikey برای Gemini):');
+    }
+    if (session.flow === 'ai_provider_add' && session.step === 'waiting_key') {
+      const key = ctx.message.text.trim();
+      if (key.length < 10) return ctx.reply('❌ کلید نامعتبر به نظر می‌رسه، دوباره بفرست:');
+      session.data.apiKey = key;
+      session.step = 'waiting_model';
+      return ctx.reply('🤖 اسم دقیق مدل رو بفرست (مثلاً gemini-3.7-flash یا gemini-2.5-flash) — اگه مطمئن نیستی، فقط بنویس "پیش‌فرض":');
+    }
+    if (session.flow === 'ai_provider_add' && session.step === 'waiting_model') {
+      const modelInput = ctx.message.text.trim();
+      const modelName = (!modelInput || modelInput === 'پیش‌فرض') ? 'gemini-3.7-flash' : modelInput;
+      const countRes = await pool.query('SELECT COUNT(*)::int c FROM ai_providers');
+      const isFirst = countRes.rows[0].c === 0;
+      await pool.query(
+        'INSERT INTO ai_providers (label, api_key, model_name, is_active, created_at) VALUES ($1,$2,$3,$4,NOW())',
+        [session.data.label, session.data.apiKey, modelName, isFirst]
+      );
+      delete sessions[userId];
+      return ctx.reply(`✅ مدل «${session.data.label}» ثبت شد${isFirst ? ' و چون اولین مدله، خودکار فعال شد.' : '؛ برای فعال‌کردنش برو تو لیست مدل‌ها بزن روش.'}`);
     }
     if (session.flow === 'ai_knowledge_add' && session.step === 'waiting_title') {
       session.data.title = ctx.message.text.trim();
@@ -380,7 +477,13 @@ function registerAiSupportHandlers(bot) {
     if (session.flow === 'ai_chat' && session.step === 'chatting') {
       const text = ctx.message.text.trim();
 
-      // اگر به‌خاطر بی‌ادبی مکرر موقتاً ساکته، اصلاً هزینه‌ی تماس با Gemini رو نده
+      const idleMs = Date.now() - (session.data.lastActivity || 0);
+      if (idleMs > 10 * 60 * 1000) {
+        delete sessions[userId];
+        return next();
+      }
+      session.data.lastActivity = Date.now();
+
       if (session.data.muteUntil && Date.now() < session.data.muteUntil) {
         return ctx.reply('🙏 لطفاً کمی صبر کنید، به‌زودی می‌تونیم ادامه بدیم.');
       }
@@ -388,8 +491,14 @@ function registerAiSupportHandlers(bot) {
         session.data.muteUntil = null;
       }
 
+      let thinkingMsg = null;
+      try { thinkingMsg = await ctx.reply('🧠 فکر هوچینو⁰¹ ••۰•۰۰'); } catch (e) {}
+
+      const user = await getUser(userId);
+      const userName = user?.full_name || null;
+
       await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'user', text]);
-      const result = await askGemini(userId, text);
+      const result = await askGemini(userId, text, userName);
       const responseText = result.text;
 
       await pool.query('INSERT INTO ai_support_conversations (telegram_id, role, content, created_at) VALUES ($1,$2,$3,NOW())', [String(userId), 'assistant', responseText]);
@@ -407,25 +516,27 @@ function registerAiSupportHandlers(bot) {
           finalText += '\n\n⚠️ برای بار دوم می‌گم: ادبیات محترمانه رو رعایت کنید، وگرنه مجبور می‌شم برای مدتی گفتگو رو متوقف کنم.';
         } else {
           session.data.muteUntil = Date.now() + 15 * 60 * 1000;
+          if (thinkingMsg) { try { await ctx.telegram.editMessageText(ctx.chat.id, thinkingMsg.message_id, undefined, '⛔ به‌خاطر تکرار بی‌احترامی، گفتگو برای مدتی متوقف می‌شه. لطفاً چند دقیقه دیگه دوباره تلاش کنید.'); return; } catch (e) {} }
           return ctx.reply('⛔ به‌خاطر تکرار بی‌احترامی، گفتگو برای مدتی متوقف می‌شه. لطفاً چند دقیقه دیگه دوباره تلاش کنید.');
         }
       } else {
         session.data.insultStrikes = 0;
       }
 
-      if (needSupport) {
-        return ctx.reply(HEADER + finalText, {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '📩 ارتباط با مدیریت', callback_data: 'ai_start_ticket' }]
-            ]
-          }
-        });
-      } else {
-        return ctx.reply(HEADER + finalText);
+      const finalPayload = needSupport ? {
+        reply_markup: { inline_keyboard: [[{ text: '📩 ارتباط با مدیریت', callback_data: 'ai_start_ticket' }]] }
+      } : undefined;
+
+      if (thinkingMsg) {
+        try {
+          await ctx.telegram.editMessageText(ctx.chat.id, thinkingMsg.message_id, undefined, HEADER + finalText, finalPayload);
+          return;
+        } catch (e) { /* اگه ویرایش شکست خورد، به‌صورت پیام جدید بفرست */ }
       }
+      return ctx.reply(HEADER + finalText, finalPayload);
     }
 
+    // ---- فرآیند تیکت ----
     if (session.flow === 'ai_ticket' && session.step === 'waiting_order_code') {
       const orderCode = ctx.message.text.trim();
       if (orderCode.length < 3) {
@@ -508,6 +619,7 @@ function startReminderTimer(bot) {
 }
 
 module.exports = function (bot) {
+  ensureAiProvidersTable();
   registerAiSupportHandlers(bot);
   startReminderTimer(bot);
 };
