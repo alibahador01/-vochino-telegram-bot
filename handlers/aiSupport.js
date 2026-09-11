@@ -71,6 +71,9 @@ async function ensureAiProvidersTable() {
         created_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    // اگه این جدول قبلاً (با نسخه‌ی قدیمی‌تر کد) ساخته شده بود، ستون جدید provider_type
+    // رو خودکار اضافه می‌کنیم — همون خطایی که دیدی دقیقاً به همین دلیل بود
+    await pool.query(`ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS provider_type TEXT NOT NULL DEFAULT 'gemini'`);
   } catch (e) { console.log('خطا در ساخت جدول ai_providers:', e.message); }
 }
 
@@ -266,7 +269,7 @@ async function runAiTurn(ctx, session, userId, textForModel, textForHistory, ima
     if (strikes === 1) {
       finalText += '\n\n🙏 حواسم به سوالتون هست و جوابتون رو دادم؛ فقط لطفاً کمی محترمانه‌تر صحبت کنیم 🌸';
     } else if (strikes === 2) {
-      finalText += '\n\n⚠️ برای بار دوم می‌گم: ادبیات محترمانه رو رعایت کنید، وگرنه مجبور می‌شم گزارش بدم به مجموعه بن کنند یا برای مدتی گفتگو و رو متوقف کنم.';
+      finalText += '\n\n⚠️ برای بار دوم می‌گم: ادبیات محترمانه رو رعایت کنید، وگرنه مجبور می‌شم برای مدتی گفتگو رو متوقف کنم.';
     } else {
       session.data.muteUntil = Date.now() + 15 * 60 * 1000;
       if (thinkingMsg) { try { await ctx.telegram.editMessageText(ctx.chat.id, thinkingMsg.message_id, undefined, '⛔ به‌خاطر تکرار بی‌احترامی، گفتگو برای مدتی متوقف می‌شه. لطفاً چند دقیقه دیگه دوباره تلاش کنید.'); return; } catch (e) {} }
@@ -289,7 +292,7 @@ async function runAiTurn(ctx, session, userId, textForModel, textForHistory, ima
   return ctx.reply(HEADER + finalText, finalPayload);
 }
 
-// اگه بیش از ۷ دقیقه از آخرین پیام با دستیار گذشته یا به‌خاطر بی‌ادبی موقتاً ساکته،
+// اگه بیش از ۱۰ دقیقه از آخرین پیام با دستیار گذشته یا به‌خاطر بی‌ادبی موقتاً ساکته،
 // این تابع پیام مناسب رو می‌فرسته و true برمی‌گردونه (یعنی «متوقف شو»)
 async function checkIdleAndMute(ctx, session, userId) {
   const idleMs = Date.now() - (session.data.lastActivity || 0);
@@ -327,7 +330,7 @@ function registerAiSupportHandlers(bot) {
     const rows = res.rows.reverse();
     let msg = '💬 پیام‌های قبلی شما\n\n';
     for (const r of rows) {
-      const who = r.role === 'assistant' ? '🐽 دستیار' : '🙋 شما';
+      const who = r.role === 'assistant' ? '🎧 دستیار' : '🙋 شما';
       const content = r.content.length > 200 ? r.content.slice(0, 200) + '…' : r.content;
       msg += `${who}: ${content}\n\n`;
     }
