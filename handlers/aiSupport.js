@@ -87,12 +87,20 @@ async function getActiveProvider() {
 }
 
 async function askGemini(telegramId, userText, userName, imagePart) {
-  const provider = await getActiveProvider();
-  if (!provider) return { ok: false, text: '⚠️ هوچینو AI دستیار فعلاً تنظیم نشده. لطفاً از گزینه «ارتباط با مدیریت» استفاده کنید.' };
+  let provider = await getActiveProvider();
+  if (!provider && !imagePart) return { ok: false, text: '⚠️ هوچینو AI دستیار فعلاً تنظیم نشده. لطفاً از گزینه «ارتباط با مدیریت» استفاده کنید.' };
 
-  if (imagePart && provider.type === 'groq') {
-    return { ok: false, text: '⚠️ فعلاً برای خوندن عکس نیاز به یه مدل Gemini فعاله. لطفاً سوالتون رو به‌صورت متن یا ویس بفرستید، یا از پنل ادمین یه مدل Gemini رو فعال کنید.' };
+  if (imagePart) {
+    // برای عکس، مستقل از این‌که فعلاً کدوم مدل «فعاله»، دنبال هر کلید Gemini موجودی می‌گردیم
+    // (چون Groq فعلاً عکس رو پشتیبانی نمی‌کنه) — دقیقاً مثل کاری که برای ویس با Groq می‌کنیم
+    const visionProvider = await findAnyProviderByType('gemini');
+    if (!visionProvider) {
+      return { ok: false, text: '⚠️ فعلاً برای خوندن عکس نیاز به یه مدل Gemini ثبت‌شده‌ست (نیازی نیست فعالش کنی، فقط باید ثبت شده باشه). از پنل ادمین یه مدل Gemini اضافه کن.' };
+    }
+    provider = visionProvider;
   }
+
+  if (!provider) return { ok: false, text: '⚠️ هوچینو AI دستیار فعلاً تنظیم نشده. لطفاً از گزینه «ارتباط با مدیریت» استفاده کنید.' };
 
   // تاریخچه‌ی گفتگوهای قبلی — فقط ۳ ردوبدل آخر (۳ پیام کاربر + ۳ پاسخ) نگه داشته می‌شود
   const historyRes = await pool.query(
@@ -192,11 +200,20 @@ async function askGroq(provider, systemPrompt, rawHistory, userText) {
 }
 
 // پیدا کردن یه کلید Groq برای رونویسی صوت (فارغ از این‌که مدل فعال چت الان چیه)
+// دنبال یه مدل ثبت‌شده از نوع خاص می‌گرده (اول ترجیحاً فعال، بعد هرکدوم) — مستقل از این‌که
+// الان کدوم مدل برای چت متنی «فعاله». همین باعث میشه چند تا مدل مختلف هم‌زمان کار کنن:
+// یکی برای چت، یکی برای عکس، یکی برای ویس.
+async function findAnyProviderByType(type) {
+  const active = await pool.query('SELECT * FROM ai_providers WHERE is_active = true AND provider_type = $1 LIMIT 1', [type]);
+  if (active.rows[0]) return { apiKey: active.rows[0].api_key, model: active.rows[0].model_name, label: active.rows[0].label, type };
+  const any = await pool.query('SELECT * FROM ai_providers WHERE provider_type = $1 ORDER BY id DESC LIMIT 1', [type]);
+  if (any.rows[0]) return { apiKey: any.rows[0].api_key, model: any.rows[0].model_name, label: any.rows[0].label, type };
+  return null;
+}
+
 async function findGroqKeyForAudio() {
-  const active = await pool.query("SELECT api_key FROM ai_providers WHERE is_active = true AND provider_type = 'groq' LIMIT 1");
-  if (active.rows[0]) return active.rows[0].api_key;
-  const any = await pool.query("SELECT api_key FROM ai_providers WHERE provider_type = 'groq' ORDER BY id DESC LIMIT 1");
-  return any.rows[0]?.api_key || null;
+  const p = await findAnyProviderByType('groq');
+  return p?.apiKey || null;
 }
 
 async function transcribeVoiceGroq(fileUrl) {
