@@ -17,9 +17,37 @@ async function getKnowledgeText() {
   return res.rows.map(r => `### ${r.title}\n${r.content}`).join('\n\n');
 }
 
+async function ensureAiNotesTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_support_notes (
+        id SERIAL PRIMARY KEY,
+        content TEXT NOT NULL,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    // نکته‌ی قدیمی (تک‌متنی) رو یه‌بار به لیست جدید منتقل می‌کنیم تا چیزی گم نشه
+    const legacy = await getSetting('gemini_extra_prompt', '');
+    if (legacy) {
+      const countRes = await pool.query('SELECT COUNT(*)::int c FROM ai_support_notes');
+      if (countRes.rows[0].c === 0) {
+        await pool.query('INSERT INTO ai_support_notes (content, active, created_at, updated_at) VALUES ($1, TRUE, NOW(), NOW())', [legacy]);
+      }
+    }
+  } catch (e) { console.log('خطا در ساخت جدول ai_support_notes:', e.message); }
+}
+
+async function getExtraNotesText() {
+  const res = await pool.query('SELECT content FROM ai_support_notes WHERE active = TRUE ORDER BY id ASC');
+  if (res.rows.length === 0) return '';
+  return res.rows.map(r => r.content).join('\n\n');
+}
+
 async function buildSystemPrompt(userName) {
   const knowledge = await getKnowledgeText();
-  const custom = await getSetting('gemini_extra_prompt', '');
+  const custom = await getExtraNotesText();
   return (
     '🎧 معرفی خودت: اسمت «هوچینو AI دستیار⁰¹» هست — دستیار هوشمند صرافی ووچینو⁰¹، تحت نظارت مستقیم تیم متخصص همین مجموعه. ' +
     'ووچینو⁰¹ یک صرافی/ربات تلگرامی تخصصی خرید و فروش ووچر دیجیتال، شارژ و برداشت کیف‌پول، احراز هویت، بونوس، دعوت دوستان و سرویس VPN هست. ' +
@@ -403,7 +431,7 @@ function registerAiSupportHandlers(bot) {
           inline_keyboard: [
             [{ text: '🧩 مدیریت مدل‌های هوش مصنوعی', callback_data: 'ai_providers_list' }],
             [{ text: '📚 مدیریت دانش پشتیبانی', callback_data: 'ai_knowledge_list' }],
-            [{ text: '📝 نکات اضافی برای Gemini', callback_data: 'ai_set_extra_prompt' }],
+            [{ text: '📝 نکات اضافی', callback_data: 'ai_notes_list' }],
             [{ text: '🎫 تیکت‌های باز', callback_data: 'ai_tickets_open' }],
             [{ text: '📋 همه تیکت‌ها', callback_data: 'ai_tickets_all' }],
             [{ text: '🔙 بازگشت', callback_data: 'menu_admin_panel' }]
@@ -483,11 +511,72 @@ function registerAiSupportHandlers(bot) {
     ctx.reply('🗑 مدل حذف شد.');
   });
 
-  bot.action('ai_set_extra_prompt', async (ctx) => {
+  bot.action('ai_notes_list', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'ai_set_extra_prompt', step: 'waiting_value' };
-    ctx.reply('📝 نکات اضافی‌ای که می‌خواید Gemini همیشه رعایت کنه رو بفرستید:');
+    const res = await pool.query('SELECT * FROM ai_support_notes ORDER BY id DESC');
+    const buttons = res.rows.map(r => {
+      const preview = r.content.length > 30 ? r.content.slice(0, 30) + '…' : r.content;
+      return [{ text: (r.active ? '✅ ' : '⛔ ') + preview, callback_data: 'ai_note_view_' + r.id }];
+    });
+    buttons.push([{ text: '➕ افزودن نکته جدید', callback_data: 'ai_note_add' }]);
+    buttons.push([{ text: '🔙 بازگشت', callback_data: 'admin_ai_support' }]);
+    ctx.reply('📝 نکات اضافی (' + res.rows.length + ' مورد):', { reply_markup: { inline_keyboard: buttons } });
+  });
+
+  bot.action('ai_note_add', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'ai_note_add', step: 'waiting_content' };
+    ctx.reply('📝 متن نکته‌ی جدید رو بفرستید:');
+  });
+
+  async function renderNoteItem(ctx, id) {
+    const row = (await pool.query('SELECT * FROM ai_support_notes WHERE id=$1', [id])).rows[0];
+    if (!row) return ctx.reply('یافت نشد.');
+    const maxLen = 3500;
+    const shown = row.content.length > maxLen ? row.content.slice(0, maxLen) + '\n\n…(ادامه به‌خاطر محدودیت تلگرام نمایش داده نمی‌شه، ولی کامل ذخیره‌ست)' : row.content;
+    try {
+      await ctx.reply(`📝 ${shown}\n\nوضعیت: ${row.active ? '✅ فعال' : '⛔ غیرفعال'}`, {
+        reply_markup: { inline_keyboard: [
+          [{ text: row.active ? '⛔ غیرفعال کردن' : '✅ فعال کردن', callback_data: 'ai_note_toggle_' + id }],
+          [{ text: '🗑 حذف', callback_data: 'ai_note_del_' + id }],
+          [{ text: '🔙 بازگشت', callback_data: 'ai_notes_list' }]
+        ] }
+      });
+    } catch (e) {
+      await ctx.reply('⚠️ این نکته خیلی طولانیه، ولی کامل ذخیره‌ست.', {
+        reply_markup: { inline_keyboard: [
+          [{ text: row.active ? '⛔ غیرفعال کردن' : '✅ فعال کردن', callback_data: 'ai_note_toggle_' + id }],
+          [{ text: '🗑 حذف', callback_data: 'ai_note_del_' + id }],
+          [{ text: '🔙 بازگشت', callback_data: 'ai_notes_list' }]
+        ] }
+      });
+    }
+  }
+
+  bot.action(/^ai_note_view_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery();
+    return renderNoteItem(ctx, ctx.match[1]);
+  });
+
+  bot.action(/^ai_note_toggle_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const id = ctx.match[1];
+    await pool.query('UPDATE ai_support_notes SET active = NOT active, updated_at=NOW() WHERE id=$1', [id]);
+    ctx.answerCbQuery('✅ به‌روز شد');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return renderNoteItem(ctx, id);
+  });
+
+  bot.action(/^ai_note_del_(\d+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const id = ctx.match[1];
+    await pool.query('DELETE FROM ai_support_notes WHERE id=$1', [id]);
+    ctx.answerCbQuery('🗑 حذف شد');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    ctx.reply('🗑 حذف شد.');
   });
 
   bot.action('ai_knowledge_list', async (ctx) => {
@@ -664,10 +753,10 @@ function registerAiSupportHandlers(bot) {
     }
 
     // ---- تنظیمات ادمین ----
-    if (session.flow === 'ai_set_extra_prompt' && session.step === 'waiting_value') {
-      await setSetting('gemini_extra_prompt', ctx.message.text.trim());
+    if (session.flow === 'ai_note_add' && session.step === 'waiting_content') {
+      await pool.query('INSERT INTO ai_support_notes (content, active, created_at, updated_at) VALUES ($1, TRUE, NOW(), NOW())', [ctx.message.text.trim()]);
       delete sessions[userId];
-      return ctx.reply('✅ ذخیره شد.');
+      return ctx.reply('✅ نکته‌ی جدید ثبت شد.');
     }
     if (session.flow === 'ai_provider_add' && session.step === 'waiting_label') {
       session.data.label = ctx.message.text.trim();
@@ -824,6 +913,7 @@ function startReminderTimer(bot) {
 
 module.exports = function (bot) {
   ensureAiProvidersTable();
+  ensureAiNotesTable();
   registerAiSupportHandlers(bot);
   startReminderTimer(bot);
 };
