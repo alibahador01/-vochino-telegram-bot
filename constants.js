@@ -25,7 +25,7 @@ const mainMenuButtons = [
   { key: 'wallet',  text: '🧳 کیف پول' },
   { key: 'bonus',   text: '🧩 بونوس' },
   { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
-  { key: 'website', text: '🌐 وبسایت ووچینو⁰¹' },
+  { key: 'hochino_main', text: '🐽 هوچینو AI برتر⁰¹' },
   { key: 'support', text: '🐽 ⁰¹دستار AI هوچینو' }
 ];
 
