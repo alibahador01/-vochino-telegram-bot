@@ -28,6 +28,19 @@ module.exports = function registerHochinoHandlers(bot) {
     });
   });
 
+  // ============ دکمه مستقیم: گفتگو (از منوی اصلی) ============
+  bot.action('menu_hochino_chat', async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
+
+    await ctx.reply('💬 <b>گفتگو AI هوچینو⁰¹</b>\n\n🚧 این بخش به‌زودی فعال می‌شود...', {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'hochino_back' }]]
+      }
+    });
+  });
+
   // ============ دکمه ۱: گفتگو ============
   bot.action('hochino_chat', async (ctx) => {
     try { await ctx.answerCbQuery(); } catch (e) {}
