@@ -174,7 +174,8 @@ require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
 require('./handlers/profile')(bot);
 require('./handlers/vpn')(bot);
-require('./handlers/currencyFeed')(bot);
+// 🐽 هوچینو AI برتر⁰¹ — ماژول کاملاً مستقل
+require('./hochino_module')(bot);
 
 // مدیریت خطا
 process.on('unhandledRejection', (err) => console.log('UNHANDLED REJECTION:', err.message));
