@@ -60,17 +60,26 @@ module.exports = function registerMiscHandlers(bot) {
     return gameHandler.showBonusMenu(ctx);
   });
 
-  // 🌐 وب‌سایت ووچینو⁰۱ – مستقیم لینک را باز کن
-  bot.action('menu_website', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    const websiteUrl = process.env.WEBSITE_URL || 'https://vochino.com';
-    ctx.reply(`🌐 وب‌سایت ووچینو⁰۱:\n${websiteUrl}`, {
-      reply_markup: {
-        inline_keyboard: [[{ text: '🚀 باز کردن وب‌سایت', url: websiteUrl }]]
-      }
-    });
+  // 🐽 هوچینو AI برتر⁰¹ — منوی اصلی هوچینو (ماژول مستقل)
+bot.action('menu_hochino_main', async (ctx) => {
+  ctx.answerCbQuery();
+  try { await ctx.deleteMessage(); } catch (e) {}
+  const text = [
+    '🐽 <b>هوچینو AI برتر⁰¹</b>',
+    '',
+    'یکی از گزینه‌های زیر رو انتخاب کن:'
+  ].join('\n');
+  return ctx.reply(text, {
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '💬 گفتگو AI هوچینو⁰¹', callback_data: 'hochino_chat' }],
+        [{ text: '⚽️ تحلیل AI هوچینو⁰¹', callback_data: 'hochino_analyze' }],
+        [{ text: '📆 جدول AI هوچینو⁰¹',  callback_data: 'hochino_table' }]
+      ]
+    }
   });
+});
 
   bot.action('menu_support', async (ctx) => {
     ctx.answerCbQuery();
