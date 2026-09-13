@@ -20,13 +20,13 @@ const DEPOSIT_CARDS = [
 ];
 
 const mainMenuButtons = [
-  { key: 'buy',     text: '✨ خرید' },
-  { key: 'sell',    text: '✨ فروش' },
-  { key: 'wallet',  text: '🧳 کیف پول' },
-  { key: 'bonus',   text: '🧩 بونوس' },
-  { key: 'special', text: '🎁 ویژه ووچینو⁰¹' },
+  { key: 'buy',          text: '✨ خرید' },
+  { key: 'sell',         text: '✨ فروش' },
+  { key: 'wallet',       text: '🧳 کیف پول' },
+  { key: 'bonus',        text: '🧩 بونوس' },
+  { key: 'hochino_chat', text: '🐽 هوچینو AI گفتگو' },
   { key: 'hochino_main', text: '🐽 هوچینو AI برتر⁰¹' },
-  { key: 'support', text: '🐽 ⁰¹دستار AI هوچینو' }
+  { key: 'support',      text: '🎧 هوچینو AI دستیار⁰¹' }
 ];
 
 const ADMIN_BUTTON = { key: 'admin_panel', text: '👑 پنل مدیریت' };
