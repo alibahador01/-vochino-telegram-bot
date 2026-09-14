@@ -169,6 +169,7 @@ require('./handlers/game')(bot);
 // ⚠️ orderAdmin باید قبل از admin ثبت شود
 require('./handlers/orderAdmin')(bot);
 require('./handlers/admin')(bot);
+require('./handlers/emojiManager')(bot);
 require('./handlers/adminBonus')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
