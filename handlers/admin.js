@@ -71,6 +71,7 @@ module.exports = function registerAdminHandlers(bot) {
             [{ text: '💳 حداقل برداشت', callback_data: 'admin_min_withdraw' }],
             [{ text: '🌐 مدیریت فیلترشکن (VPN)', callback_data: 'admin_vpn_panel' }],
             [{ text: '🎁 مدیریت بونوس‌ها', callback_data: 'admin_bonus_settings' }],
+            [{ text: '🎨 مدیریت Custom Emoji', callback_data: 'admin_emoji_manager' }],
             [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'back_main_menu' }]
           ]
         }
