@@ -1,9 +1,11 @@
+// handlers/emojiManager.js
 const fs = require('fs');
 const path = require('path');
 const { ADMIN_IDS } = require('../constants');
 const { getSetting, setSetting } = require('../db');
 
-const LIBRARY_PATH = path.join(__dirname, '..', 'emoji_library.json');
+// فایل library سبک‌شده (۱.۵ مگ) که توی ریشه‌ی پروژه‌ست
+const LIBRARY_PATH = path.join(__dirname, '..', 'emoji_slim.json');
 const SETTINGS_KEY = 'emoji_assignments';
 const MAX_RESULTS = 50;
 
@@ -119,21 +121,38 @@ function buildIndex() {
   });
 }
 
+// ============================================================
+// بارگذاری فایل library با فرمت slim (id / e)
+// و تبدیل به فرمت داخلی استاندارد (custom_emoji_id / emoji)
+// ============================================================
 function loadLibrary() {
   if (loaded) return;
 
   if (!fs.existsSync(LIBRARY_PATH)) {
-    throw new Error(`emoji_library.json not found: ${LIBRARY_PATH}`);
+    throw new Error(`emoji_slim.json not found: ${LIBRARY_PATH}`);
   }
 
   const raw = fs.readFileSync(LIBRARY_PATH, 'utf8');
   const parsed = JSON.parse(raw);
 
   if (!Array.isArray(parsed)) {
-    throw new Error('emoji_library.json must contain an array');
+    throw new Error('emoji_slim.json must contain an array');
   }
 
-  library = parsed.filter(x => x && x.custom_emoji_id);
+  // تبدیل ساختار slim به ساختار داخلی
+  // ورودی:  { id: '4900066628240147633', e: '🇪🇸' }
+  // خروجی:  { custom_emoji_id: '...', emoji: '🇪🇸', set_name: null, ... }
+  library = parsed
+    .filter(x => x && x.id)
+    .map(x => ({
+      custom_emoji_id: String(x.id),
+      emoji: x.e || '🔹',
+      set_name: null,
+      is_animated: false,
+      is_video: false,
+      type: 'custom_emoji'
+    }));
+
   buildIndex();
   loaded = true;
 
