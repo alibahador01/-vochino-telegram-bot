@@ -156,8 +156,58 @@ if (process.env.NODE_ENV !== 'development') {
   }, 14 * 60 * 1000);
 }
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
+
+// ============ Custom Emoji خودکار روی همه پیام‌ها ============
+const { premiumize } = require('./hochino_module/emoji_helper');
+
+bot.use(async (ctx, next) => {
+  const origReply = ctx.reply.bind(ctx);
+  const origEdit = ctx.editMessageText.bind(ctx);
+  const origSend = ctx.telegram.sendMessage.bind(ctx.telegram);
+
+  ctx.reply = async (text, extra) => {
+    if (typeof text === 'string') {
+      const t = await premiumize(text);
+      if (t !== text && (!extra || !extra.parse_mode)) {
+        extra = { ...(extra || {}), parse_mode: 'HTML' };
+      }
+      return origReply(t, extra);
+    }
+    return origReply(text, extra);
+  };
+
+  ctx.editMessageText = async (text, extra) => {
+    if (typeof text === 'string') {
+      const t = await premiumize(text);
+      if (t !== text && (!extra || !extra.parse_mode)) {
+        extra = { ...(extra || {}), parse_mode: 'HTML' };
+      }
+      return origEdit(t, extra);
+    }
+    return origEdit(text, extra);
+  };
+
+  ctx.telegram.sendMessage = async (chatId, text, extra) => {
+    if (typeof text === 'string') {
+      const t = await premiumize(text);
+      if (t !== text && (!extra || !extra.parse_mode)) {
+        extra = { ...(extra || {}), parse_mode: 'HTML' };
+      }
+      return origSend(chatId, t, extra);
+    }
+    return origSend(chatId, text, extra);
+  };
+
+  return next();
+});
+// ================================================================
+
+// هندلرها
+require('./handlers/registration')(bot);
+require('./handlers/verification')(bot);
+// ... بقیه هندلرها (دست‌نخورده)
 
 // هندلرها
 require('./handlers/registration')(bot);
