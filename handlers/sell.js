@@ -3,7 +3,7 @@ const texts = require('../texts');
 const { sessions, fillTemplate } = require('../utils');
 const { pool, getUser, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS } = require('../constants');
-const { tryAutoFulfillSell } = require('../exchangeEngine');
+const { tryAutoFulfillSell, getEffectiveUnitPrice } = require('../exchangeEngine');
 const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
 
@@ -48,7 +48,9 @@ module.exports = function registerSellHandlers(bot) {
       return startVerification(ctx, 'sell', key);
     }
 
-    const limitCheck = await checkDailyLimit(ctx.from.id, Number(product.unit_price || 0));
+    const { price: effectiveUnitPrice } = await getEffectiveUnitPrice(product, 'sell');
+
+    const limitCheck = await checkDailyLimit(ctx.from.id, effectiveUnitPrice);
     if (!limitCheck.ok) {
       return ctx.reply(
         `🔒 سقف احراز هویت نقره‌ای شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان در روز است.\nبرای افزایش سقف معاملات، احراز هویت طلایی را انجام دهید.`,
@@ -59,7 +61,7 @@ module.exports = function registerSellHandlers(bot) {
     const minAmount = Number(product.min_amount || 0);
     // حداقل فروش در دیتابیس ذخیره می‌شد ولی هیچ‌جا چک نمی‌شد؛ اینجا واقعاً اعمال می‌شود.
     // چون فروش بر اساس «قیمت واحد ثابت» است نه مبلغ ورودی کاربر، این چک روی خودِ قیمت واحد محصول انجام می‌شود.
-    if (minAmount > 0 && Number(product.unit_price || 0) < minAmount) {
+    if (minAmount > 0 && effectiveUnitPrice < minAmount) {
       return ctx.reply(`❌ فروش این محصول فعلاً غیرفعال است (قیمت واحد کمتر از حداقل تعیین‌شده در پنل است).`);
     }
 
@@ -69,7 +71,7 @@ module.exports = function registerSellHandlers(bot) {
       data: {
         productType: key,
         productName: product.name,
-        unitPrice: Number(product.unit_price || 0)
+        unitPrice: effectiveUnitPrice
       }
     };
 
@@ -77,7 +79,7 @@ module.exports = function registerSellHandlers(bot) {
     let msg =
       `✨ Vochino⁰¹\n` +
       `💎 فروش ${product.name}\n\n` +
-      `💵 قیمت واحد: ${Number(product.unit_price || 0).toLocaleString('en-US')} تومان\n\n`;
+      `💵 قیمت واحد: ${effectiveUnitPrice.toLocaleString('en-US')} تومان\n\n`;
     if (product.sample_code) {
       msg += `🔐 نمونه کد: ${product.sample_code}\n\n`;
     }
