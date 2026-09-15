@@ -2,6 +2,7 @@
 const texts = require('../texts');
 const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
 const { pool, getUser, updateUser, getUserCards, getTransactionLogs, logTransaction, getAdmin, getAllAdmins, getSetting, setSetting } = require('../db');
+const { calculateCommission } = require('../exchangeEngine');
 const { MIN_WITHDRAW, ADMIN_IDS } = require('../constants');
 const R = require('./receipts');
 
@@ -302,10 +303,11 @@ module.exports = function registerWalletHandlers(bot) {
     if (!user || !user.card_number) {
       return ctx.reply('❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی کیف پول گزینه «افزودن کارت جدید» را انتخاب کنید.');
     }
+    const minWithdraw = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
     const cards = await getUserCards(ctx.from.id);
     if (cards.length === 1) {
       sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { card: cards[0].card_number } };
-      return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`);
+      return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${minWithdraw.toLocaleString('en-US')} تومان):`);
     }
     sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_card', lang: (user && user.language) || 'fa', data: {} };
     const buttons = cards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `wcard:${i}` }]);
@@ -323,7 +325,8 @@ module.exports = function registerWalletHandlers(bot) {
     try { await ctx.deleteMessage(); } catch (e) {}
     session.data.card = card.card_number;
     session.step = 'waiting_amount';
-    return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${MIN_WITHDRAW.toLocaleString('en-US')} تومان):`);
+    const minWithdraw = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
+    return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${minWithdraw.toLocaleString('en-US')} تومان):`);
   });
 
   // ==================== احراز طلایی / کارت جدید / رفرال ====================
@@ -529,7 +532,7 @@ module.exports = function registerWalletHandlers(bot) {
 
     if (session.flow === 'withdraw' && session.step === 'waiting_amount') {
       const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
-      const min = MIN_WITHDRAW;
+      const min = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
       if (!amount || amount < min) {
         return ctx.reply(`حداقل مبلغ برداشت ${min.toLocaleString('en-US')} تومان است. لطفاً دوباره وارد کنید:`);
       }
@@ -539,18 +542,28 @@ module.exports = function registerWalletHandlers(bot) {
       }
       const destCard = (session.data && session.data.card) || user.card_number;
 
+      // کارمزد برداشت — از پنل قابل تنظیم (درصدی یا ثابت)؛ اگر تنظیم نشده باشد صفر است (رفتار قبلی حفظ می‌شود)
+      const feeType = await getSetting('withdraw_fee_type', 'none');
+      const feeValue = await getSetting('withdraw_fee_value', '0');
+      const commission = calculateCommission(feeType, feeValue, amount);
+      const payoutAmount = Math.max(0, amount - commission);
+
       const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
       await pool.query(
-        `INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code)
-         VALUES ($1, 'withdraw', $2, $3, 'pending', NOW(), $4)`,
-        [String(ctx.from.id), amount, destCard, trackCode]
+        `INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code, commission, payout_amount)
+         VALUES ($1, 'withdraw', $2, $3, 'pending', NOW(), $4, $5, $6)`,
+        [String(ctx.from.id), amount, destCard, trackCode, commission, payoutAmount]
       );
 
       delete sessions[ctx.from.id];
-      ctx.reply(`درخواست برداشت شما ثبت شد ✅\nپس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.\n\n📍 کد پیگیری: \`${trackCode}\``, { parse_mode: 'Markdown' });
+      const feeLine = commission > 0
+        ? `💳 کارمزد برداشت: ${commission.toLocaleString('en-US')} تومان\n💵 مبلغ قابل واریز به کارت: ${payoutAmount.toLocaleString('en-US')} تومان\n\n`
+        : '';
+      ctx.reply(`درخواست برداشت شما ثبت شد ✅\n${feeLine}پس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.\n\n📍 کد پیگیری: \`${trackCode}\``, { parse_mode: 'Markdown' });
 
       const ids = await adminIdsList();
-      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n📱 ${user.phone || '---'}\n💳 ${destCard}\n💰 ${amount.toLocaleString()} تومان\n📍 کد: ${trackCode}`).catch(console.error));
+      const adminFeeLine = commission > 0 ? `\n💳 کارمزد: ${commission.toLocaleString()} تومان\n💵 واریزی به کارت: ${payoutAmount.toLocaleString()} تومان` : '';
+      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n📱 ${user.phone || '---'}\n💳 ${destCard}\n💰 مبلغ درخواستی: ${amount.toLocaleString()} تومان${adminFeeLine}\n📍 کد: ${trackCode}`).catch(console.error));
     }
 
     if (session.flow === 'add_card' && session.step === 'waiting_number') {
