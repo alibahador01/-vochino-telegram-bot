@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// مسیرهای سلامت
+// ==================== مسیرهای سلامت ====================
 app.get('/', (req, res) => res.send('Bot is alive and connected to Supabase!'));
 app.get('/health', (req, res) => res.send('OK'));
 app.get('/ping', (req, res) => res.send('PONG'));
@@ -146,70 +146,110 @@ app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
-// ضدخواب
+// ==================== ضدخواب ====================
 if (process.env.NODE_ENV !== 'development') {
-  const antiSleep = new AntiSleepBot(process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com');
+  const antiSleep = new AntiSleepBot(
+    process.env.RENDER_EXTERNAL_URL ||
+    process.env.APP_URL ||
+    'https://vochino-telegram-bot.onrender.com'
+  );
   antiSleep.startAll();
 } else {
   setInterval(() => {
-    https.get('https://vochino-telegram-bot.onrender.com', (res) => console.log('[Dev Ping] Status:', res.statusCode)).on('error', () => {});
+    https.get('https://vochino-telegram-bot.onrender.com', (res) => {
+      console.log('[Dev Ping] Status:', res.statusCode);
+    }).on('error', () => {});
   }, 14 * 60 * 1000);
 }
 
+// ==================== ربات تلگرام ====================
 const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
-// ============ Custom Emoji خودکار روی همه پیام‌ها ============
-const { premiumize } = require('./hochino_module/emoji_helper');
+// ============================================================
+// 🎨 میان‌افزار خودکار Custom Emoji
+// ------------------------------------------------------------
+// این میان‌افزار روی همه‌ی پیام‌های خروجی ربات اعمال می‌شه.
+// هر ایموجی معمولی که از پنل ادمین با ایموجی پرمیوم نگاشت
+// شده باشه، خودکار به فرمت tg-emoji تبدیل می‌شه.
+//
+// ⚠️ این بخش کاملاً مستقل از کدهای صرافی است و به هیچ فایل
+// دیگری دست نمی‌زند. تمام خطاها به صورت امن گرفته می‌شن تا
+// ربات هرگز به خاطر این middleware کرش نکند.
+// ============================================================
+let premiumize = null;
+try {
+  const emojiHelper = require('./hochino_module/emoji_helper');
+  premiumize = emojiHelper.premiumize;
+} catch (e) {
+  console.log('⚠️ emoji_helper لود نشد:', e.message);
+}
 
-bot.use(async (ctx, next) => {
-  const origReply = ctx.reply.bind(ctx);
-  const origEdit = ctx.editMessageText.bind(ctx);
-  const origSend = ctx.telegram.sendMessage.bind(ctx.telegram);
+if (typeof premiumize === 'function') {
+  bot.use(async (ctx, next) => {
+    const origReply = ctx.reply.bind(ctx);
+    const origEdit = ctx.editMessageText ? ctx.editMessageText.bind(ctx) : null;
+    const origSend = ctx.telegram.sendMessage.bind(ctx.telegram);
 
-  ctx.reply = async (text, extra) => {
-    if (typeof text === 'string') {
-      const t = await premiumize(text);
-      if (t !== text && (!extra || !extra.parse_mode)) {
-        extra = { ...(extra || {}), parse_mode: 'HTML' };
+    // جایگزینی ctx.reply
+    ctx.reply = async (text, extra) => {
+      if (typeof text !== 'string') {
+        return origReply(text, extra);
       }
-      return origReply(t, extra);
-    }
-    return origReply(text, extra);
-  };
-
-  ctx.editMessageText = async (text, extra) => {
-    if (typeof text === 'string') {
-      const t = await premiumize(text);
-      if (t !== text && (!extra || !extra.parse_mode)) {
-        extra = { ...(extra || {}), parse_mode: 'HTML' };
+      try {
+        const t = await premiumize(text);
+        if (t !== text && (!extra || !extra.parse_mode)) {
+          extra = { ...(extra || {}), parse_mode: 'HTML' };
+        }
+        return origReply(t, extra);
+      } catch (e) {
+        return origReply(text, extra);
       }
-      return origEdit(t, extra);
-    }
-    return origEdit(text, extra);
-  };
+    };
 
-  ctx.telegram.sendMessage = async (chatId, text, extra) => {
-    if (typeof text === 'string') {
-      const t = await premiumize(text);
-      if (t !== text && (!extra || !extra.parse_mode)) {
-        extra = { ...(extra || {}), parse_mode: 'HTML' };
+    // جایگزینی ctx.editMessageText
+    if (origEdit) {
+      ctx.editMessageText = async (text, extra) => {
+        if (typeof text !== 'string') {
+          return origEdit(text, extra);
+        }
+        try {
+          const t = await premiumize(text);
+          if (t !== text && (!extra || !extra.parse_mode)) {
+            extra = { ...(extra || {}), parse_mode: 'HTML' };
+          }
+          return origEdit(t, extra);
+        } catch (e) {
+          return origEdit(text, extra);
+        }
+      };
+    }
+
+    // جایگزینی ctx.telegram.sendMessage
+    ctx.telegram.sendMessage = async (chatId, text, extra) => {
+      if (typeof text !== 'string') {
+        return origSend(chatId, text, extra);
       }
-      return origSend(chatId, t, extra);
-    }
-    return origSend(chatId, text, extra);
-  };
+      try {
+        const t = await premiumize(text);
+        if (t !== text && (!extra || !extra.parse_mode)) {
+          extra = { ...(extra || {}), parse_mode: 'HTML' };
+        }
+        return origSend(chatId, t, extra);
+      } catch (e) {
+        return origSend(chatId, text, extra);
+      }
+    };
 
-  return next();
-});
-// ================================================================
+    return next();
+  });
+  console.log('✅ Custom Emoji middleware فعال شد');
+} else {
+  console.log('⚠️ Custom Emoji middleware غیرفعال (emoji_helper پیدا نشد)');
+}
+// ============================================================
 
-// هندلرها
-require('./handlers/registration')(bot);
-require('./handlers/verification')(bot);
-// ... بقیه هندلرها (دست‌نخورده)
-
-// هندلرها
+// ==================== هندلرهای صرافی (دست‌نخورده) ====================
 require('./handlers/registration')(bot);
 require('./handlers/verification')(bot);
 require('./handlers/wallet')(bot);
@@ -225,11 +265,16 @@ require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
 require('./handlers/profile')(bot);
 require('./handlers/vpn')(bot);
-// 🐽 هوچینو AI برتر⁰¹ — ماژول کاملاً مستقل
+require('./handlers/currencyFeed')(bot);
+
+// ==================== ماژول هوچینو⁰¹ (کاملاً مستقل) ====================
 require('./hochino_module')(bot);
 
-// مدیریت خطا
-process.on('unhandledRejection', (err) => console.log('UNHANDLED REJECTION:', err.message));
+// ==================== مدیریت خطا ====================
+process.on('unhandledRejection', (err) => {
+  console.log('UNHANDLED REJECTION:', err.message);
+});
+
 process.on('uncaughtException', (err) => {
   console.log('UNCAUGHT EXCEPTION:', err.message);
   console.log(err.stack);
@@ -237,17 +282,39 @@ process.on('uncaughtException', (err) => {
 
 bot.catch((err, ctx) => {
   console.log('BOT ERROR:', err.message);
-  try { ctx.reply('⚠️ خطای موقت. لطفاً دوباره تلاش کنید.'); } catch (e) {}
-  try { ADMIN_IDS.forEach(id => ctx.telegram.sendMessage(id, `🧨 خطا:\n${err.message}\n👤 ${ctx.from?.id || '-'}`)); } catch (e) {}
+  try {
+    ctx.reply('⚠️ خطای موقت. لطفاً دوباره تلاش کنید.');
+  } catch (e) {}
+  try {
+    ADMIN_IDS.forEach(id =>
+      ctx.telegram.sendMessage(
+        id,
+        `🧨 خطا:\n${err.message}\n👤 ${ctx.from?.id || '-'}`
+      )
+    );
+  } catch (e) {}
 });
 
+// ==================== راه‌اندازی ====================
 async function init() {
   await initDb();
+
   const cacheLoaded = await loadTextsCache();
-  if (!cacheLoaded) console.log('⚠️ کش متن‌ها بارگذاری نشد.');
-  try { await sendRatesToChannel(bot); } catch (e) { console.log('خطا در ارسال نرخ:', e.message); }
+  if (!cacheLoaded) {
+    console.log('⚠️ کش متن‌ها بارگذاری نشد.');
+  }
+
+  try {
+    await sendRatesToChannel(bot);
+  } catch (e) {
+    console.log('خطا در ارسال نرخ:', e.message);
+  }
+
   bot.launch();
   console.log('✅ ربات روشن شد');
 }
 
-init().catch(e => { console.log('INIT ERROR:', e.message); console.log(e.stack); });
+init().catch(e => {
+  console.log('INIT ERROR:', e.message);
+  console.log(e.stack);
+});
