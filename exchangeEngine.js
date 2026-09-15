@@ -89,37 +89,39 @@ async function fetchProviderPrice(apiSource, productType, productKey) {
 
 // خروجی: { price, source: 'api'|'manual'|'none', apiSourceName? }
 // product باید شامل key و unit_price (قیمت دستی فعلی از پنل) باشد.
-async function getEffectiveUnitPrice(product) {
+// type: 'buy' یا 'sell' — کاملاً مستقل از هم، چون ممکنه یه محصول فقط سمت خرید یا فقط سمت فروش به API وصل باشه
+async function getEffectiveUnitPrice(product, type = 'buy') {
   const manualPrice = Number(product.unit_price || 0);
 
   if (!(await isAutoExecutionEnabled())) {
     return { price: manualPrice, source: 'manual' };
   }
 
-  const chain = await getApiChainForProduct('buy', product.key);
+  const chain = await getApiChainForProduct(type, product.key);
   if (chain.length === 0) {
     return { price: manualPrice, source: 'manual' };
   }
 
-  const cacheKey = `buy:${product.key}`;
+  const cacheKey = `${type}:${product.key}`;
   const cached = priceCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < PRICE_CACHE_TTL_MS) {
     return { price: cached.price, source: cached.source, apiSourceName: cached.apiSourceName };
   }
 
+  const tableName = type === 'sell' ? 'sell_products' : 'products';
   for (const apiSource of chain) {
-    const result = await fetchProviderPrice(apiSource, 'buy', product.key);
+    const result = await fetchProviderPrice(apiSource, type, product.key);
     if (result.success) {
       priceCache.set(cacheKey, { price: result.price, source: 'api', apiSourceName: apiSource.name, ts: Date.now() });
       // برای دیده‌شدن در پنل ادمین که آخرین قیمت از کجا آمده (صرفاً اطلاع‌رسانی، تصمیم منطقی نیست)
-      try { await pool.query('UPDATE products SET price_source = $1 WHERE key = $2', ['api', product.key]); } catch (e) {}
+      try { await pool.query(`UPDATE ${tableName} SET price_source = $1 WHERE key = $2`, ['api', product.key]); } catch (e) {}
       return { price: result.price, source: 'api', apiSourceName: apiSource.name };
     }
-    console.log(`❌ دریافت قیمت از صرافی ${apiSource.name} برای ${product.key} شکست خورد: ${result.error}`);
+    console.log(`❌ دریافت قیمت از صرافی ${apiSource.name} برای ${type}:${product.key} شکست خورد: ${result.error}`);
   }
 
   // همه‌ی صرافی‌ها شکست خوردند → برگشت امن به قیمت دستی، بدون توقف کار ربات
-  try { await pool.query('UPDATE products SET price_source = $1 WHERE key = $2', ['manual', product.key]); } catch (e) {}
+  try { await pool.query(`UPDATE ${tableName} SET price_source = $1 WHERE key = $2`, ['manual', product.key]); } catch (e) {}
   return { price: manualPrice, source: 'manual' };
 }
 
