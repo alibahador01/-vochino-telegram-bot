@@ -396,7 +396,7 @@ async function getApiChainForProduct(productType, productKey) {
   return res.rows;
 }
 
-async function setOrderFulfillment(orderId, { status, apiSourceId, apiCost, providerTxId, deliveredCode, fulfillmentMode }) {
+async function setOrderFulfillment(orderId, { status, apiSourceId, apiCost, providerTxId, deliveredCode, deliveredHash, fulfillmentMode }) {
   const fields = ['status = $2'];
   const values = [orderId, status];
   let i = 3;
@@ -404,6 +404,7 @@ async function setOrderFulfillment(orderId, { status, apiSourceId, apiCost, prov
   if (apiCost !== undefined) { fields.push(`api_cost = $${i++}`); values.push(apiCost); }
   if (providerTxId !== undefined) { fields.push(`provider_tx_id = $${i++}`); values.push(providerTxId); }
   if (deliveredCode !== undefined) { fields.push(`delivered_code = $${i++}`); values.push(deliveredCode); }
+  if (deliveredHash !== undefined) { fields.push(`delivered_hash = $${i++}`); values.push(deliveredHash); }
   if (fulfillmentMode !== undefined) { fields.push(`fulfillment_mode = $${i++}`); values.push(fulfillmentMode); }
   const res = await pool.query(`UPDATE orders SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, values);
   return res.rows[0] || null;
@@ -576,8 +577,14 @@ async function sendRatesToChannel(bot) {
 
   let message = `📊 **نرخ‌های امروز ووچینو⁰¹**\n\n💰 **نرخ دلار:** ${usdRate.toLocaleString('en-US')} تومان\n\n🛍 **محصولات قابل خرید:**\n`;
   for (const p of products) {
-    const price = p.price_type === 'usd' ? Number(p.min_amount) * rate : Number(p.min_amount);
-    message += `• ${p.name}: ${price.toLocaleString('en-US')} تومان\n`;
+    if (Number(p.hide_price)) {
+      message += `• ${p.name}: حداقل خرید ${Number(p.min_amount).toLocaleString('en-US')} ${p.price_type === 'usd' ? 'دلار' : 'تومان'}\n`;
+      continue;
+    }
+    const unitPrice = Number(p.unit_price || 0);
+    message += unitPrice > 0
+      ? `• ${p.name}: ${unitPrice.toLocaleString('en-US')} تومان\n`
+      : `• ${p.name}: قیمت هنوز تنظیم نشده\n`;
   }
 
   message += '\n🔄 **محصولات قابل فروش:**\n';
@@ -674,6 +681,9 @@ async function initDb() {
       name TEXT,
       min_amount NUMERIC,
       max_amount NUMERIC DEFAULT 0,
+      unit_price NUMERIC DEFAULT 0,
+      price_source TEXT DEFAULT 'manual',
+      hide_price INTEGER DEFAULT 0,
       price_type TEXT CHECK (price_type IN ('usd', 'toman', 'crypto')),
       commission_type TEXT DEFAULT 'none',
       commission_value NUMERIC DEFAULT 0,
@@ -859,6 +869,10 @@ async function initDb() {
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden INTEGER DEFAULT 0',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS min_amount NUMERIC DEFAULT 0',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+    // قیمت واحد محصولات خرید — دستی از پنل، یا خودکار وقتی صرافی API وصل و فعال باشد
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS unit_price NUMERIC DEFAULT 0',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS price_source TEXT DEFAULT \'manual\'',
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS hide_price INTEGER DEFAULT 0',
 
     // sell_products
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS sample_code TEXT',
@@ -889,6 +903,9 @@ async function initDb() {
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS receipt_file_id TEXT',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS target_user_id TEXT',
+    // کارمزد برداشت — از مبلغ درخواستی کسر و مابقی به کارت واریز می‌شود (موجودی کیف پول کامل کسر می‌شود)
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS commission NUMERIC DEFAULT 0',
+    'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS payout_amount NUMERIC DEFAULT 0',
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS tracking_code TEXT',
 
     // api_sources
@@ -967,6 +984,8 @@ async function initDb() {
         ('gameMultiplier', '2', NOW()),
         ('minPurchaseForGame', '0', NOW()),
         ('min_withdraw', '100000', NOW()),
+        ('withdraw_fee_type', 'none', NOW()),
+        ('withdraw_fee_value', '0', NOW()),
         ('vpn_enabled', 'true', NOW()),
         ('vpn_visible', 'true', NOW()),
         ('vpn_max_free_attempts', '1', NOW()),
@@ -1035,6 +1054,10 @@ async function initDb() {
       );
     } catch (e) {}
   }
+
+  // هات ووچر طبق تصمیم کسب‌وکاری «قیمت آنلاین» ندارد؛ فقط حداقل خرید نشان داده می‌شود
+  // (این خط روی نصب‌های قبلی هم اجرا می‌شود، نه فقط نصب تازه، چون ON CONFLICT بالا رکورد موجود را دست نمی‌زند)
+  try { await pool.query("UPDATE products SET hide_price = 1 WHERE key = 'hotvoucher'"); } catch (e) {}
 
   const sellProducts = [
     { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
