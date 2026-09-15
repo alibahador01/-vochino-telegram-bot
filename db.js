@@ -880,6 +880,7 @@ async function initDb() {
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS commission_value NUMERIC DEFAULT 0',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS price_source TEXT DEFAULT \'manual\'',
 
     // orders
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
