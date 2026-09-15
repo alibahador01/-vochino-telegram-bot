@@ -10,13 +10,13 @@ module.exports = function registerHochinoHandlers(bot) {
   // ============ تابع کمکی: نمایش منوی هوچینو ============
   async function showHochinoMenu(ctx) {
     const analyzeBtn = await premiumButton(
-      'تحلیل AI هوچینو⁰¹',
+      '⚽️ تحلیل AI هوچینو⁰¹',
       'hochino_analyze',
       '⚽️'
     );
 
     const tableBtn = await premiumButton(
-      'جدول AI هوچینو⁰¹',
+      '📆 جدول AI هوچینو⁰¹',
       'hochino_table',
       '📆'
     );
@@ -66,7 +66,7 @@ module.exports = function registerHochinoHandlers(bot) {
     try { await ctx.answerCbQuery(); } catch (e) {}
 
     const backBtn = await premiumButton(
-      'بازگشت',
+      '🔙 بازگشت',
       'hochino_back',
       '🔙'
     );
@@ -87,7 +87,7 @@ module.exports = function registerHochinoHandlers(bot) {
     try { await ctx.answerCbQuery(); } catch (e) {}
 
     const backBtn = await premiumButton(
-      'بازگشت',
+      '🔙 بازگشت',
       'hochino_back',
       '🔙'
     );
