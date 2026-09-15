@@ -37,6 +37,92 @@ async function isAutoExecutionEnabled() {
   return (await getSetting('api_execution_mode', 'manual')) === 'auto';
 }
 
+// ==================== قیمت واحد محصول (دستی ← خودکار وقتی API وصل شد) ====================
+// منطق: تا وقتی هیچ صرافی به این محصول وصل نیست یا حالت اجرا «دستی»ست،
+// قیمتی که ادمین در پنل ثبت کرده (products.unit_price) همان چیزی‌ست که نمایش داده می‌شود.
+// به محض این‌که ادمین صرافی را برای همین محصول (product_api_links) وصل/فعال کند
+// و حالت اجرا را روی «خودکار» بگذارد، این تابع خودش سراغ صرافی می‌رود، آخرین
+// قیمت را می‌گیرد و جایگزین قیمت دستی می‌کند — بدون این‌که لازم باشد کسی دست به کد بزند.
+// اگر صرافی جواب ندهد/خطا بدهد، به‌صورت خودکار به قیمت دستی برمی‌گردد (fallback امن).
+const PRICE_CACHE_TTL_MS = 60 * 1000; // برای جلوگیری از بمباران درخواست به صرافی سر هر پیام کاربر
+const priceCache = new Map(); // key: `${productType}:${productKey}` -> { price, source, ts }
+
+async function fetchProviderPrice(apiSource, productType, productKey) {
+  if (!apiSource || !apiSource.base_url) {
+    return { success: false, error: 'صرافی بدون base_url است.' };
+  }
+  const endpointMap = {
+    voucher: '/api/v1/voucher',
+    crypto: '/api/v1/crypto',
+    star: '/api/v1/stars',
+    gift: '/api/v1/gift',
+    filter: '/api/v1/vpn',
+    multi: '/api/v1/order'
+  };
+  const path = endpointMap[apiSource.type] || '/api/v1/order';
+  const url = apiSource.base_url.replace(/\/+$/, '') + path;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiSource.api_key || '',
+        'X-API-SECRET': apiSource.secret_key || ''
+      },
+      body: JSON.stringify({ action: 'price', product: productKey, type: productType }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success === false) {
+      return { success: false, error: (data && data.message) || `پاسخ نامعتبر از صرافی ${apiSource.name} (HTTP ${res.status})` };
+    }
+    const price = Number(data.price ?? data.unit_price ?? data.rate);
+    if (!price || price <= 0) {
+      return { success: false, error: `صرافی ${apiSource.name} قیمت معتبری برنگرداند.` };
+    }
+    return { success: true, price };
+  } catch (err) {
+    return { success: false, error: 'خطا در دریافت قیمت از صرافی ' + apiSource.name + ': ' + err.message };
+  }
+}
+
+// خروجی: { price, source: 'api'|'manual'|'none', apiSourceName? }
+// product باید شامل key و unit_price (قیمت دستی فعلی از پنل) باشد.
+async function getEffectiveUnitPrice(product) {
+  const manualPrice = Number(product.unit_price || 0);
+
+  if (!(await isAutoExecutionEnabled())) {
+    return { price: manualPrice, source: 'manual' };
+  }
+
+  const chain = await getApiChainForProduct('buy', product.key);
+  if (chain.length === 0) {
+    return { price: manualPrice, source: 'manual' };
+  }
+
+  const cacheKey = `buy:${product.key}`;
+  const cached = priceCache.get(cacheKey);
+  if (cached && (Date.now() - cached.ts) < PRICE_CACHE_TTL_MS) {
+    return { price: cached.price, source: cached.source, apiSourceName: cached.apiSourceName };
+  }
+
+  for (const apiSource of chain) {
+    const result = await fetchProviderPrice(apiSource, 'buy', product.key);
+    if (result.success) {
+      priceCache.set(cacheKey, { price: result.price, source: 'api', apiSourceName: apiSource.name, ts: Date.now() });
+      // برای دیده‌شدن در پنل ادمین که آخرین قیمت از کجا آمده (صرفاً اطلاع‌رسانی، تصمیم منطقی نیست)
+      try { await pool.query('UPDATE products SET price_source = $1 WHERE key = $2', ['api', product.key]); } catch (e) {}
+      return { price: result.price, source: 'api', apiSourceName: apiSource.name };
+    }
+    console.log(`❌ دریافت قیمت از صرافی ${apiSource.name} برای ${product.key} شکست خورد: ${result.error}`);
+  }
+
+  // همه‌ی صرافی‌ها شکست خوردند → برگشت امن به قیمت دستی، بدون توقف کار ربات
+  try { await pool.query('UPDATE products SET price_source = $1 WHERE key = $2', ['manual', product.key]); } catch (e) {}
+  return { price: manualPrice, source: 'manual' };
+}
+
 // ==================== فراخوانی عمومی صرافی ====================
 // این تابع فقط زمانی واقعاً به بیرون درخواست می‌زند که apiSource.base_url ست شده باشد
 // و حالت اجرا "خودکار" باشد. ساختار درخواست/پاسخ بر اساس apiSource.type انتخاب می‌شود.
@@ -91,6 +177,7 @@ async function callProviderApi(apiSource, action, payload) {
       providerTxId: data.tx_id || data.transaction_id || null,
       apiCost: data.cost !== undefined ? Number(data.cost) : payload.amount,
       deliveredCode: data.code || data.voucher_code || null,
+      deliveredHash: data.hash || data.voucher_hash || null,
       raw: data
     };
   } catch (err) {
@@ -101,6 +188,11 @@ async function callProviderApi(apiSource, action, payload) {
 // ==================== اجرای خودکار سفارش خرید ====================
 // فراخوانی می‌شود بعد از ثبت سفارش در orders. اگر حالت دستی باشد یا اتصالی
 // وجود نداشته باشد، کاری انجام نمی‌دهد و سفارش دقیقاً مثل قبل در انتظار تحویل دستی می‌ماند.
+// ⚠️ نکته‌ی حیاتی (باگی که قبلاً وجود داشت و رفع شد): پارامتر amount باید «مبلغ پایه»
+// باشد — یعنی همان چیزی که کاربر وارد کرده، بدون کارمزد. اگر اینجا finalAmount
+// (مبلغ پایه + کارمزد) پاس داده شود، کارمزد/سود ما هم به صرافی داده می‌شود و
+// عملاً سودی از این تراکنش نمی‌ماند. کارمزد فقط باید داخل خودمان (تفاوت بین چیزی
+// که از کاربر گرفتیم و چیزی که به صرافی دادیم) باقی بماند، هرگز به payload صرافی اضافه نشود.
 async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trackingCode }, bot) {
   if (!(await isAutoExecutionEnabled())) return { executed: false, reason: 'manual_mode' };
 
@@ -116,6 +208,7 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
         apiCost: result.apiCost,
         providerTxId: result.providerTxId,
         deliveredCode: result.deliveredCode,
+        deliveredHash: result.deliveredHash,
         fulfillmentMode: 'auto'
       });
       try {
@@ -125,7 +218,8 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
         try {
           await bot.telegram.sendMessage(telegramId,
             `🎉 سفارش شما به‌صورت خودکار انجام شد!\n🆔 ${trackingCode}` +
-            (result.deliveredCode ? `\n📦 کد:\n${result.deliveredCode}` : '')
+            (result.deliveredCode ? `\n📦 کد ووچر:\n${result.deliveredCode}` : '') +
+            (result.deliveredHash ? `\n🔐 هش ووچر:\n${result.deliveredHash}` : '')
           );
         } catch (e) {}
       }
@@ -182,6 +276,8 @@ module.exports = {
   calculateSellPayout,
   isAutoExecutionEnabled,
   callProviderApi,
+  fetchProviderPrice,
+  getEffectiveUnitPrice,
   tryAutoFulfillBuy,
   tryAutoFulfillSell
 };
