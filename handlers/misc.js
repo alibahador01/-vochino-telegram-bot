@@ -60,26 +60,8 @@ module.exports = function registerMiscHandlers(bot) {
     return gameHandler.showBonusMenu(ctx);
   });
 
-  // 🐽 هوچینو AI برتر⁰¹ — منوی اصلی هوچینو (ماژول مستقل)
-bot.action('menu_hochino_main', async (ctx) => {
-  ctx.answerCbQuery();
-  try { await ctx.deleteMessage(); } catch (e) {}
-  const text = [
-    '🐽 <b>هوچینو AI برتر⁰¹</b>',
-    '',
-    'یکی از گزینه‌های زیر رو انتخاب کن:'
-  ].join('\n');
-  return ctx.reply(text, {
-    parse_mode: 'HTML',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '💬 گفتگو AI هوچینو⁰¹', callback_data: 'hochino_chat' }],
-        [{ text: '⚽️ تحلیل AI هوچینو⁰¹', callback_data: 'hochino_analyze' }],
-        [{ text: '📆 جدول AI هوچینو⁰¹',  callback_data: 'hochino_table' }]
-      ]
-    }
-  });
-});
+  // ⚠️ توجه: هندلر menu_hochino_main در فایل hochino_module/index.js تعریف شده است
+  // و از این فایل حذف شد تا از نمایش تکراری منو جلوگیری شود.
 
   bot.action('menu_support', async (ctx) => {
     ctx.answerCbQuery();
@@ -87,4 +69,3 @@ bot.action('menu_hochino_main', async (ctx) => {
     return require('./aiSupport').showSupportMenu(ctx);
   });
 };
-
