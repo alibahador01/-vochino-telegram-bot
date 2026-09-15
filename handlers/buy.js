@@ -1,9 +1,9 @@
 // handlers/buy.js
 const texts = require('../texts');
 const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
-const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins } = require('../db');
+const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins, getUsdRate } = require('../db');
 const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
-const { calculateBuyFinal, tryAutoFulfillBuy } = require('../exchangeEngine');
+const { calculateBuyFinal, tryAutoFulfillBuy, getEffectiveUnitPrice } = require('../exchangeEngine');
 const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
 
@@ -54,19 +54,46 @@ module.exports = function registerBuyHandlers(bot) {
       return startVerification(ctx, 'buy', key);
   }
 
+    // حداقل خرید ممکن است در پنل به دلار ثبت شده باشد (price_type='usd')؛ چون کاربر همیشه
+    // مبلغ را به تومان وارد می‌کند، اینجا یک‌بار به تومان تبدیل می‌شود تا مقایسه‌ی بعدی درست باشد
+    // (قبلاً این تبدیل انجام نمی‌شد و برای محصولات دلاری عملاً هیچ حداقلی اعمال نمی‌شد).
+    const usdRate = await getUsdRate();
+    const minAmountToman = product.price_type === 'usd'
+      ? Number(product.min_amount || 0) * usdRate
+      : Number(product.min_amount || 0);
+
     sessions[ctx.from.id] = {
       flow: 'buy',
       step: 'waiting_amount',
       data: {
         productType: key,
         productName: product.name,
-        minAmount: Number(product.min_amount || 0),
+        minAmount: minAmountToman,
         maxAmount: Number(product.max_amount || 0)
       }
     };
 
+    const minLabel = product.price_type === 'usd'
+      ? `${Number(product.min_amount || 0).toLocaleString('en-US')} دلار (حدود ${minAmountToman.toLocaleString('en-US')} تومان)`
+      : `${minAmountToman.toLocaleString('en-US')} تومان`;
+
+    // خط «قیمت واحد» فقط برای محصولاتی نمایش داده می‌شود که hide_price نخورده‌اند (مثلاً هات ووچر ندارد)
+    let priceLine = '';
+    if (!Number(product.hide_price)) {
+      const { price } = await getEffectiveUnitPrice(product);
+      priceLine = price > 0
+        ? `💵 قیمت واحد: ${price.toLocaleString('en-US')} تومان\n\n`
+        : `💵 قیمت واحد: هنوز از پنل تنظیم نشده\n\n`;
+    }
+
     // لیست محصولات حذف نمی‌شود؛ فقط سوال مبلغ پرسیده می‌شود (بدون دکمه بازگشت)
-    return ctx.reply(`💵 مبلغ خرید ${product.name} را به تومان وارد کنید:\n(حداقل ${Number(product.min_amount || 0).toLocaleString('en-US')} تومان)`);
+    return ctx.reply(
+      `✨ Vochino⁰¹\n` +
+      `💠 خرید ${product.name}\n\n` +
+      priceLine +
+      `❗️ حداقل خرید: ${minLabel}\n\n` +
+      `📥 لطفاً مبلغ خرید را به تومان وارد کنید:`
+    );
   });
 
   bot.on('text', async (ctx, next) => {
@@ -186,7 +213,7 @@ module.exports = function registerBuyHandlers(bot) {
     // در غیر این صورت (پیش‌فرض فعلی) هیچ کاری نمی‌کند و سفارش دقیقاً مثل قبل دستی می‌ماند.
     let autoResult = { executed: false };
     try {
-      autoResult = await tryAutoFulfillBuy({ orderId, telegramId: ctx.from.id, productKey, amount: finalAmount, trackingCode }, bot);
+      autoResult = await tryAutoFulfillBuy({ orderId, telegramId: ctx.from.id, productKey, amount, trackingCode }, bot);
     } catch (e) { console.error('خطا در اجرای خودکار سفارش خرید:', e.message); }
 
     if (autoResult.executed) return; // کاربر و لاگ قبلاً داخل exchangeEngine مطلع شدند
