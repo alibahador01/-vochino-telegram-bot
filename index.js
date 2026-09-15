@@ -156,7 +156,7 @@ if (process.env.NODE_ENV !== 'development') {
   }, 14 * 60 * 1000);
 }
 
-const const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
 // ============ Custom Emoji خودکار روی همه پیام‌ها ============
