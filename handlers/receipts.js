@@ -7,7 +7,7 @@ const HEADER =
   '👑 ووچینو⁰¹\n' +
   '╰━━━━━━━ ❖ ━━━━━━━╯\n';
 
-const SEP_MONEY = '💲➖💲💲➖💲💲➖';
+const SEP_MONEY = '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️';
 const SEP_LINE = '━━━━━━━━━━━━━━━━';
 
 function faNum(n) {
@@ -46,7 +46,7 @@ function buildBuyReceipt(o) {
       `💳 کارت پرداخت: ${maskCard(o.card)}\n` +
       SEP_LINE + '\n';
     if (o.voucherCode || o.voucherHash) {
-      msg += '🎟️ اطلاعات ووچر 💎\n';
+      msg += '💱 اطلاعات ووچر 💎\n';
       if (o.voucherCode) msg += `💎 کد ووچر:\n\`${o.voucherCode}\`\n`;
       if (o.voucherHash) msg += `🔐 هش ووچر:\n\`${o.voucherHash}\`\n`;
       msg += SEP_LINE + '\n';
@@ -98,9 +98,9 @@ function buildSellReceipt(o) {
       `فاکتور فروش 📋\n` +
       `🛍️ نوع تراکنش: ${name}\n` +
       `💰 مبلغ فروش: ${faNum(o.amount)} تومان\n` +
-      `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
+      `🔻 کارمزد: ${faNum(o.commission)} تومان\n` +
       `💵 مبلغ دریافتی: ${faNum(o.received)} تومان\n` +
-      `🟢 وضعیت: موفق | فروش و واریز انجام شد\n` +
+      `💳 وضعیت: موفق | فروش و واریز انجام شد\n` +
       SEP_MONEY + '\n' +
       (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       `💳 کارت بانکی: ${maskCard(o.card)}\n` +
@@ -118,14 +118,14 @@ function buildSellReceipt(o) {
       HEADER +
       `فاکتور فروش 📋\n` +
       `🛍️ نوع تراکنش: ${name}\n` +
-      `💰 مبلغ فروش: ${faNum(o.amount)} تومان\n` +
+      `💱 مبلغ فروش: ${faNum(o.amount)} تومان\n` +
       `💳 کارمزد: ${faNum(o.commission)} تومان\n` +
       `🟠 وضعیت: در انتظار | در حال بررسی\n` +
       (o.tracking ? `🔖 کد پیگیری سفارش: ${o.tracking}\n` : '') +
       SEP_LINE + '\n' +
       `⏳ پس از تأیید توسط پشتیبانی، مبلغ به کیف پول شما اضافه می‌شود.\n` +
       SEP_LINE + '\n' +
-      `🕐 تاریخ و ساعت: ${formatDateTime(o.createdAt)}`
+      `⌚ تاریخ و ساعت: ${formatDateTime(o.createdAt)}`
     );
   }
   return (
