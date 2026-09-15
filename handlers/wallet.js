@@ -64,7 +64,7 @@ module.exports = function registerWalletHandlers(bot) {
       [{ text: '💳 افزودن کارت جدید', callback_data: 'wallet_add_card' }],
       [{ text: '♻️ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
       [{ text: '🪎 کسب درآمد', callback_data: 'wallet_referral' }],
-      [{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]
+      [{ text: '🟡 بازگشت', callback_data: 'back_main_menu' }]
     ];
 
     ctx.reply(profileText, {
@@ -116,7 +116,7 @@ module.exports = function registerWalletHandlers(bot) {
     if (st.label === 'رد شده') firstLine = '🔴 رد شده';
     else if (t.kind === 'buy') firstLine = `🟢 خرید ${t.productName || ''}`.trim();
     else if (t.kind === 'sell') firstLine = `🔵 فروش ${t.productName || ''}`.trim();
-    else if (t.kind === 'withdraw') firstLine = '🟠 برداشت';
+    else if (t.kind === 'withdraw') firstLine = '🟣 برداشت';
     else if (t.kind === 'deposit') firstLine = '🟡 شارژ';
     else firstLine = `⚪️ ${t.kind}`;
     return `${firstLine} | ${amount} تومان`;
@@ -135,7 +135,7 @@ module.exports = function registerWalletHandlers(bot) {
 
     const recent = list.slice(0, 10);
     const buttons = recent.map(t => [{ text: buttonLabel(t), callback_data: `tx_detail:${t.kind}:${t.id}` }]);
-    buttons.push([{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]);
+    buttons.push([{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]);
 
     ctx.reply('🧾 **گزارش تراکنش‌های شما**\n\nبرای مشاهده جزئیات، روی هر تراکنش بزنید:', {
       parse_mode: 'Markdown',
@@ -232,7 +232,7 @@ module.exports = function registerWalletHandlers(bot) {
           [{ text: '💳 کارت به کارت', callback_data: 'deposit_card' }],
           [{ text: '🪙 ترون (تتر)', callback_data: 'deposit_crypto' }],
           [{ text: '🌐 درگاه پرداخت', callback_data: 'deposit_gateway' }],
-          [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
+          [{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]
         ]
       }
     });
@@ -277,14 +277,14 @@ module.exports = function registerWalletHandlers(bot) {
   bot.action('deposit_crypto', async (ctx) => {
     ctx.answerCbQuery();
     return ctx.reply('🪙 بخش ارز دیجیتال به‌زودی فعال می‌شود.', {
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'wallet_deposit' }]] }
+      reply_markup: { inline_keyboard: [[{ text: '🟡 بازگشت', callback_data: 'wallet_deposit' }]] }
     });
   });
 
   bot.action('deposit_gateway', async (ctx) => {
     ctx.answerCbQuery();
     return ctx.reply('🌐 درگاه پرداخت به‌زودی فعال می‌شود.', {
-      reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'wallet_deposit' }]] }
+      reply_markup: { inline_keyboard: [[{ text: '🟡 بازگشت', callback_data: 'wallet_deposit' }]] }
     });
   });
 
