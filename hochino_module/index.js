@@ -5,11 +5,8 @@ const { premiumButton } = require('./emoji_helper');
 module.exports = function registerHochinoHandlers(bot) {
   console.log('🐽 هوچینو⁰¹: بارگذاری ماژول...');
 
-  // ============ منوی اصلی هوچینو ============
-  bot.action('menu_hochino_main', async (ctx) => {
-    try { await ctx.answerCbQuery(); } catch (e) {}
-    try { await ctx.deleteMessage(); } catch (e) {}
-
+  // ============ منوی اصلی هوچینو (فقط تحلیل + جدول) ============
+  async function showHochinoMenu(ctx) {
     const analyzeBtn = await premiumButton('تحلیل AI هوچینو⁰¹', 'hochino_analyze', '⚽️');
     const tableBtn = await premiumButton('جدول AI هوچینو⁰¹', 'hochino_table', '📆');
 
@@ -22,9 +19,15 @@ module.exports = function registerHochinoHandlers(bot) {
         ]
       }
     });
+  }
+
+  bot.action('menu_hochino_main', async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
+    await showHochinoMenu(ctx);
   });
 
-  // ============ دکمه مستقیم گفتگو ============
+  // ============ دکمه مستقیم گفتگو (فقط از منوی اصلی) ============
   bot.action('menu_hochino_chat', async (ctx) => {
     try { await ctx.answerCbQuery(); } catch (e) {}
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -57,23 +60,11 @@ module.exports = function registerHochinoHandlers(bot) {
     });
   });
 
-  // ============ بازگشت ============
+  // ============ بازگشت به منوی هوچینو ============
   bot.action('hochino_back', async (ctx) => {
     try { await ctx.answerCbQuery(); } catch (e) {}
     try { await ctx.deleteMessage(); } catch (e) {}
-
-    const analyzeBtn = await premiumButton('تحلیل AI هوچینو⁰¹', 'hochino_analyze', '⚽️');
-    const tableBtn = await premiumButton('جدول AI هوچینو⁰¹', 'hochino_table', '📆');
-
-    await ctx.reply('🐽 <b>هوچینو AI برتر⁰¹</b>\n\nیکی از گزینه‌های زیر رو انتخاب کن:', {
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [
-          [analyzeBtn],
-          [tableBtn]
-        ]
-      }
-    });
+    await showHochinoMenu(ctx);
   });
 
   console.log('✅ هوچینو⁰¹: ماژول آماده است');
