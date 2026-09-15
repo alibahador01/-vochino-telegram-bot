@@ -56,6 +56,13 @@ module.exports = function registerSellHandlers(bot) {
       );
     }
 
+    const minAmount = Number(product.min_amount || 0);
+    // حداقل فروش در دیتابیس ذخیره می‌شد ولی هیچ‌جا چک نمی‌شد؛ اینجا واقعاً اعمال می‌شود.
+    // چون فروش بر اساس «قیمت واحد ثابت» است نه مبلغ ورودی کاربر، این چک روی خودِ قیمت واحد محصول انجام می‌شود.
+    if (minAmount > 0 && Number(product.unit_price || 0) < minAmount) {
+      return ctx.reply(`❌ فروش این محصول فعلاً غیرفعال است (قیمت واحد کمتر از حداقل تعیین‌شده در پنل است).`);
+    }
+
     sessions[ctx.from.id] = {
       flow: 'sell',
       step: 'waiting_code',
@@ -67,10 +74,14 @@ module.exports = function registerSellHandlers(bot) {
     };
 
     // کد نمونه برای مشتری فقط به‌صورت متن ثابت (غیرقابل کپی) نمایش داده می‌شود
-    let msg = `🎟 کد ووچر ${product.name} خود را وارد کنید تا بررسی شود:`;
+    let msg =
+      `✨ Vochino⁰¹\n` +
+      `💎 فروش ${product.name}\n\n` +
+      `💵 قیمت واحد: ${Number(product.unit_price || 0).toLocaleString('en-US')} تومان\n\n`;
     if (product.sample_code) {
-      msg += `\n\n📎 نمونه فرمت قابل قبول (ثابت):\n${product.sample_code}`;
+      msg += `🔐 نمونه کد: ${product.sample_code}\n\n`;
     }
+    msg += `📥 لطفاً کد ووچر خود را وارد کنید:`;
     // بدون parse_mode تا کد نمونه قابل کپی نباشد؛ لیست محصولات هم حذف نمی‌شود
     return ctx.reply(msg);
   });
