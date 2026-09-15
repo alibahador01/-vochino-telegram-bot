@@ -715,7 +715,7 @@ module.exports = function registerAdminHandlers(bot) {
     ctx.reply(`⚙️ **کارمزد برای ${product.name}**\n\nلطفاً نوع کارمزد را انتخاب کنید:`, {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📊 درصدی', callback_data: 'comm_type_percentage' }],
+          [{ text: '📊 درصد', callback_data: 'comm_type_percentage' }],
           [{ text: '💵 مبلغ ثابت', callback_data: 'comm_type_fixed' }],
           [{ text: '❌ بدون کارمزد', callback_data: 'comm_type_none' }]
         ]
@@ -775,7 +775,7 @@ bot.action('admin_products_sell', async (ctx) => {
       msg += '❌ هیچ محصولی تعریف نشده.';
     } else {
       products.forEach(p => {
-        msg += `🔹 ${p.name} (${p.key})\n   قیمت واحد: ${Number(p.unit_price).toLocaleString()} تومان\n   کارمزد: ${p.commission_type === 'none' ? 'ندارد' : p.commission_value + (p.commission_type === 'percentage' ? '%' : ' تومان')}\n   وضعیت: ${p.active ? '✅ فعال' : '⛔ غیرفعال'}\n\n`;
+        msg += `🔹 ${p.name} (${p.key})\n   قیمت واحد: ${Number(p.unit_price).toLocaleString()} تومان (${p.price_source === 'api' ? 'زنده از API' : 'دستی'})\n   کارمزد: ${p.commission_type === 'none' ? 'ندارد' : p.commission_value + (p.commission_type === 'percentage' ? '%' : ' تومان')}\n   وضعیت: ${p.active ? '✅ فعال' : '⛔ غیرفعال'}\n\n`;
       });
     }
 
@@ -783,6 +783,7 @@ bot.action('admin_products_sell', async (ctx) => {
       reply_markup: {
         inline_keyboard: [
           [{ text: '➕ افزودن محصول فروش', callback_data: 'admin_add_product_sell' }],
+          [{ text: '💵 تنظیم قیمت واحد', callback_data: 'admin_price_product_sell' }],
           [{ text: '⚙️ تنظیم کارمزد فروش', callback_data: 'admin_commission_product_sell' }],
           [{ text: '🔄 غیرفعال/فعال کردن', callback_data: 'admin_toggle_product_sell' }],
           [{ text: '📋 لیست کامل', callback_data: 'admin_list_products_sell' }],
@@ -790,6 +791,28 @@ bot.action('admin_products_sell', async (ctx) => {
         ]
       }
     });
+  });
+
+  bot.action('admin_price_product_sell', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    const products = await getSellProducts(false);
+    if (products.length === 0) {
+      return ctx.reply('❌ هیچ محصولی برای تنظیم قیمت وجود ندارد.', { reply_markup: { inline_keyboard: [[{ text: '🔙 بازگشت', callback_data: 'admin_products_sell' }]] } });
+    }
+    const buttons = products.map(p => [{ text: `${p.name} — فعلی: ${Number(p.unit_price || 0).toLocaleString()} تومان`, callback_data: 'admin_price_sell_' + p.key }]);
+    buttons.push([{ text: '🔙 بازگشت', callback_data: 'admin_products_sell' }]);
+    ctx.reply('💵 **تنظیم قیمت واحد فروش**\n\n⚠️ این قیمت فقط تا وقتی صرافی API برای این محصول (سمت فروش) وصل و «حالت خودکار» فعال نشده، استفاده می‌شود. بعد از اتصال API، قیمت به‌صورت خودکار از صرافی گرفته می‌شود و این عدد فقط پشتیبان (fallback) می‌ماند.\n\nمحصول مورد نظر را انتخاب کنید:', { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+  });
+
+  bot.action(/^admin_price_sell_(.+)/, async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const key = ctx.match[1];
+    const product = await getSellProductByKey(key);
+    if (!product) return ctx.answerCbQuery('محصول یافت نشد');
+    ctx.answerCbQuery(); try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'admin_set_price_sell', step: 'waiting_value', lang: 'fa', data: { productKey: key, productName: product.name } };
+    ctx.reply(`💵 قیمت واحد جدید فروش برای «${product.name}» را به تومان وارد کنید:`);
   });
 
   bot.action('admin_add_product_sell', async (ctx) => {
@@ -1290,7 +1313,7 @@ bot.action('admin_products_sell', async (ctx) => {
       }
       const btns = [
         [{ text: '✅ تایید', callback_data: 'admin_approve_' + w.id }, { text: '❌ رد', callback_data: 'admin_reject_' + w.id }],
-        [{ text: '✉️ رد با دلیل', callback_data: 'admin_reject_reason_' + w.id }]
+        [{ text: '💬 رد با دلیل', callback_data: 'admin_reject_reason_' + w.id }]
       ];
       if (w.receipt_file_id) ctx.replyWithPhoto(w.receipt_file_id, { caption: msg, reply_markup: { inline_keyboard: btns } });
       else ctx.reply(msg, { reply_markup: { inline_keyboard: btns } });
@@ -1470,6 +1493,16 @@ bot.action('admin_products_sell', async (ctx) => {
       await pool.query("UPDATE products SET unit_price=$1, price_source='manual' WHERE key=$2", [val, session.data.productKey]);
       delete sessions[ctx.from.id];
       ctx.reply(`✅ قیمت واحد «${session.data.productName}» روی ${val.toLocaleString()} تومان تنظیم شد.\n\nتا وقتی API وصل نشده، همین قیمت به کاربران نمایش داده می‌شود.`);
+      return;
+    }
+
+    // تنظیم دستی قیمت واحد فروش
+    if (session.flow === 'admin_set_price_sell' && session.step === 'waiting_value') {
+      const val = parseFloat(ctx.message.text.replace(/[^0-9.]/g, ''));
+      if (isNaN(val) || val < 0) return ctx.reply('❌ عدد معتبر وارد کنید. دوباره وارد کنید:');
+      await pool.query("UPDATE sell_products SET unit_price=$1, price_source='manual' WHERE key=$2", [val, session.data.productKey]);
+      delete sessions[ctx.from.id];
+      ctx.reply(`✅ قیمت واحد فروش «${session.data.productName}» روی ${val.toLocaleString()} تومان تنظیم شد.\n\nتا وقتی API وصل نشده، همین قیمت مبنای محاسبه‌ی فروش کاربران است.`);
       return;
     }
 
@@ -2004,43 +2037,4 @@ bot.action('admin_products_sell', async (ctx) => {
     s.data.priceType = 'usd'; s.step = 'waiting_min_amount'; ctx.answerCbQuery(); ctx.reply('حداقل مبلغ (دلار):');
   });
   bot.action('buy_price_toman', async (ctx) => {
-    const s = sessions[ctx.from.id]; if (!s || s.flow !== 'admin_add_product_buy') return;
-    s.data.priceType = 'toman'; s.step = 'waiting_min_amount'; ctx.answerCbQuery(); ctx.reply('حداقل مبلغ (تومان):');
-  });
-  bot.action(/^admin_link_api_(\d+)/, async (ctx) => {
-    const s = sessions[ctx.from.id]; if (!s || s.flow !== 'admin_add_product_link') return;
-    const apiId = ctx.match[1];
-    try {
-      await addProductApiLink(s.data.productType, s.data.productKey, apiId, 1);
-      delete sessions[ctx.from.id];
-      ctx.answerCbQuery(); ctx.reply('✅ اتصال برقرار شد.');
-    } catch (err) { ctx.reply('❌ خطا.'); }
-  });
-  bot.action(/^comm_type_(.+)/, async (ctx) => {
-    const s = sessions[ctx.from.id]; if (!s || s.flow !== 'admin_commission_product_buy') return;
-    const type = ctx.match[1];
-    s.data.commType = type;
-    if (type === 'none') {
-      await pool.query('UPDATE products SET commission_type=$1, commission_value=0 WHERE key=$2', ['none', s.data.productKey]);
-      delete sessions[ctx.from.id];
-      ctx.answerCbQuery(); ctx.reply('✅ کارمزد حذف شد.');
-    } else {
-      s.step = 'waiting_value';
-      ctx.answerCbQuery(); ctx.reply('مقدار کارمزد را وارد کنید:');
-    }
-  });
-  bot.action(/^comm_sell_type_(.+)/, async (ctx) => {
-    const s = sessions[ctx.from.id]; if (!s || s.flow !== 'admin_commission_product_sell') return;
-    const type = ctx.match[1];
-    s.data.commType = type;
-    if (type === 'none') {
-      await pool.query('UPDATE sell_products SET commission_type=$1, commission_value=0 WHERE key=$2', ['none', s.data.productKey]);
-      delete sessions[ctx.from.id];
-      ctx.answerCbQuery(); ctx.reply('✅ کارمزد حذف شد.');
-    } else {
-      s.step = 'waiting_value';
-      ctx.answerCbQuery(); ctx.reply('مقدار کارمزد را وارد کنید:');
-    }
-  });
-
-}; // پایان تابع registerAdminHandlers
+    const s = sessions[ctx.from.id]; if (!s || 
