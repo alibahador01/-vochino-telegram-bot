@@ -160,31 +160,6 @@ if (process.env.NODE_ENV !== 'development') {
       console.log('[Dev Ping] Status:', res.statusCode);
     }).on('error', () => {});
   }, 14 * 60 * 1000);
-}
-
-// ==================== ربات تلگرام ====================
-const bot = new Telegraf(process.env.BOT_TOKEN);
-bot.use(session());
-
-// ============================================================
-// 🎨 میان‌افزار خودکار Custom Emoji
-// ------------------------------------------------------------
-// این میان‌افزار روی همه‌ی پیام‌های خروجی ربات اعمال می‌شه.
-// هر ایموجی معمولی که از پنل ادمین با ایموجی پرمیوم نگاشت
-// شده باشه، خودکار به فرمت tg-emoji تبدیل می‌شه.
-//
-// ⚠️ این بخش کاملاً مستقل از کدهای صرافی است و به هیچ فایل
-// دیگری دست نمی‌زند. تمام خطاها به صورت امن گرفته می‌شن تا
-// ربات هرگز به خاطر این middleware کرش نکند.
-// ============================================================
-let premiumize = null;
-try {
-  const emojiHelper = require('./hochino_module/emoji_helper');
-  premiumize = emojiHelper.premiumize;
-} catch (e) {
-  console.log('⚠️ emoji_helper لود نشد:', e.message);
-}
-
 if (typeof premiumize === 'function') {
   bot.use(async (ctx, next) => {
     const origReply = ctx.reply.bind(ctx);
