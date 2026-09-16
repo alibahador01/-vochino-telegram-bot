@@ -2,24 +2,20 @@
 // 🐽 ماژول هوچینو⁰¹ — نسخه فاز ۰ (فقط ساختار)
 // این ماژول کاملاً مستقل از کدهای صرافی ووچینو⁰¹ است
 
-const { premiumButton } = require('./emoji_helper');
-
 module.exports = function registerHochinoHandlers(bot) {
   console.log('🐽 هوچینو⁰¹: بارگذاری ماژول...');
 
   // ============ تابع کمکی: نمایش منوی هوچینو ============
   async function showHochinoMenu(ctx) {
-    const analyzeBtn = await premiumButton(
-      '⚽️ تحلیل AI هوچینو⁰¹',
-      'hochino_analyze',
-      '⚽️'
-    );
+    const analyzeBtn = {
+      text: '⚽️ تحلیل AI هوچینو⁰¹',
+      callback_data: 'hochino_analyze'
+    };
 
-    const tableBtn = await premiumButton(
-      '📆 جدول AI هوچینو⁰¹',
-      'hochino_table',
-      '📆'
-    );
+    const tableBtn = {
+      text: '📆 جدول AI هوچینو⁰¹',
+      callback_data: 'hochino_table'
+    };
 
     await ctx.reply(
       '🐽 <b>هوچینو AI برتر⁰¹</b>\n\nیکی از گزینه‌های زیر رو انتخاب کن:',
@@ -65,11 +61,10 @@ module.exports = function registerHochinoHandlers(bot) {
   bot.action('hochino_analyze', async (ctx) => {
     try { await ctx.answerCbQuery(); } catch (e) {}
 
-    const backBtn = await premiumButton(
-      '🔙 بازگشت',
-      'hochino_back',
-      '🔙'
-    );
+    const backBtn = {
+      text: '🔙 بازگشت',
+      callback_data: 'hochino_back'
+    };
 
     await ctx.reply(
       '⚽️ <b>تحلیل AI هوچینو⁰¹</b>\n\n🚧 این بخش به‌زودی فعال می‌شود...',
@@ -86,11 +81,10 @@ module.exports = function registerHochinoHandlers(bot) {
   bot.action('hochino_table', async (ctx) => {
     try { await ctx.answerCbQuery(); } catch (e) {}
 
-    const backBtn = await premiumButton(
-      '🔙 بازگشت',
-      'hochino_back',
-      '🔙'
-    );
+    const backBtn = {
+      text: '🔙 بازگشت',
+      callback_data: 'hochino_back'
+    };
 
     await ctx.reply(
       '📆 <b>جدول AI هوچینو⁰¹</b>\n\n🚧 این بخش به‌زودی فعال می‌شود...',
