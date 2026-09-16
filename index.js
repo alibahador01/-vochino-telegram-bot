@@ -1,4 +1,4 @@
-// index.js
+// index.js — خط ۱
 const { Telegraf, session } = require('telegraf');
 const express = require('express');
 const https = require('https');
@@ -160,69 +160,11 @@ if (process.env.NODE_ENV !== 'development') {
       console.log('[Dev Ping] Status:', res.statusCode);
     }).on('error', () => {});
   }, 14 * 60 * 1000);
-if (typeof premiumize === 'function') {
-  bot.use(async (ctx, next) => {
-    const origReply = ctx.reply.bind(ctx);
-    const origEdit = ctx.editMessageText ? ctx.editMessageText.bind(ctx) : null;
-    const origSend = ctx.telegram.sendMessage.bind(ctx.telegram);
-
-    // جایگزینی ctx.reply
-    ctx.reply = async (text, extra) => {
-      if (typeof text !== 'string') {
-        return origReply(text, extra);
-      }
-      try {
-        const t = await premiumize(text);
-        if (t !== text && (!extra || !extra.parse_mode)) {
-          extra = { ...(extra || {}), parse_mode: 'HTML' };
-        }
-        return origReply(t, extra);
-      } catch (e) {
-        return origReply(text, extra);
-      }
-    };
-
-    // جایگزینی ctx.editMessageText
-    if (origEdit) {
-      ctx.editMessageText = async (text, extra) => {
-        if (typeof text !== 'string') {
-          return origEdit(text, extra);
-        }
-        try {
-          const t = await premiumize(text);
-          if (t !== text && (!extra || !extra.parse_mode)) {
-            extra = { ...(extra || {}), parse_mode: 'HTML' };
-          }
-          return origEdit(t, extra);
-        } catch (e) {
-          return origEdit(text, extra);
-        }
-      };
-    }
-
-    // جایگزینی ctx.telegram.sendMessage
-    ctx.telegram.sendMessage = async (chatId, text, extra) => {
-      if (typeof text !== 'string') {
-        return origSend(chatId, text, extra);
-      }
-      try {
-        const t = await premiumize(text);
-        if (t !== text && (!extra || !extra.parse_mode)) {
-          extra = { ...(extra || {}), parse_mode: 'HTML' };
-        }
-        return origSend(chatId, t, extra);
-      } catch (e) {
-        return origSend(chatId, text, extra);
-      }
-    };
-
-    return next();
-  });
-  console.log('✅ Custom Emoji middleware فعال شد');
-} else {
-  console.log('⚠️ Custom Emoji middleware غیرفعال (emoji_helper پیدا نشد)');
 }
-// ============================================================
+
+// ==================== ربات تلگرام ====================
+const bot = new Telegraf(process.env.BOT_TOKEN);
+bot.use(session());
 
 // ==================== هندلرهای صرافی (دست‌نخورده) ====================
 require('./handlers/registration')(bot);
