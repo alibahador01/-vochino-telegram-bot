@@ -47,4 +47,7 @@ module.exports = [
   // رفرال
   { key: 'referralTitle', category: 'referral', value: '👥 دعوت دوستان' },
   { key: 'referralLink', category: 'referral', value: '🔗 لینک دعوت شما:\n{link}\n\n👥 تعداد دعوت: {count} نفر\n💰 پاداش هر دعوت: {bonus} تومان' },
+
+  // ناوبری (دکمه‌های عمومی بازگشت که در چند بخش مختلف ربات تکرار می‌شوند)
+  { key: 'navBackToMenu', category: 'navigation', value: '🔙 بازگشت به منو', description: 'متن دکمه‌ی عمومی «بازگشت به منوی اصلی» — از پنل ادمین (📝 مدیریت متن‌های ربات ← دسته‌بندی navigation) قابل ویرایش است و همه‌جا که این دکمه استفاده شده با هم عوض می‌شود.' },
 ];
