@@ -31,37 +31,12 @@ module.exports = function registerMiscHandlers(bot) {
     showMainMenu(ctx);
   });
 
-  bot.action('menu_buy', async (ctx) => {
-    ctx.answerCbQuery();
-    return ctx.deleteMessage().then(() => ctx.answerCbQuery()).catch(() => {});
-  });
-
-  bot.action('menu_sell', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    const { getSellProducts } = require('../db');
-    const products = await getSellProducts(true);
-    const t = texts.fa;
-    if (products.length === 0) return ctx.reply(t.sellNoProducts);
-    const buttons = products.map(p => [{ text: p.name, callback_data: 'sell_' + p.key }]);
-    ctx.reply(t.sellMenuTitle, { reply_markup: { inline_keyboard: buttons } });
-  });
-
-  bot.action('menu_wallet', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    return require('./wallet').showWalletMenu(ctx);
-  });
-
-  bot.action('menu_bonus', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    const gameHandler = require('./game');
-    return gameHandler.showBonusMenu(ctx);
-  });
-
-  // ⚠️ توجه: هندلر menu_hochino_main در فایل hochino_module/index.js تعریف شده است
-  // و از این فایل حذف شد تا از نمایش تکراری منو جلوگیری شود.
+  // توجه: هندلرهای menu_buy / menu_sell / menu_wallet / menu_bonus از اینجا حذف شدند —
+  // نسخه‌ی واقعی و درست هرکدام در فایل مربوط به همان بخش ثبت می‌شود
+  // (به ترتیب: handlers/buy.js، handlers/sell.js، handlers/wallet.js، handlers/game.js)
+  // و چون در index.js زودتر از این فایل require می‌شوند، نسخه‌های اینجا هیچ‌وقت واقعاً
+  // اجرا نمی‌شدند؛ نگه‌داشتنشان فقط کد مرده و گمراه‌کننده بود (یکی از آن‌ها —
+  // menu_wallet — حتی به یک تابع نادرست/ناموجود اشاره می‌کرد که در صورت اجرا خطا می‌داد).
 
   bot.action('menu_support', async (ctx) => {
     ctx.answerCbQuery();
