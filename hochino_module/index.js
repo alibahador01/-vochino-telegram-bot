@@ -1,6 +1,7 @@
 // hochino_module/index.js
 // 🐽 ماژول هوچینو⁰¹ — نسخه فاز ۰ (فقط ساختار)
 // این ماژول کاملاً مستقل از کدهای صرافی ووچینو⁰¹ است
+const { backToMenuButton } = require('../utils');
 
 module.exports = function registerHochinoHandlers(bot) {
   console.log('🐽 هوچینو⁰¹: بارگذاری ماژول...');
@@ -25,7 +26,7 @@ module.exports = function registerHochinoHandlers(bot) {
           inline_keyboard: [
             [analyzeBtn],
             [tableBtn],
-            [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
+            [backToMenuButton()]
           ]
         }
       }
@@ -50,7 +51,7 @@ module.exports = function registerHochinoHandlers(bot) {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔙 بازگشت به منو', callback_data: 'back_main_menu' }]
+            [backToMenuButton()]
           ]
         }
       }
