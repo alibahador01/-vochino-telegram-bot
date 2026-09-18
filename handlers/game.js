@@ -1,6 +1,6 @@
 // handlers/game.js
 const { Markup } = require('telegraf');
-const { sessions } = require('../utils');
+const { sessions, backToMenuButton } = require('../utils');
 const { pool, getUser, getSetting } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 
@@ -156,7 +156,7 @@ async function showBonusMenu(ctx) {
   const freshUser = await getUser(userId);
   const buttons = gameKeys.map(key => [{ text: gameMessages.gameNames[key], callback_data: 'game_select_' + key }]);
   buttons.push([{ text: gameMessages.withdrawBonus, callback_data: 'bonus_withdraw_start' }]);
-  buttons.push([{ text: gameMessages.back, callback_data: 'back_main_menu' }]);
+  buttons.push([backToMenuButton()]);
   ctx.reply(
     gameMessages.chooseGame + `\n\n💎 موجودی بونوس شما: ${faNum(freshUser.bonus_balance)} تومان`,
     Markup.inlineKeyboard(buttons)
