@@ -1,6 +1,6 @@
 // handlers/wallet.js
 const texts = require('../texts');
-const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
+const { sessions, showMainMenu, fillTemplate, generateTrackingCode, backToMenuButton } = require('../utils');
 const { pool, getUser, updateUser, getUserCards, getTransactionLogs, logTransaction, getAdmin, getAllAdmins, getSetting, setSetting } = require('../db');
 const { calculateCommission } = require('../exchangeEngine');
 const { MIN_WITHDRAW, ADMIN_IDS } = require('../constants');
@@ -64,7 +64,7 @@ module.exports = function registerWalletHandlers(bot) {
       [{ text: '💳 افزودن کارت جدید', callback_data: 'wallet_add_card' }],
       [{ text: '♻️ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
       [{ text: '🪎 کسب درآمد', callback_data: 'wallet_referral' }],
-      [{ text: '🟡 بازگشت', callback_data: 'back_main_menu' }]
+      [backToMenuButton()]
     ];
 
     ctx.reply(profileText, {
@@ -296,6 +296,16 @@ module.exports = function registerWalletHandlers(bot) {
   });
 
   // ==================== برداشت ====================
+  async function withdrawAmountPrompt() {
+    const minWithdraw = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
+    const feeType = await getSetting('withdraw_fee_type', 'none');
+    const feeValue = await getSetting('withdraw_fee_value', '0');
+    let feeLine = '';
+    if (feeType === 'percentage' && Number(feeValue) > 0) feeLine = `\n💳 کارمزد برداشت: ${feeValue}٪`;
+    else if (feeType === 'fixed' && Number(feeValue) > 0) feeLine = `\n💳 کارمزد برداشت: ${Number(feeValue).toLocaleString('en-US')} تومان`;
+    return `مبلغ برداشت خود را به تومان وارد کنید (حداقل ${minWithdraw.toLocaleString('en-US')} تومان):${feeLine}`;
+  }
+
   bot.action('wallet_withdraw', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
@@ -303,11 +313,10 @@ module.exports = function registerWalletHandlers(bot) {
     if (!user || !user.card_number) {
       return ctx.reply('❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی کیف پول گزینه «افزودن کارت جدید» را انتخاب کنید.');
     }
-    const minWithdraw = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
     const cards = await getUserCards(ctx.from.id);
     if (cards.length === 1) {
       sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { card: cards[0].card_number } };
-      return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${minWithdraw.toLocaleString('en-US')} تومان):`);
+      return ctx.reply(await withdrawAmountPrompt());
     }
     sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_card', lang: (user && user.language) || 'fa', data: {} };
     const buttons = cards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `wcard:${i}` }]);
@@ -325,8 +334,7 @@ module.exports = function registerWalletHandlers(bot) {
     try { await ctx.deleteMessage(); } catch (e) {}
     session.data.card = card.card_number;
     session.step = 'waiting_amount';
-    const minWithdraw = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
-    return ctx.reply(`مبلغ برداشت خود را به تومان وارد کنید (حداقل ${minWithdraw.toLocaleString('en-US')} تومان):`);
+    return ctx.reply(await withdrawAmountPrompt());
   });
 
   // ==================== احراز طلایی / کارت جدید / رفرال ====================
