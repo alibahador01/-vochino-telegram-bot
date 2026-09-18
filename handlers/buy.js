@@ -1,6 +1,6 @@
 // handlers/buy.js
 const texts = require('../texts');
-const { sessions, showMainMenu, fillTemplate, generateTrackingCode } = require('../utils');
+const { sessions, showMainMenu, fillTemplate, generateTrackingCode, backToMenuButton } = require('../utils');
 const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins, getUsdRate } = require('../db');
 const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
 const { calculateBuyFinal, tryAutoFulfillBuy, getEffectiveUnitPrice } = require('../exchangeEngine');
@@ -22,11 +22,11 @@ module.exports = function registerBuyHandlers(bot) {
     const products = await getProducts(true);
     if (products.length === 0) {
       return ctx.reply('❌ در حال حاضر هیچ محصول فعالی وجود ندارد.', {
-        reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]] }
+        reply_markup: { inline_keyboard: [[backToMenuButton()]] }
       });
     }
     const buttons = products.map(p => [{ text: p.name, callback_data: 'buy_pick_' + p.key }]);
-    buttons.push([{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]);
+    buttons.push([backToMenuButton()]);
     return ctx.reply(R.HEADER + '🛍 محصول مورد نظر خود را انتخاب کنید:', {
       reply_markup: { inline_keyboard: buttons }
     });
@@ -42,6 +42,7 @@ module.exports = function registerBuyHandlers(bot) {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
     try { await ctx.deleteMessage(); } catch (e) {}
+    return showMainMenu(ctx);
   });
 
   bot.action(/^buy_pick_(.+)$/, async (ctx) => {
@@ -73,8 +74,12 @@ module.exports = function registerBuyHandlers(bot) {
       }
     };
 
+    // حداقل خرید همیشه به خود مشتری «به همون واحدی که ادمین از پنل تنظیم کرده» نشان داده می‌شود
+    // (مثلاً «۱ دلار») — بدون هیچ تبدیل زنده به تومان، چون آن تبدیل با تغییر نرخ دلار عوض می‌شد
+    // و باعث می‌شد انگار خود «حداقل خرید» با نرخ دلار جابه‌جا می‌شود؛ در حالی که حداقل خرید یک
+    // عدد ثابت و مستقل است که خود ادمین از «تنظیمات کلی» تنظیم می‌کند.
     const minLabel = product.price_type === 'usd'
-      ? `${Number(product.min_amount || 0).toLocaleString('en-US')} دلار (حدود ${minAmountToman.toLocaleString('en-US')} تومان)`
+      ? `${Number(product.min_amount || 0).toLocaleString('en-US')} دلار`
       : `${minAmountToman.toLocaleString('en-US')} تومان`;
 
     // خط «قیمت واحد» فقط برای محصولاتی نمایش داده می‌شود که hide_price نخورده‌اند (مثلاً هات ووچر ندارد)
@@ -177,7 +182,7 @@ module.exports = function registerBuyHandlers(bot) {
       delete sessions[ctx.from.id];
       return ctx.reply(
         `❌ موجودی کیف پول شما کافی نیست.\nمبلغ لازم: ${finalAmount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${user ? Number(user.balance).toLocaleString('en-US') : '0'} تومان`,
-        { reply_markup: { inline_keyboard: [[{ text: '🧳 شارژ کیف پول', callback_data: 'wallet_deposit' }], [{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]] } }
+        { reply_markup: { inline_keyboard: [[{ text: '🧳 شارژ کیف پول', callback_data: 'wallet_deposit' }], [backToMenuButton()]] } }
       );
     }
 
