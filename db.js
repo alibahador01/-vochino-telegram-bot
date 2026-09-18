@@ -1078,17 +1078,17 @@ async function initDb() {
   }
 
   // --- متون پیش‌فرض bot_texts ---
+  // توجه: این حلقه همیشه اجرا می‌شود (نه فقط وقتی جدول خالیه) چون هر INSERT با
+  // ON CONFLICT (key) DO NOTHING محافظت شده؛ یعنی برای کلیدهای موجود کاملاً بی‌اثره،
+  // ولی اگر بعداً کلید جدیدی به textDefaults.js اضافه شود (مثلاً برای یک ربات که از قبل
+  // در حال اجراست و جدولش خالی نیست)، همان یک‌بار هم درج می‌شود و از قلم نمی‌افتد.
   try {
-    const cnt = await pool.query('SELECT COUNT(*)::int AS c FROM bot_texts');
-    if (cnt.rows[0].c === 0) {
-      const defaults = require('./textDefaults');
-      for (const t of defaults) {
-        await pool.query(
-          'INSERT INTO bot_texts (key, category, value, description) VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING',
-          [t.key, t.category, t.value, t.description || '']
-        );
-      }
-      console.log('✅ متون پیش‌فرض bot_texts درج شد');
+    const defaults = require('./textDefaults');
+    for (const t of defaults) {
+      await pool.query(
+        'INSERT INTO bot_texts (key, category, value, description) VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING',
+        [t.key, t.category, t.value, t.description || '']
+      );
     }
   } catch (e) { console.log('خطا در درج متون پیش‌فرض:', e.message); }
 
