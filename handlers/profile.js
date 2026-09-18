@@ -1,5 +1,5 @@
 const texts = require('../texts');
-const { sessions, showMainMenu } = require('../utils');
+const { sessions, showMainMenu, backToMenuButton } = require('../utils');
 const { pool, getUser, getReferrals } = require('../db');
 
 module.exports = function registerProfileHandlers(bot) {
@@ -46,7 +46,7 @@ module.exports = function registerProfileHandlers(bot) {
       // این دکمه به همون فلوی سالم و کامل احراز طلایی در wallet.js وصل می‌شه (نه یک فلوی جدا و ناقص)
       [{ text: '🛡️ احراز هویت طلایی', callback_data: 'wallet_gold_verify' }],
       [{ text: '🧾 گزارش تراکنش‌ها', callback_data: 'menu_invoices' }],
-      [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
+      [backToMenuButton()]
     ];
 
     ctx.reply(infoText, {
