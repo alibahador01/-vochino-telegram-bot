@@ -1,6 +1,6 @@
 // handlers/sell.js
 const texts = require('../texts');
-const { sessions, fillTemplate } = require('../utils');
+const { sessions, fillTemplate, backToMenuButton } = require('../utils');
 const { pool, getUser, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { tryAutoFulfillSell, getEffectiveUnitPrice } = require('../exchangeEngine');
@@ -22,11 +22,11 @@ module.exports = function registerSellHandlers(bot) {
     const products = await getSellProducts(true);
     if (products.length === 0) {
       return ctx.reply('❌ در حال حاضر هیچ محصول فروشی فعال نیست.', {
-        reply_markup: { inline_keyboard: [[{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]] }
+        reply_markup: { inline_keyboard: [[backToMenuButton()]] }
       });
     }
     const buttons = products.map(p => [{ text: p.name, callback_data: 'sell_pick_' + p.key }]);
-    buttons.push([{ text: '🔴 بازگشت', callback_data: 'back_main_menu' }]);
+    buttons.push([backToMenuButton()]);
     return ctx.reply(R.HEADER + '♨️ محصولی که می‌خواهید بفروشید را انتخاب کنید:', {
       reply_markup: { inline_keyboard: buttons }
     });
