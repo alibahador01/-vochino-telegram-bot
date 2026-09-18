@@ -1,5 +1,5 @@
 // handlers/aiSupport.js
-const { sessions } = require('../utils');
+const { sessions, backToMenuButton } = require('../utils');
 const { pool, getUser, getSetting } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 
@@ -650,7 +650,7 @@ async function showSupportMenu(ctx) {
         inline_keyboard: [
           [{ text: '🎧 هوچینو AI دستیار⁰¹', callback_data: 'ai_assistant_start' }],
           [{ text: '💬 پیام‌های قبلی', callback_data: 'ai_history' }],
-          [{ text: '🔙 بازگشت', callback_data: 'back_main_menu' }]
+          [backToMenuButton()]
         ]
       }
     }
