@@ -1,8 +1,24 @@
 // utils.js
 const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS, AI_THEMES, AI_DEFAULT_THEME } = require('./constants');
 const { getSetting } = require('./db');
+const { getText } = require('./textManager');
 
 const sessions = {};
+
+/**
+ * دکمه‌ی یکپارچه و قابل‌استفاده‌ی مجدد «بازگشت به منو».
+ * متنِ روی دکمه از سیستم متن‌های قابل‌ویرایش ربات خوانده می‌شود (کلید navBackToMenu،
+ * دسته‌بندی navigation) — یعنی هیچ متنی اینجا هاردکد نشده؛ ادمین از پنل مدیریت
+ * (📝 مدیریت متن‌های ربات ← navigation ← navBackToMenu) می‌تواند نوشته‌ی روی این دکمه
+ * را هر وقت خواست عوض کند و همه‌جا که از این تابع استفاده شده با هم به‌روز می‌شود.
+ * پیش‌فرض «🔙 بازگشت به منو» فقط برای زمانی است که هنوز از پنل چیزی تنظیم نشده باشد.
+ *
+ * @param {string} callbackData - کال‌بک دکمه؛ پیش‌فرض 'back_main_menu' (بازگشت به منوی اصلی ربات)
+ * @returns {{text: string, callback_data: string}}
+ */
+function backToMenuButton(callbackData = 'back_main_menu') {
+  return { text: getText('navBackToMenu', '🔙 بازگشت به منو'), callback_data: callbackData };
+}
 
 /**
  * ری‌اکشن روی یک پیام مشخص می‌گذارد (با ایموجی تنظیم‌شده در پنل ادمین).
@@ -142,6 +158,7 @@ async function sendBroadcastWithPhoto(bot, userIds, photo, caption, extra = {}, 
 
 module.exports = {
   sessions,
+  backToMenuButton,
   generateTrackingCode,
   generateVoucherTrackingCode,
   fillTemplate,
