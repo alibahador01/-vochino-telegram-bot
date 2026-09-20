@@ -377,8 +377,18 @@ function registerAiSupportHandlers(bot) {
   bot.action('ai_assistant_start', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    sessions[ctx.from.id] = { flow: 'ai_chat', step: 'chatting', data: { lastActivity: Date.now() } };
-    ctx.reply(HEADER + '💬 مشکل یا سوالتون رو بنویسید، در خدمتتونم.');
+
+    sessions[ctx.from.id] = {
+      flow: 'ai_chat',
+      step: 'chatting',
+      data: { lastActivity: Date.now() }
+    };
+
+    ctx.reply(
+      HEADER +
+      '💬 مشکل یا سوالتون رو بنویسید، در خدمتتونم.\n\n' +
+      '🎙 اگر توضیح دادن براتون راحت‌تره، می‌تونید ویس یا عکس/اسکرین‌شات هم ارسال کنید.'
+    );
   });
 
   bot.action('ai_history', async (ctx) => {
