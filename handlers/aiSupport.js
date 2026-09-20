@@ -16,7 +16,7 @@ const tavily = require('../tools/tavily');
 const { sendAiReply } = require('../formatting/telegram');
 const { fetchWithTimeout } = require('../util/http');
 
-const HEADER = '╭𓆩𓆩ⓥⓞⓒⓗⓘⓝⓞ ⁰¹𓆪𓆪╮\n        🐽هوچینو AI دستیار⁰¹\n╰✬┉┉ 🎧🏛🎧 ┉┉✬╯\n\n';
+const HEADER = '╭𓆩𓆩ⓥⓞⓒⓗⓘⓝⓞ⁰¹𓆪𓆪╮\n        🐽هوچینو AI دستیار⁰¹\n╰𓆩𓆩✬┉🎧🏛🎧┉✬𓆪𓆪╯\n\n';
 
 function isAdmin(id) { return ADMIN_IDS.includes(Number(id)); }
 
