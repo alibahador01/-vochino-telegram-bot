@@ -1,6 +1,7 @@
 // handlers/registration.js
 const texts = require('../texts');
 const { sessions, showMainMenu, reactToMessage } = require('../utils');
+const { ensurePersistentKeyboard } = require('./homeMenu');
 const { pool, getUser, createUser, updateUser, getSetting, checkMembership, getRequiredChannels } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { checkAndGrantBonuses } = require('./bonusEngine');
@@ -51,6 +52,7 @@ module.exports = function registerRegistrationHandlers(bot) {
       reactToMessage(ctx, ctx.chat.id, ctx.message.message_id, true);
     }
     showMainMenu(ctx);
+    ensurePersistentKeyboard(ctx);
   });
 
   bot.action(/^lang_(fa|en|tr)$/, async (ctx) => {
@@ -170,6 +172,7 @@ module.exports = function registerRegistrationHandlers(bot) {
     await checkAndGrantBonuses(ctx, userId, 'registration');
 
     showMainMenu(ctx);
+    ensurePersistentKeyboard(ctx);
   });
 
 };
