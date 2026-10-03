@@ -218,7 +218,9 @@ module.exports = function registerBuyHandlers(bot) {
     // در غیر این صورت (پیش‌فرض فعلی) هیچ کاری نمی‌کند و سفارش دقیقاً مثل قبل دستی می‌ماند.
     let autoResult = { executed: false };
     try {
-      autoResult = await tryAutoFulfillBuy({ orderId, telegramId: ctx.from.id, productKey, amount, trackingCode }, bot);
+      // ⚠️ فیکس باگ: «product» کامل (شامل coin_code) هم پاس داده می‌شود، نه فقط productKey —
+      // بدون این، exchangeEngine برای صرافی‌هایی مثل uWallet نمی‌دانست کدام coin را بفرستد.
+      autoResult = await tryAutoFulfillBuy({ orderId, telegramId: ctx.from.id, productKey, amount, trackingCode, product }, bot);
     } catch (e) { console.error('خطا در اجرای خودکار سفارش خرید:', e.message); }
 
     if (autoResult.executed) return; // کاربر و لاگ قبلاً داخل exchangeEngine مطلع شدند
