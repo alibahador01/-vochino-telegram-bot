@@ -6,7 +6,13 @@
 // و هیچ درخواست واقعی به بیرون نمی‌فرستد؛ فقط وقتی ادمین از پنل حالت را
 // روی "خودکار" بگذارد و صرافی را با اطلاعات واقعی ثبت/فعال کند، اجرا می‌شود.
 
-const { pool, getSetting, getApiChainForProduct, setOrderFulfillment, setSellOrderFulfillment, logTransaction } = require('./db');
+const {
+  pool, getSetting, getApiChainForProduct,
+  setOrderFulfillment, setSellOrderFulfillment,
+  setSellOrderPendingUwallet, finalizeSellOrderUwallet,
+  logTransaction
+} = require('./db');
+const uwallet = require('./uwallet');
 
 // ==================== محاسبه کارمزد (منبع واحد، هم برای دستی هم API) ====================
 function calculateCommission(commissionType, commissionValue, baseAmount) {
@@ -48,6 +54,10 @@ const PRICE_CACHE_TTL_MS = 60 * 1000; // برای جلوگیری از بمبار
 const priceCache = new Map(); // key: `${productType}:${productKey}` -> { price, source, ts }
 
 async function fetchProviderPrice(apiSource, productType, productKey) {
+  // uWallet هیچ اندپوینت قیمت لحظه‌ای ندارد (طبق تصمیم قطعی پروژه) — همیشه برمی‌گردیم به قیمت دستی پنل.
+  if (apiSource && apiSource.type === 'uwallet') {
+    return { success: false, error: 'uWallet قیمت لحظه‌ای ندارد؛ قیمت از پنل (دستی) خوانده می‌شود.' };
+  }
   if (!apiSource || !apiSource.base_url) {
     return { success: false, error: 'صرافی بدون base_url است.' };
   }
@@ -130,6 +140,44 @@ async function getEffectiveUnitPrice(product, type = 'buy') {
 // و حالت اجرا "خودکار" باشد. ساختار درخواست/پاسخ بر اساس apiSource.type انتخاب می‌شود.
 // خروجی همیشه یکسان است: { success, providerTxId, apiCost, raw, error }
 async function callProviderApi(apiSource, action, payload) {
+  // ==================== شاخه‌ی اختصاصی uWallet (قرارداد واقعی، نه قرارداد عمومی زیر) ====================
+  if (apiSource && apiSource.type === 'uwallet') {
+    const coin = payload.coinCode;
+    if (!coin) {
+      return { success: false, error: 'برای این محصول coin_code (کد کوین uWallet) در پنل تنظیم نشده است.' };
+    }
+
+    if (action === 'buy') {
+      // خرید کاربر از ما = ما از uWallet یک ووچر با موجودی‌مان می‌سازیم و کدش را تحویل می‌دهیم
+      const r = await uwallet.createVoucher(apiSource, { coin, amount: payload.amount });
+      if (!r.success) return { success: false, error: r.error };
+      return {
+        success: true,
+        providerTxId: r.transactionId,
+        apiCost: payload.amount,
+        deliveredCode: r.code,
+        deliveredHash: null,
+        raw: r.raw
+      };
+    }
+
+    if (action === 'sell') {
+      // فروش کاربر به ما = ما کد ووچر مشتری را روی uWallet فعال (use) می‌کنیم
+      const voucherCode = (payload.meta && payload.meta.voucherCode) || '';
+      const r = await uwallet.useVoucher(apiSource, { coin, code: voucherCode });
+      if (!r.success) return { success: false, error: r.error };
+      return {
+        success: true,
+        status: r.status, // 'confirm' | 'pending' | 'reject'
+        providerTxId: r.transactionId,
+        apiCost: r.receive !== undefined ? r.receive : payload.amount,
+        raw: r.raw
+      };
+    }
+
+    return { success: false, error: 'عملیات نامعتبر برای uWallet: ' + action };
+  }
+
   if (!apiSource || !apiSource.base_url) {
     return { success: false, error: 'صرافی بدون base_url — قابل فراخوانی نیست.' };
   }
@@ -195,16 +243,24 @@ async function callProviderApi(apiSource, action, payload) {
 // (مبلغ پایه + کارمزد) پاس داده شود، کارمزد/سود ما هم به صرافی داده می‌شود و
 // عملاً سودی از این تراکنش نمی‌ماند. کارمزد فقط باید داخل خودمان (تفاوت بین چیزی
 // که از کاربر گرفتیم و چیزی که به صرافی دادیم) باقی بماند، هرگز به payload صرافی اضافه نشود.
-async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trackingCode }, bot) {
+// ⚠️ رفع باگ حیاتی: این تابع الان «product» کامل را هم می‌گیرد (نه فقط productKey)،
+// چون برای صرافی‌هایی مثل uWallet لازم است coin_code محصول (مثلاً UUSD/HotVoucher) را بدانیم —
+// چیزی که فقط از روی productKey قابل استخراج نیست و باید از ردیف محصول خوانده شود.
+async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trackingCode, product }, bot) {
   if (!(await isAutoExecutionEnabled())) return { executed: false, reason: 'manual_mode' };
 
   const chain = await getApiChainForProduct('buy', productKey);
   if (chain.length === 0) return { executed: false, reason: 'no_api_link' };
 
   for (const apiSource of chain) {
-    const result = await callProviderApi(apiSource, 'buy', { productKey, amount, trackingCode });
+    const result = await callProviderApi(apiSource, 'buy', {
+      productKey,
+      amount,
+      trackingCode,
+      coinCode: product && product.coin_code
+    });
     if (result.success) {
-      await setOrderFulfillment(orderId, {
+      const updated = await setOrderFulfillment(orderId, {
         status: 'completed',
         apiSourceId: apiSource.id,
         apiCost: result.apiCost,
@@ -213,6 +269,9 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
         deliveredHash: result.deliveredHash,
         fulfillmentMode: 'auto'
       });
+      // updated === null یعنی این سفارش قبلاً completed شده بود (مثلاً فراخوانی تکراری) — دیگر پیام/لاگ تکراری نده
+      if (!updated) return { executed: true, apiSource, result, duplicate: true };
+
       try {
         await logTransaction(telegramId, 'buy', 0, `خرید خودکار API (${trackingCode}) — صرافی: ${apiSource.name}`);
       } catch (e) {}
@@ -240,33 +299,92 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
   const chain = await getApiChainForProduct('sell', productKey);
   if (chain.length === 0) return { executed: false, reason: 'no_api_link' };
 
+  // کارمزد و مبلغ قابل‌پرداخت همیشه بر اساس «قیمت واحد دستی پنل» محاسبه می‌شود، نه عددی که
+  // صرافی برمی‌گرداند — طبق تصمیم قطعی پروژه (uWallet قیمت لحظه‌ای ندارد).
   const { commission, payout } = calculateSellPayout(amount, product);
 
   for (const apiSource of chain) {
-    const result = await callProviderApi(apiSource, 'sell', { productKey, amount, trackingCode, meta: { voucherCode } });
-    if (result.success) {
-      await setSellOrderFulfillment(sellOrderId, {
-        status: 'approved',
-        amount: payout,
+    const result = await callProviderApi(apiSource, 'sell', {
+      productKey,
+      amount,
+      trackingCode,
+      coinCode: product && product.coin_code,
+      meta: { voucherCode }
+    });
+
+    if (!result.success) {
+      console.log(`❌ صرافی ${apiSource.name} برای فروش ${trackingCode} شکست خورد: ${result.error}`);
+      continue;
+    }
+
+    // ==================== شاخه‌ی uWallet: ممکن است confirm / pending / reject باشد ====================
+    if (apiSource.type === 'uwallet') {
+      if (result.status === 'pending') {
+        // هنوز نهایی نشده — نه رد قطعی و نه تأیید فوری. فقط شناسه‌ی تراکنش را ذخیره می‌کنیم
+        // تا exchangePolling.js (هر ۳۰ ثانیه) و وبهوک /webhook/uwallet بعداً آن را نهایی کنند.
+        // ⚠️ موجودی کاربر اینجا اصلاً شارژ نمی‌شود — فقط وقتی نتیجه‌ی قطعی برسد.
+        await setSellOrderPendingUwallet(sellOrderId, { providerTxId: result.providerTxId, apiSourceId: apiSource.id });
+        if (bot) {
+          try {
+            await bot.telegram.sendMessage(telegramId,
+              `⏳ فروش شما در صف بررسی uWallet قرار گرفت و به‌زودی نهایی می‌شود.\n🆔 ${trackingCode}`
+            );
+          } catch (e) {}
+        }
+        return { executed: true, apiSource, result, pending: true };
+      }
+
+      // confirm یا reject — نهایی‌سازی اتمیک (جلوگیری از شارژ دوباره اگر وبهوک هم‌زمان برسد)
+      const outcome = result.status === 'confirm' ? 'approved' : 'rejected';
+      const fin = await finalizeSellOrderUwallet(sellOrderId, {
+        outcome,
+        payout,
         commission,
-        apiSourceId: apiSource.id,
-        apiCost: result.apiCost,
-        fulfillmentMode: 'auto'
+        apiCost: result.apiCost
       });
-      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, String(telegramId)]);
+      if (!fin.applied) return { executed: true, apiSource, result, duplicate: true };
+
       try {
-        await logTransaction(telegramId, 'sell', payout, `فروش خودکار API (${trackingCode}) — صرافی: ${apiSource.name} — کارمزد: ${commission}`);
+        await logTransaction(
+          telegramId,
+          outcome === 'approved' ? 'sell' : 'refund',
+          outcome === 'approved' ? payout : 0,
+          `فروش ${outcome === 'approved' ? 'تأیید' : 'رد'} شده توسط uWallet (${trackingCode})`
+        );
       } catch (e) {}
+
       if (bot) {
         try {
-          await bot.telegram.sendMessage(telegramId,
-            `✅ فروش شما به‌صورت خودکار تأیید شد.\n💰 ${payout.toLocaleString('en-US')} تومان به کیف پول اضافه شد.\n🆔 ${trackingCode}`
-          );
+          const msg = outcome === 'approved'
+            ? `✅ فروش شما به‌صورت خودکار تأیید شد.\n💰 ${payout.toLocaleString('en-US')} تومان به کیف پول اضافه شد.\n🆔 ${trackingCode}`
+            : `❌ فروش شما رد شد (کد نامعتبر یا قبلاً استفاده‌شده).\n🆔 ${trackingCode}`;
+          await bot.telegram.sendMessage(telegramId, msg);
         } catch (e) {}
       }
-      return { executed: true, apiSource, result, payout, commission };
+      return { executed: true, apiSource, result, payout: outcome === 'approved' ? payout : 0, commission, outcome };
     }
-    console.log(`❌ صرافی ${apiSource.name} برای فروش ${trackingCode} شکست خورد: ${result.error}`);
+
+    // ==================== شاخه‌ی عمومی (صرافی‌های غیر uWallet — رفتار قبلی بدون تغییر) ====================
+    await setSellOrderFulfillment(sellOrderId, {
+      status: 'approved',
+      amount: payout,
+      commission,
+      apiSourceId: apiSource.id,
+      apiCost: result.apiCost,
+      fulfillmentMode: 'auto'
+    });
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, String(telegramId)]);
+    try {
+      await logTransaction(telegramId, 'sell', payout, `فروش خودکار API (${trackingCode}) — صرافی: ${apiSource.name} — کارمزد: ${commission}`);
+    } catch (e) {}
+    if (bot) {
+      try {
+        await bot.telegram.sendMessage(telegramId,
+          `✅ فروش شما به‌صورت خودکار تأیید شد.\n💰 ${payout.toLocaleString('en-US')} تومان به کیف پول اضافه شد.\n🆔 ${trackingCode}`
+        );
+      } catch (e) {}
+    }
+    return { executed: true, apiSource, result, payout, commission };
   }
 
   return { executed: false, reason: 'all_providers_failed' };
