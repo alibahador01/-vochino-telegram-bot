@@ -406,7 +406,18 @@ async function setOrderFulfillment(orderId, { status, apiSourceId, apiCost, prov
   if (deliveredCode !== undefined) { fields.push(`delivered_code = $${i++}`); values.push(deliveredCode); }
   if (deliveredHash !== undefined) { fields.push(`delivered_hash = $${i++}`); values.push(deliveredHash); }
   if (fulfillmentMode !== undefined) { fields.push(`fulfillment_mode = $${i++}`); values.push(fulfillmentMode); }
-  const res = await pool.query(`UPDATE orders SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, values);
+  // گارد idempotency: اگر سفارش قبلاً completed شده، دوباره آپدیت نمی‌شود (جلوگیری از پیام تکراری
+  // به کاربر وقتی وبهوک uWallet بیش از یک‌بار برای همین تراکنش فراخوانی شود — طبق مستندات uWallet
+  // تا ۳ بار تلاش برای ارسال callback انجام می‌شود). خروجی null یعنی «قبلاً پردازش شده، کاری نکن».
+  const res = await pool.query(
+    `UPDATE orders SET ${fields.join(', ')} WHERE id = $1 AND status != 'completed' RETURNING *`,
+    values
+  );
+  return res.rows[0] || null;
+}
+
+async function getOrderByProviderTxId(providerTxId) {
+  const res = await pool.query('SELECT * FROM orders WHERE provider_tx_id = $1', [providerTxId]);
   return res.rows[0] || null;
 }
 
@@ -421,6 +432,70 @@ async function setSellOrderFulfillment(sellOrderId, { status, amount, commission
   if (fulfillmentMode !== undefined) { fields.push(`fulfillment_mode = $${i++}`); values.push(fulfillmentMode); }
   const res = await pool.query(`UPDATE sell_orders SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, values);
   return res.rows[0] || null;
+}
+
+// ==================== uWallet: چرخه‌ی تراکنش‌های «در انتظار» (فقط سمت فروش/voucher-use پندینگ دارد) ====================
+
+// وقتی uWallet برای فعال‌سازی یک ووچر فروش، status='pending' برگرداند، سفارش را روی
+// «در انتظار uWallet» قفل می‌کنیم و شناسه‌ی تراکنش را ذخیره می‌کنیم تا هم پولینگ ۳۰ ثانیه‌ای
+// و هم وبهوک بتوانند بعداً همین سفارش را با provider_tx_id پیدا کنند.
+async function setSellOrderPendingUwallet(sellOrderId, { providerTxId, apiSourceId }) {
+  const res = await pool.query(
+    `UPDATE sell_orders SET status = 'pending_uwallet', provider_tx_id = $2, api_source_id = $3, fulfillment_mode = 'auto'
+     WHERE id = $1 AND status = 'pending_review' RETURNING *`,
+    [sellOrderId, providerTxId, apiSourceId]
+  );
+  return res.rows[0] || null;
+}
+
+// همه‌ی سفارش‌های فروشی که منتظر نتیجه‌ی uWallet هستند — برای جاب پولینگ ۳۰ ثانیه‌ای
+async function getPendingUwalletSellOrders() {
+  const res = await pool.query(
+    `SELECT * FROM sell_orders WHERE status = 'pending_uwallet' AND provider_tx_id IS NOT NULL ORDER BY created_at ASC LIMIT 100`
+  );
+  return res.rows;
+}
+
+async function getSellOrderByProviderTxId(providerTxId) {
+  const res = await pool.query('SELECT * FROM sell_orders WHERE provider_tx_id = $1', [providerTxId]);
+  return res.rows[0] || null;
+}
+
+// ⚠️ رفع باگ حیاتی «شارژ دوباره‌ی کیف‌پول»: هم پولینگ و هم وبهوک ممکن است تقریباً هم‌زمان
+// به نتیجه‌ی نهایی یک تراکنش pending برسند. این تابع با FOR UPDATE ردیف سفارش را قفل می‌کند،
+// وضعیت را فقط یک‌بار از pending_uwallet به approved/rejected می‌برد و فقط همان یک‌بار موجودی
+// کیف‌پول کاربر را شارژ می‌کند؛ تلاش دوم (از مسیر دیگر) چیزی جز {applied:false} برنمی‌گرداند
+// و هیچ تغییری در موجودی کاربر اعمال نمی‌شود.
+async function finalizeSellOrderUwallet(sellOrderId, { outcome, payout = 0, commission = 0, apiCost = 0 }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const lockRes = await client.query('SELECT * FROM sell_orders WHERE id = $1 FOR UPDATE', [sellOrderId]);
+    const order = lockRes.rows[0];
+
+    if (!order || order.status === 'approved' || order.status === 'rejected') {
+      await client.query('ROLLBACK');
+      return { applied: false, order: order || null };
+    }
+
+    const newStatus = outcome === 'approved' ? 'approved' : 'rejected';
+    const updRes = await client.query(
+      `UPDATE sell_orders SET status = $2, amount = $3, commission = $4, api_cost = $5 WHERE id = $1 RETURNING *`,
+      [sellOrderId, newStatus, payout, commission, apiCost]
+    );
+
+    if (outcome === 'approved') {
+      await client.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, order.telegram_id]);
+    }
+
+    await client.query('COMMIT');
+    return { applied: true, order: updRes.rows[0] };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ==================== VPN ====================
@@ -691,6 +766,7 @@ async function initDb() {
       active INTEGER DEFAULT 1,
       hidden INTEGER DEFAULT 0,
       api_source_id INTEGER,
+      coin_code TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );`,
     `CREATE TABLE IF NOT EXISTS sell_products (
@@ -704,6 +780,7 @@ async function initDb() {
       commission_value NUMERIC DEFAULT 0,
       active INTEGER DEFAULT 1,
       api_source_id INTEGER,
+      coin_code TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );`,
     `CREATE TABLE IF NOT EXISTS sell_orders (
@@ -714,12 +791,13 @@ async function initDb() {
       amount INTEGER DEFAULT 0,
       status TEXT DEFAULT 'pending_review',
       created_at TIMESTAMP DEFAULT NOW(),
-      tracking_code TEXT UNIQUE
+      tracking_code TEXT UNIQUE,
+      provider_tx_id TEXT
     );`,
     `CREATE TABLE IF NOT EXISTS api_sources (
       id SERIAL PRIMARY KEY,
       name TEXT,
-      type TEXT CHECK (type IN ('voucher', 'crypto', 'star', 'gift', 'filter', 'multi')),
+      type TEXT CHECK (type IN ('voucher', 'crypto', 'star', 'gift', 'filter', 'multi', 'uwallet')),
       base_url TEXT,
       api_key TEXT,
       secret_key TEXT,
@@ -873,6 +951,8 @@ async function initDb() {
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS unit_price NUMERIC DEFAULT 0',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS price_source TEXT DEFAULT \'manual\'',
     'ALTER TABLE products ADD COLUMN IF NOT EXISTS hide_price INTEGER DEFAULT 0',
+    // coin_code — کد کوین روی uWallet برای این محصول (مثلاً UUSD برای یو ووچر، HotVoucher برای هات ووچر)
+    'ALTER TABLE products ADD COLUMN IF NOT EXISTS coin_code TEXT',
 
     // sell_products
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS sample_code TEXT',
@@ -881,6 +961,7 @@ async function initDb() {
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
     'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS price_source TEXT DEFAULT \'manual\'',
+    'ALTER TABLE sell_products ADD COLUMN IF NOT EXISTS coin_code TEXT',
 
     // orders
     'ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission INTEGER DEFAULT 0',
@@ -899,6 +980,8 @@ async function initDb() {
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS api_source_id INTEGER',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS api_cost NUMERIC DEFAULT 0',
     'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS fulfillment_mode TEXT DEFAULT \'manual\'',
+    // provider_tx_id — شناسه‌ی تراکنش روی uWallet، برای polling و تطبیق وبهوک با همین سفارش فروش
+    'ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT',
 
     // wallet_requests
     'ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS card_number TEXT',
@@ -915,6 +998,9 @@ async function initDb() {
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_multi INTEGER DEFAULT 0',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1',
     'ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS ip_slot TEXT DEFAULT \'default\'',
+    // نوع «uwallet» به لیست انواع مجاز صرافی اضافه می‌شود (برای نصب‌های قبلی که constraint قدیمی دارند)
+    'ALTER TABLE api_sources DROP CONSTRAINT IF EXISTS api_sources_type_check',
+    'ALTER TABLE api_sources ADD CONSTRAINT api_sources_type_check CHECK (type IN (\'voucher\', \'crypto\', \'star\', \'gift\', \'filter\', \'multi\', \'uwallet\'))',
 
     // tickets
     'ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_response TEXT',
@@ -1031,8 +1117,10 @@ async function initDb() {
   const buyProducts = [
     { key: 'voucher', name: '🎟 یوووچر', min_amount: 1, price_type: 'usd', active: 1, hidden: 0 },
     { key: 'hotvoucher', name: '🎟 هات ووچر', min_amount: 50000, price_type: 'toman', active: 1, hidden: 0 },
-    { key: 'premium_voucher', name: '🎟 پرمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 0, hidden: 1 },
-    { key: 'ps_voucher', name: '🔵 پی‌اس ووچر', min_amount: 185081, price_type: 'toman', active: 0, hidden: 1 },
+    // ⚠️ باگ قبلی: این دو محصول با hidden:1 ساخته می‌شدند و در بخش خرید اصلاً دیده نمی‌شدند.
+    // طبق تصمیم پروژه باید توی جدول باشند و در لیست خرید دیده شوند (اتصال API‌شان جداگانه و بعداً انجام می‌شود).
+    { key: 'premium_voucher', name: '🎟 پرمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 1, hidden: 0 },
+    { key: 'ps_voucher', name: '🔵 پی‌اس ووچر', min_amount: 185081, price_type: 'toman', active: 1, hidden: 0 },
     { key: 'perfect_money', name: '💵 پرفکت مانی', min_amount: 1, price_type: 'usd', active: 0, hidden: 1 },
     { key: 'crypto_dollar', name: '💲 دلار (کریپتو)', min_amount: 10, price_type: 'usd', active: 0, hidden: 1 },
     { key: 'crypto_tron', name: '🪙 ترون (TRX)', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
@@ -1060,11 +1148,23 @@ async function initDb() {
   // (این خط روی نصب‌های قبلی هم اجرا می‌شود، نه فقط نصب تازه، چون ON CONFLICT بالا رکورد موجود را دست نمی‌زند)
   try { await pool.query("UPDATE products SET hide_price = 1 WHERE key = 'hotvoucher'"); } catch (e) {}
 
+  // فیکس باگ hidden روی نصب‌های قبلی (رکوردهایی که قبل از این فیکس با hidden=1 درج شده بودند)
+  try {
+    await pool.query(
+      "UPDATE products SET hidden = 0, active = 1 WHERE key IN ('premium_voucher','ps_voucher') AND (hidden = 1 OR active = 0)"
+    );
+  } catch (e) {}
+
+  // coin_code برای اتصال uWallet — یو ووچر = UUSD، هات ووچر = HotVoucher (طبق تصمیم قطعی پروژه)
+  try { await pool.query("UPDATE products SET coin_code = 'UUSD' WHERE key = 'voucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
+  try { await pool.query("UPDATE products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
+
   const sellProducts = [
     { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
     { key: 'premiumvoucher', name: '🎟 پرمیوم ووچر', unit_price: 100000, sample_code: 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', active: 1 },
     { key: 'psvoucher', name: '🔵 پی‌اس ووچر', unit_price: 100000, sample_code: 'PS-4KF8-92AD-7QPW-XM2L', active: 1 },
-    { key: 'hotvoucher_sell', name: '🎟 هات ووچر', unit_price: 50000, sample_code: 'HOT-XXXX-XXXX', active: 0 },
+    // هات ووچر فروش هم طبق تصمیم پروژه باید فعال باشد (اتصال uWallet)
+    { key: 'hotvoucher_sell', name: '🎟 هات ووچر', unit_price: 50000, sample_code: 'HOT-XXXX-XXXX', active: 1 },
     { key: 'perfect_money_sell', name: '💵 پرفکت مانی', unit_price: 60000, sample_code: 'PM-XXXX', active: 0 }
   ];
 
@@ -1076,6 +1176,11 @@ async function initDb() {
       );
     } catch (e) {}
   }
+
+  // فیکس نصب‌های قبلی: فعال‌سازی فروش هات ووچر + coin_code برای اتصال uWallet
+  try { await pool.query("UPDATE sell_products SET active = 1 WHERE key = 'hotvoucher_sell' AND active = 0"); } catch (e) {}
+  try { await pool.query("UPDATE sell_products SET coin_code = 'UUSD' WHERE key = 'uvoucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
+  try { await pool.query("UPDATE sell_products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher_sell' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
 
   // --- متون پیش‌فرض bot_texts ---
   // توجه: این حلقه همیشه اجرا می‌شود (نه فقط وقتی جدول خالیه) چون هر INSERT با
@@ -1147,7 +1252,12 @@ module.exports = {
   getActiveApiForProduct,
   getApiChainForProduct,
   setOrderFulfillment,
+  getOrderByProviderTxId,
   setSellOrderFulfillment,
+  setSellOrderPendingUwallet,
+  getPendingUwalletSellOrders,
+  getSellOrderByProviderTxId,
+  finalizeSellOrderUwallet,
   getVpnSubscription,
   createVpnSubscription,
   getAllBotTexts,
