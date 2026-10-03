@@ -4,10 +4,16 @@ const express = require('express');
 const https = require('https');
 const path = require('path');
 
-const { pool, initDb, sendRatesToChannel } = require('./db');
+const {
+  pool, initDb, sendRatesToChannel,
+  getSellOrderByProviderTxId, getOrderByProviderTxId, getSellProductByKey,
+  finalizeSellOrderUwallet, logTransaction
+} = require('./db');
 const { ADMIN_IDS } = require('./constants');
 const { loadTextsCache } = require('./textManager');
 const AntiSleepBot = require('./AntiSleepBot');
+const { calculateSellPayout } = require('./exchangeEngine');
+const exchangePolling = require('./exchangePolling');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -140,6 +146,62 @@ app.get('/api/dashboard/:userId', async (req, res) => {
   }
 });
 
+// ==================== وبهوک uWallet ====================
+// طبق مستندات uWallet: هر تراکنشی که به وضعیت نهایی (confirm/reject) برسد اینجا پوش می‌شود.
+// همیشه باید 200 برگردانیم، وگرنه uWallet تا ۳ بار دیگر (۱ دقیقه بعد، ۱ ساعت بعد) دوباره تلاش می‌کند
+// که همان تلاش‌های تکراری دقیقاً همان چیزی است که finalizeSellOrderUwallet (اتمیک) در برابرش ایمن است.
+app.post('/webhook/uwallet', express.json(), async (req, res) => {
+  res.status(200).send('OK'); // طبق مستندات: پاسخ همیشه باید فوری 200 باشد
+  try {
+    const tx = req.body;
+    if (!tx || !tx.id || !tx.status) return;
+    if (tx.status !== 'confirm' && tx.status !== 'reject') return; // فقط وضعیت نهایی پردازش می‌شود
+
+    const sellOrder = await getSellOrderByProviderTxId(tx.id);
+    if (sellOrder) {
+      // ممکن است این سفارش قبلاً توسط exchangePolling.js نهایی شده باشد — finalizeSellOrderUwallet
+      // به‌صورت اتمیک این را چک می‌کند و در آن صورت applied=false برمی‌گرداند (بدون شارژ دوباره).
+      const product = await getSellProductByKey(sellOrder.product_type);
+      const { commission, payout } = calculateSellPayout(Number(sellOrder.amount || 0), product || {});
+      const outcome = tx.status === 'confirm' ? 'approved' : 'rejected';
+
+      const fin = await finalizeSellOrderUwallet(sellOrder.id, {
+        outcome,
+        payout,
+        commission,
+        apiCost: tx.receive !== undefined ? Number(tx.receive) : 0
+      });
+
+      if (fin.applied) {
+        try {
+          await logTransaction(
+            sellOrder.telegram_id,
+            outcome === 'approved' ? 'sell' : 'refund',
+            outcome === 'approved' ? payout : 0,
+            `فروش نهایی‌شده با وبهوک uWallet (${sellOrder.tracking_code})`
+          );
+        } catch (e) {}
+        try {
+          const msg = outcome === 'approved'
+            ? `✅ فروش شما تأیید شد.\n💰 ${payout.toLocaleString('en-US')} تومان به کیف پول اضافه شد.\n🆔 ${sellOrder.tracking_code}`
+            : `❌ فروش شما رد شد (کد نامعتبر یا قبلاً استفاده‌شده).\n🆔 ${sellOrder.tracking_code}`;
+          await bot.telegram.sendMessage(sellOrder.telegram_id, msg);
+        } catch (e) {}
+      }
+      return;
+    }
+
+    // اگر مربوط به سفارش فروشی نبود، شاید یک سفارش خرید (create voucher) باشد — خرید همگام است
+    // و معمولاً قبلاً completed شده؛ این فقط برای لاگ/رهگیری دیرهنگام است، نیازی به اقدام نیست.
+    const buyOrder = await getOrderByProviderTxId(tx.id);
+    if (buyOrder) {
+      console.log(`ℹ️ وبهوک uWallet برای سفارش خرید ${buyOrder.tracking_code} دریافت شد (status=${tx.status}).`);
+    }
+  } catch (err) {
+    console.log('❌ خطا در پردازش وبهوک uWallet:', err.message);
+  }
+});
+
 app.get('*', (req, res) => res.send('Vochino Bot Active'));
 
 app.listen(PORT, () => {
@@ -169,6 +231,9 @@ bot.use(session());
 // ==================== هندلرهای صرافی (دست‌نخورده) ====================
 require('./handlers/registration')(bot);
 require('./handlers/verification')(bot);
+// ⚠️ باید زودتر از هندلرهای سشن‌محور (خرید/فروش/...) ثبت شود تا دکمه‌ی ☰ Home همیشه،
+// حتی وسط یک فلوی نیمه‌کاره، کار کند
+require('./handlers/homeMenu')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
 require('./handlers/sell')(bot);
@@ -224,6 +289,9 @@ async function init() {
   } catch (e) {
     console.log('خطا در ارسال نرخ:', e.message);
   }
+
+  // پولینگ ۳۰ ثانیه‌ای uWallet برای سفارش‌های فروشِ pending (باگ #۱ از سند — exchangePolling.js)
+  exchangePolling.start(bot);
 
   bot.launch();
   console.log('✅ ربات روشن شد');
