@@ -3,6 +3,7 @@
 const { sessions } = require('../utils');
 const { pool, getUser, getSetting } = require('../db');
 const R = require('./receipts');
+const { persistentKeyboard } = require('./homeMenu');
 
 const T = {
   fa: {
@@ -114,7 +115,10 @@ module.exports = function registerVerificationHandlers(bot) {
     }
     session.data.phone = ctx.message.contact.phone_number;
     session.step = 'waiting_name';
-    await ctx.reply(t(lang).stepName, { reply_markup: { remove_keyboard: true } });
+    // ⚠️ فیکس مشکل ۴: قبلاً اینجا remove_keyboard بود که کیبورد دائمی Home/Live Price رو کامل
+    // حذف می‌کرد و دیگه هیچ‌وقت خودش برنمی‌گشت (تا /start بعدی). الان به‌جاش همون کیبورد دائمی
+    // دوباره ست می‌شه — هم کیبورد موقت «ارسال شماره تلفن» جمع می‌شه، هم Home/Live Price برمی‌گرده.
+    await ctx.reply(t(lang).stepName, { reply_markup: persistentKeyboard() });
   });
 
   bot.on('text', async (ctx, next) => {
