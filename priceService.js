@@ -18,7 +18,18 @@ let cache = null; // { data, ts }
 async function fetchFresh() {
   const res = await fetchWithTimeout(BASE_URL + '/', {}, TIMEOUT_MS);
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  const json = await res.json();
+  // ⚠️ ساختار واقعی سرویس (طبق نمونه‌ی جدید) یک آبجکت تودرتوست، نه فیلدهای مستقیم روی ریشه:
+  // { "ali1377": { ps_buy, ps_sell, ... } }
+  // به‌جای قفل‌شدن روی اسم کلید بیرونی «ali1377» (که ممکنه فقط اسم اکانت/پروژه باشه و عوض بشه)،
+  // همیشه اولین مقدار آبجکت بیرونی رو برمی‌داریم — تا اگه اسم کلید عوض شد چیزی نشکنه.
+  if (json && typeof json === 'object' && !Array.isArray(json)) {
+    const values = Object.values(json);
+    if (values.length > 0 && values[0] && typeof values[0] === 'object') {
+      return values[0];
+    }
+  }
+  return json; // فال‌بک: اگه یه روز ساختار صاف/مستقیم شد، همینجوری هم کار می‌کنه
 }
 
 // خروجی: { ps_buy, ps_sell, premium_buy, premium_sell, u_buy, u_sell, tether_usd, utopia_usd, stale? }
