@@ -165,11 +165,13 @@ app.post('/webhook/uwallet', express.json(), async (req, res) => {
       const { commission, payout } = calculateSellPayout(Number(sellOrder.amount || 0), product || {});
       const outcome = tx.status === 'confirm' ? 'approved' : 'rejected';
 
+      // کارمزد دقیق uWallet (fee) رو ترجیح می‌دیم؛ وبهوک طبق مستندات این فیلد رو مستقیم می‌فرسته
+      const providerCost = tx.fee !== undefined ? Number(tx.fee) : (tx.receive !== undefined ? Number(tx.receive) : 0);
       const fin = await finalizeSellOrderUwallet(sellOrder.id, {
         outcome,
         payout,
         commission,
-        apiCost: tx.receive !== undefined ? Number(tx.receive) : 0
+        apiCost: providerCost
       });
 
       if (fin.applied) {
