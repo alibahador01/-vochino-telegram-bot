@@ -29,42 +29,59 @@ async function ensurePersistentKeyboard(ctx) {
   } catch (e) {}
 }
 
-async function buildLivePriceMessage() {
-  const prices = await priceService.getPrices();
+// ⚠️ اصلاح طبق فیدبک: صفحه‌ی Live Price باید یک پیام متنی ساده باشد، نه Inline Keyboard.
+// فرمت و فونت‌ها دقیقاً همان چیزی‌اند که فرستاده شده؛ فقط بعد از هر Buy/Sell عدد واقعی (از
+// price-service) با «:» اضافه شده — چون «کنارشون نمایش داده بشه» خواسته شده بود، نه جایگزین متن.
+function fmtPrice(n) {
+  if (n === undefined || n === null || n === '' || isNaN(Number(n))) return '—';
+  const num = Number(n);
+  // قیمت‌های بزرگ (تومانی) با جداکننده‌ی هزارگان، قیمت‌های کوچک (دلاری مثل تتر) همون‌جور که هست
+  return Number.isInteger(num) || Math.abs(num) >= 1000 ? num.toLocaleString('en-US') : String(num);
+}
+
+async function buildLivePriceText() {
+  const prices = await priceService.getPrices(); // ممکنه null باشه (سرویس در دسترس نیست) یا stale:true داشته باشه
 
   const uPct = priceService.slowFluctuatingPercent('u_voucher');
   const premiumPct = priceService.slowFluctuatingPercent('premium_voucher');
   const psPct = priceService.slowFluctuatingPercent('ps_voucher');
   const dollarPct = priceService.slowFluctuatingPercent('dollar');
+  const utopiaPct = priceService.slowFluctuatingPercent('utopia');
 
-  const text =
-    '💱 𝑼𝒕𝒐𝒑𝒊𝒂 — 𝑳𝒊𝒗𝒆 𝑷𝒓𝒊𝒄𝒆' + (prices && prices.stale ? ' ⚠️' : '') + '\n\n' +
-    'برای خرید/فروش روی دکمه‌ی محصول بزنید؛ برای دیدن قیمت دقیق روی نوار درصد بزنید.';
+  const uBar = priceService.renderBar(uPct, '▰', '▱', 8);
+  const premiumBar = priceService.renderBar(premiumPct, '▰', '▱', 8);
+  const psBar = priceService.renderBar(psPct, '▰', '▱', 8);
+  const dollarBar = priceService.renderBar(dollarPct, '⬢', '⬡', 5);
+  const utopiaBar = priceService.renderBar(utopiaPct, '⬢', '⬡', 5);
 
-  const keyboard = [
-    [
-      { text: '🔷️ 𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', callback_data: 'buy_pick_voucher' },
-      { text: '🔶️ 𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', callback_data: 'sell_pick_uvoucher' }
-    ],
-    [{ text: `💱 ${priceService.renderBar(uPct, '▰', '▱', 8)} ${uPct}%`, callback_data: 'liveprice_info_u' }],
+  const p = prices || {};
 
-    [
-      { text: '🔷️ 𝑩𝒖𝒚 𝑷𝒓𝒆𝒎𝒊𝒖𝒎 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', callback_data: 'buy_pick_premium_voucher' },
-      { text: '🔶️ 𝑺𝒆𝒍𝒍 𝑷𝒓𝒆𝒎𝒊𝒖𝒎 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', callback_data: 'sell_pick_premiumvoucher' }
-    ],
-    [{ text: `💱 ${priceService.renderBar(premiumPct, '▰', '▱', 8)} ${premiumPct}%`, callback_data: 'liveprice_info_premium' }],
+  let text =
+    `🔷️ 𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.u_buy)}\n` +
+    `🔶️ 𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.u_sell)}\n` +
+    `💱 ${uBar} ${uPct}%\n\n` +
 
-    [
-      { text: '🔷️ 𝑩𝒖𝒚 𝑷𝑺 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', callback_data: 'buy_pick_ps_voucher' },
-      { text: '🔶️ 𝑺𝒆𝒍𝒍 𝑷𝑺 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', callback_data: 'sell_pick_psvoucher' }
-    ],
-    [{ text: `💱 ${priceService.renderBar(psPct, '▰', '▱', 8)} ${psPct}%`, callback_data: 'liveprice_info_ps' }],
+    `🔷️ 𝑩𝒖𝒚 𝑷𝒓𝒆𝒎𝒊𝒖𝒎 𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.premium_buy)}\n` +
+    `🔶️ 𝑺𝒆𝒍𝒍 𝑷𝒓𝒆𝒎𝒊𝒖𝒎 𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.premium_sell)}\n` +
+    `💱 ${premiumBar} ${premiumPct}%\n\n` +
 
-    [{ text: '💱 𝑫𝒐𝒍𝒍𝒂𝒓', callback_data: 'liveprice_info_dollar' }],
-    [{ text: `${priceService.renderBar(dollarPct, '⬢', '⬡', 5)} ${dollarPct}%`, callback_data: 'liveprice_info_dollar' }]
-  ];
+    `🔷️ 𝑩𝒖𝒚 𝑷𝑺 𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.ps_buy)}\n` +
+    `🔶️ 𝑺𝒆𝒍𝒍 𝑷𝑺 𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.ps_sell)}\n` +
+    `💱 ${psBar} ${psPct}%\n\n` +
 
-  return { text, keyboard };
+    `💱 𝑫𝒐𝒍𝒍𝒂𝒓: ${fmtPrice(p.tether_usd)}\n` +
+    `${dollarBar} ${dollarPct}%\n\n` +
+
+    `✨ 𝑼𝒕𝒐𝒑𝒊𝒂: ${fmtPrice(p.utopia_usd)}\n` +
+    `${utopiaBar} ${utopiaPct}%`;
+
+  if (!prices) {
+    text = '⚠️ سرویس قیمت موقتاً در دسترس نیست — این لیست بدون قیمت لحظه‌ای است.\n\n' + text;
+  } else if (prices.stale) {
+    text += '\n\n⚠️ آخرین قیمت معتبر نمایش داده شد (اتصال لحظه‌ای برقرار نشد).';
+  }
+
+  return text;
 }
 
 function registerHomeMenuHandlers(bot) {
@@ -74,27 +91,11 @@ function registerHomeMenuHandlers(bot) {
     return showMainMenu(ctx);
   });
 
-  // 💱 Live Price — صفحه‌ی قیمت‌ها
+  // 💱 Live Price — یک پیام متنی ساده (بدون هیچ دکمه‌ای)
   bot.hears(LIVE_PRICE_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
-    const { text, keyboard } = await buildLivePriceMessage();
-    return ctx.reply(text, { reply_markup: { inline_keyboard: keyboard } });
-  });
-
-  // تپ روی نوار درصد → قیمت دقیق لحظه‌ای (از price-service) به‌صورت پاپ‌آپ
-  bot.action(/^liveprice_info_(u|premium|ps|dollar)$/, async (ctx) => {
-    const key = ctx.match[1];
-    const prices = await priceService.getPrices();
-    if (!prices) {
-      return ctx.answerCbQuery('⚠️ سرویس قیمت موقتاً در دسترس نیست.', { show_alert: true });
-    }
-    const map = {
-      u: `💱 U-Voucher\nخرید: ${prices.u_buy ?? '—'}\nفروش: ${prices.u_sell ?? '—'}`,
-      premium: `💱 Premium Voucher\nخرید: ${prices.premium_buy ?? '—'}\nفروش: ${prices.premium_sell ?? '—'}`,
-      ps: `💱 PS Voucher\nخرید: ${prices.ps_buy ?? '—'}\nفروش: ${prices.ps_sell ?? '—'}`,
-      dollar: `💱 Dollar (Tether)\n${prices.tether_usd ?? '—'}`
-    };
-    return ctx.answerCbQuery(map[key], { show_alert: true });
+    const text = await buildLivePriceText();
+    return ctx.reply(text);
   });
 }
 
