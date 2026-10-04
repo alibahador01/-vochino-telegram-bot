@@ -77,4 +77,25 @@ function renderBar(percent, filledChar, emptyChar, totalSegments) {
   return filledChar.repeat(filled) + emptyChar.repeat(totalSegments - filled);
 }
 
-module.exports = { getPrices, checkHealth, slowFluctuatingPercent, renderBar };
+// ==================== نگاشت محصول ← فیلد price-service (مشکل ۳) ====================
+// فقط محصولاتی که واقعاً روی price-service تعریف شدن اینجا هستن. هات ووچر عمداً نیست —
+// نه price-service همچین فیلدی داره نه uWallet اندپوینت قیمت داره؛ برای هات ووچر همیشه
+// باید قیمت دستی پنل استفاده بشه (fallback طبیعی، نه یک حالت خطا).
+const BUY_FIELD_MAP = { voucher: 'u_buy', premium_voucher: 'premium_buy', ps_voucher: 'ps_buy' };
+const SELL_FIELD_MAP = { uvoucher: 'u_sell', premiumvoucher: 'premium_sell', psvoucher: 'ps_sell' };
+
+// خروجی: { success:false } اگه این محصول روی price-service نیست یا سرویس جواب نداد
+// (caller باید خودش fallback به قیمت دستی بزنه)، وگرنه { success:true, price, stale? }
+async function getLivePrice(type, productKey) {
+  const map = type === 'sell' ? SELL_FIELD_MAP : BUY_FIELD_MAP;
+  const field = map[productKey];
+  if (!field) return { success: false };
+
+  const prices = await getPrices();
+  if (!prices || prices[field] === undefined || prices[field] === null || isNaN(Number(prices[field]))) {
+    return { success: false };
+  }
+  return { success: true, price: Number(prices[field]), stale: !!prices.stale };
+}
+
+module.exports = { getPrices, checkHealth, slowFluctuatingPercent, renderBar, getLivePrice };
