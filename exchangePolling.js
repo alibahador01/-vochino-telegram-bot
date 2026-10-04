@@ -18,7 +18,7 @@ const POLL_INTERVAL_MS = 30 * 1000;
 let pollTimer = null;
 let isPolling = false; // جلوگیری از هم‌پوشانی دو دور پولینگ اگر یک دور طول بکشد
 
-async function finalizeOne(order, status, receive, bot) {
+async function finalizeOne(order, status, providerCost, bot) {
   const product = await getSellProductByKey(order.product_type);
   const { commission, payout } = calculateSellPayout(Number(order.amount || 0), product || {});
   const outcome = status === 'confirm' ? 'approved' : 'rejected';
@@ -27,7 +27,7 @@ async function finalizeOne(order, status, receive, bot) {
     outcome,
     payout,
     commission,
-    apiCost: receive !== undefined ? receive : 0
+    apiCost: providerCost !== undefined ? providerCost : 0
   });
 
   // applied=false یعنی وبهوک (یا یک دور پولینگ دیگر) زودتر همین سفارش را نهایی کرده — کاری نکن
@@ -68,7 +68,9 @@ async function pollOnce(bot) {
           continue;
         }
         if (statusRes.status === 'confirm' || statusRes.status === 'reject') {
-          await finalizeOne(order, statusRes.status, statusRes.receive, bot);
+          // کارمزد دقیق uWallet (fee) رو ترجیح می‌دیم؛ اگه نبود receive به‌عنوان بهترین تخمین
+          const cost = statusRes.fee !== undefined ? statusRes.fee : statusRes.receive;
+          await finalizeOne(order, statusRes.status, cost, bot);
         }
         // هر وضعیت دیگری یعنی هنوز pending — کاری نکن، دور بعدی (۳۰ ثانیه دیگر) دوباره چک می‌شود
       } catch (e) {
