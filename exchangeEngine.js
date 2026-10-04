@@ -13,6 +13,7 @@ const {
   logTransaction
 } = require('./db');
 const uwallet = require('./uwallet');
+const priceService = require('./priceService');
 
 // ==================== محاسبه کارمزد (منبع واحد، هم برای دستی هم API) ====================
 function calculateCommission(commissionType, commissionValue, baseAmount) {
@@ -103,6 +104,22 @@ async function fetchProviderPrice(apiSource, productType, productKey) {
 async function getEffectiveUnitPrice(product, type = 'buy') {
   const manualPrice = Number(product.unit_price || 0);
 
+  // ⚠️ رفع مشکل «قیمت آنلاین نمایش داده نمی‌شه»: price-service یک منبع قیمت کاملاً مستقله —
+  // نه به حالت اجرای خودکار سفارش‌ها (api_execution_mode) ربطی داره، نه به زنجیره‌ی api_sources.
+  // قبلاً این تابع فقط دنبال قیمت از زنجیره‌ی صرافی‌های وصل‌شده می‌گشت؛ چون uWallet اصلاً اندپوینت
+  // قیمت نداره (fetchProviderPrice برای type==='uwallet' همیشه fail برمی‌گردونه)، همیشه قیمت
+  // دستی نشون داده می‌شد. الان قبل از هر چیز price-service امتحان می‌شه (برای U/Premium/PS
+  // ووچر که روی اون سرویس تعریف شدن)؛ برای هات ووچر (که اصلاً روی price-service نیست) این
+  // مرحله هیچ‌کاری نمی‌کنه و مستقیم می‌ره سراغ چیزی که از قبل بود (زنجیره‌ی API یا قیمت دستی).
+  try {
+    const live = await priceService.getLivePrice(type, product.key);
+    if (live.success) {
+      return { price: live.price, source: 'price-service' };
+    }
+  } catch (e) {
+    console.log(`❌ خطا در دریافت قیمت زنده از price-service برای ${type}:${product.key}:`, e.message);
+  }
+
   if (!(await isAutoExecutionEnabled())) {
     return { price: manualPrice, source: 'manual' };
   }
@@ -166,11 +183,27 @@ async function callProviderApi(apiSource, action, payload) {
       const voucherCode = (payload.meta && payload.meta.voucherCode) || '';
       const r = await uwallet.useVoucher(apiSource, { coin, code: voucherCode });
       if (!r.success) return { success: false, error: r.error };
+
+      // ⚠️ جداسازی دقیق کارمزد uWallet از کارمزد پنل: پاسخ همزمان POST /voucher/use فقط
+      // receive برمی‌گردونه، نه fee یا amount (طبق مستندات رسمی uWallet). برای این‌که
+      // api_cost واقعاً «کارمزدی که uWallet گرفته» باشه (نه صرفاً مبلغ خالص)، یک GET
+      // /v1/transaction اضافه می‌زنیم تا fee دقیق رو بگیریم. این مبلغ فقط برای رهگیری/حسابداری
+      // داخلی ماست؛ هیچ‌وقت روی مبلغ تومانی که به کاربر پرداخت می‌شه (calculateSellPayout، که
+      // کاملاً بر مبنای قیمت دستی پنله) اثر نمی‌ذاره — دقیقاً طبق چیزی که خواسته شده بود.
+      let providerFee;
+      if (r.transactionId) {
+        try {
+          const txInfo = await uwallet.getTransactionStatus(apiSource, r.transactionId);
+          if (txInfo.success && txInfo.fee !== undefined) providerFee = txInfo.fee;
+        } catch (e) { /* اگه این تماس اضافه شکست بخوره، بی‌خطر به receive برمی‌گردیم، چیزی متوقف نمی‌شه */ }
+      }
+
       return {
         success: true,
         status: r.status, // 'confirm' | 'pending' | 'reject'
         providerTxId: r.transactionId,
-        apiCost: r.receive !== undefined ? r.receive : payload.amount,
+        // اگه fee دقیق گیر اومد همون؛ وگرنه receive (مبلغ خالص) به‌عنوان بهترین تخمین موجود
+        apiCost: providerFee !== undefined ? providerFee : (r.receive !== undefined ? r.receive : 0),
         raw: r.raw
       };
     }
