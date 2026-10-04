@@ -305,16 +305,27 @@ async function getApiSourceById(id) {
 
 async function addApiSource(data) {
   const { name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot } = data;
+  // ⚠️ رفع باگ «invalid input syntax for type integer: "false"»:
+  // ستون is_multi در دیتابیس INTEGER است، ولی قبلاً اینجا `is_multi || false` یک boolean واقعی
+  // (false) می‌ساخت که pg آن را به‌صورت متن "false" می‌فرستاد و Postgres نمی‌توانست آن را به
+  // integer تبدیل کند. چون ویزارد افزودن صرافی در admin.js اصلاً فیلدی برای is_multi نمی‌پرسد،
+  // این مقدار همیشه undefined بود و همین باگ همیشه رخ می‌داد. حالا همیشه عدد صحیح ۰/۱ فرستاده می‌شود.
   const res = await pool.query(
     'INSERT INTO api_sources (name, type, base_url, api_key, secret_key, supports_products, is_multi, priority, ip_slot, is_active, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, NOW()) RETURNING *',
-    [name, type, base_url, api_key, secret_key, supports_products, is_multi || false, priority || 1, ip_slot || 'default']
+    [name, type, base_url, api_key, secret_key, supports_products || null, is_multi ? 1 : 0, parseInt(priority, 10) || 1, ip_slot || 'default']
   );
   return res.rows[0];
 }
 
 async function updateApiSource(id, data) {
-  const fields = Object.keys(data).map((f, i) => `${f} = $${i + 2}`);
-  const values = Object.values(data);
+  // گارد دفاعی: اگر در آینده جایی مقدار boolean واقعی (true/false) برای یک ستون INTEGER مثل
+  // is_active/is_multi پاس داده شود، همینجا به ۰/۱ تبدیلش می‌کنیم تا دوباره همان باگ رخ ندهد.
+  const normalized = {};
+  for (const [key, value] of Object.entries(data)) {
+    normalized[key] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
+  }
+  const fields = Object.keys(normalized).map((f, i) => `${f} = $${i + 2}`);
+  const values = Object.values(normalized);
   const res = await pool.query(
     `UPDATE api_sources SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
     [id, ...values]
@@ -350,7 +361,10 @@ async function addProductApiLink(productType, productKey, apiSourceId, priority 
     [productType, productKey, apiSourceId]
   );
   if (existing.rows.length > 0) {
-    await pool.query('UPDATE product_api_links SET active = 1, priority = $4 WHERE id = $5', [priority, existing.rows[0].id]);
+    // ⚠️ باگ پیدا‌شده (ناخواسته، جدا از سند): اینجا placeholderها $4 و $5 بودند ولی فقط ۲ مقدار
+    // پاس داده می‌شد؛ یعنی هر بار یک محصول از قبل‌لینک‌شده دوباره لینک می‌شد، کوئری با خطای
+    // «bind message supplies 2 parameters but prepared statement requires 5» شکست می‌خورد.
+    await pool.query('UPDATE product_api_links SET active = 1, priority = $1 WHERE id = $2', [priority, existing.rows[0].id]);
     return (await pool.query('SELECT * FROM product_api_links WHERE id = $1', [existing.rows[0].id])).rows[0];
   }
   const res = await pool.query(
@@ -449,11 +463,30 @@ async function setSellOrderPendingUwallet(sellOrderId, { providerTxId, apiSource
 }
 
 // همه‌ی سفارش‌های فروشی که منتظر نتیجه‌ی uWallet هستند — برای جاب پولینگ ۳۰ ثانیه‌ای
+// مایگریشن امنِ خودترمیم‌شونده: اگر ستون provider_tx_id به هر دلیلی (مثلاً نصب خیلی قدیمی که
+// initDb کامل اجرا نشده) هنوز وجود نداشت، همینجا خودش می‌سازدش و یک‌بار دیگر تلاش می‌کند —
+// به‌جای اینکه هر ۳۰ ثانیه همین خطا را بی‌نتیجه تکرار کند.
 async function getPendingUwalletSellOrders() {
-  const res = await pool.query(
-    `SELECT * FROM sell_orders WHERE status = 'pending_uwallet' AND provider_tx_id IS NOT NULL ORDER BY created_at ASC LIMIT 100`
-  );
-  return res.rows;
+  try {
+    const res = await pool.query(
+      `SELECT * FROM sell_orders WHERE status = 'pending_uwallet' AND provider_tx_id IS NOT NULL ORDER BY created_at ASC LIMIT 100`
+    );
+    return res.rows;
+  } catch (e) {
+    if (e && e.code === '42703') { // undefined_column
+      try {
+        await pool.query('ALTER TABLE sell_orders ADD COLUMN IF NOT EXISTS provider_tx_id TEXT');
+        const retry = await pool.query(
+          `SELECT * FROM sell_orders WHERE status = 'pending_uwallet' AND provider_tx_id IS NOT NULL ORDER BY created_at ASC LIMIT 100`
+        );
+        return retry.rows;
+      } catch (e2) {
+        console.log('❌ خطا در مایگریشن خودکار ستون provider_tx_id:', e2.message || e2.code || JSON.stringify(e2));
+        return [];
+      }
+    }
+    throw e; // خطاهای دیگر (مثلاً قطعی موقت اتصال) باید توسط caller (exchangePolling.js) لاگ و دوباره امتحان شوند
+  }
 }
 
 async function getSellOrderByProviderTxId(providerTxId) {
