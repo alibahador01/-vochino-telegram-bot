@@ -244,7 +244,8 @@ require('./handlers/admin')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
 require('./handlers/profile')(bot);
-require('./handlers/vpn')(bot);
+const registerVpnHandlers = require('./handlers/vpn');
+registerVpnHandlers(bot);
 require('./handlers/currencyFeed')(bot);
 
 // ==================== ماژول هوچینو⁰¹ (کاملاً مستقل) ====================
@@ -278,6 +279,11 @@ bot.catch((err, ctx) => {
 // ==================== راه‌اندازی ====================
 async function init() {
   await initDb();
+
+  // ⚠️ رفع باگ ریس بین initDb() و سلامت‌سنجی VPN: این دیگه زمان require (بالای فایل) اجرا
+  // نمی‌شه، بلکه فقط بعد از تمام‌شدن initDb() — همون چیزی که باعث خطای تکراری «افزودن ستون
+  // vpn_servers» می‌شد.
+  registerVpnHandlers.startVpnHealthCheck(bot);
 
   const cacheLoaded = await loadTextsCache();
   if (!cacheLoaded) {
