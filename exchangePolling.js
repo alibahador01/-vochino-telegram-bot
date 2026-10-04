@@ -12,6 +12,7 @@
 const { getPendingUwalletSellOrders, getApiSourceById, getSellProductByKey, finalizeSellOrderUwallet, logTransaction } = require('./db');
 const { calculateSellPayout } = require('./exchangeEngine');
 const uwallet = require('./uwallet');
+const { describeError } = require('./util/http');
 
 const POLL_INTERVAL_MS = 30 * 1000;
 let pollTimer = null;
@@ -71,11 +72,14 @@ async function pollOnce(bot) {
         }
         // هر وضعیت دیگری یعنی هنوز pending — کاری نکن، دور بعدی (۳۰ ثانیه دیگر) دوباره چک می‌شود
       } catch (e) {
-        console.log(`❌ خطا در پولینگ سفارش فروش #${order.id}:`, e.message);
+        console.log(`❌ خطا در پولینگ سفارش فروش #${order.id}:`, describeError(e));
       }
     }
   } catch (e) {
-    console.log('❌ خطا در گرفتن لیست سفارش‌های pending_uwallet:', e.message);
+    // ⚠️ رفع باگ لاگ خالی: قبلاً اینجا e.message چاپ می‌شد که گاهی خالی بود؛ الان با describeError
+    // کد خطای Postgres و detail هم چاپ می‌شه (مثلاً اگر ستون/جدول وجود نداشته باشه، اینجا دقیقاً
+    // «relation ... does not exist» یا «column ... does not exist» رو می‌بینی، نه یک خط خالی).
+    console.log('❌ خطا در گرفتن لیست سفارش‌های pending_uwallet:', describeError(e));
   } finally {
     isPolling = false;
   }
@@ -84,7 +88,7 @@ async function pollOnce(bot) {
 function start(bot) {
   if (pollTimer) return; // قبلاً استارت شده
   pollTimer = setInterval(() => {
-    pollOnce(bot).catch(e => console.log('❌ خطای کلی پولینگ uWallet:', e.message));
+    pollOnce(bot).catch(e => console.log('❌ خطای کلی پولینگ uWallet:', describeError(e)));
   }, POLL_INTERVAL_MS);
   console.log('⏱️ پولینگ uWallet هر 30 ثانیه فعال شد.');
 }
