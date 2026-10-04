@@ -5,6 +5,7 @@ const Jimp = require('jimp');
 const QRCode = require('qrcode');
 const { pool, checkMembership, getSetting, setSetting, getUser, getReferrals } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+const { describeError } = require('../util/http');
 
 const VPN_BANNER_PATH = path.join(__dirname, '..', 'assets', 'vpn_banner1.jpg');
 const VPN_QR_BOX = { x0: 0.3076, y0: 0.3861, x1: 0.7158, y1: 0.6589 };
@@ -35,7 +36,38 @@ async function getDashboardUrl(userId) {
   return base + '?user_id=' + userId;
 }
 
+// ⚠️ مایگریشن امنِ خودکفا: این تابع قبلاً فقط ستون اضافه می‌کرد و فرض می‌کرد جدول vpn_servers
+// از قبل توسط initDb() (در db.js) ساخته شده. چون registerVPNHandlers (پایین همین فایل) همان
+// لحظه‌ی require شدن index.js اجرا می‌شود — یعنی قبل از این‌که index.js به‌صورت async منتظر
+// تمام‌شدن initDb() بماند — ممکن بود این ALTERها به جدولی بخورند که هنوز ساخته نشده، و همین باعث
+// می‌شد خطای «افزودن ستون vpn_servers» هر بار (هر ۴۵ ثانیه، در startHealthCheckTimer) تکرار شود.
+// الان خودِ این تابع هم (مثل initDb) ابتدا جدول‌ها را با CREATE TABLE IF NOT EXISTS می‌سازد، پس
+// دیگر به ترتیب اجرا نسبت به initDb() وابسته نیست.
 async function ensureVpnSchema() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vpn_servers (
+        id SERIAL PRIMARY KEY,
+        name TEXT,
+        host TEXT,
+        port INTEGER,
+        protocol TEXT,
+        ip_slot TEXT DEFAULT 'default',
+        created_at TIMESTAMP DEFAULT NOW(),
+        config_text TEXT,
+        priority INTEGER DEFAULT 1,
+        consecutive_failures INTEGER DEFAULT 0,
+        last_checked_at TIMESTAMP,
+        cool_down_until TIMESTAMP,
+        is_active BOOLEAN DEFAULT TRUE,
+        health_status TEXT DEFAULT 'unknown',
+        avg_latency_ms INTEGER DEFAULT 0
+      );
+    `);
+  } catch (e) {
+    console.log('❌ خطا در ساخت جدول vpn_servers:', describeError(e));
+  }
+
   const alterQueries = [
     `ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS config_text TEXT`,
     `ALTER TABLE vpn_servers ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1`,
@@ -46,12 +78,32 @@ async function ensureVpnSchema() {
   ];
   for (const sql of alterQueries) {
     try { await pool.query(sql); } catch (e) {
-      console.log('خطا در افزودن ستون vpn_servers:', e.message);
+      console.log('❌ خطا در افزودن ستون vpn_servers:', describeError(e));
     }
   }
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vpn_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT REFERENCES users(telegram_id),
+        status TEXT DEFAULT 'active',
+        expires_at TIMESTAMP,
+        data_limit BIGINT DEFAULT 5368709120,
+        data_used BIGINT DEFAULT 0,
+        tracking_code TEXT UNIQUE,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+  } catch (e) {
+    console.log('❌ خطا در ساخت جدول vpn_subscriptions:', describeError(e));
+  }
+
   const subAlter = [`ALTER TABLE vpn_subscriptions ADD COLUMN IF NOT EXISTS data_used BIGINT DEFAULT 0`];
   for (const sql of subAlter) {
-    try { await pool.query(sql); } catch (e) {}
+    try { await pool.query(sql); } catch (e) {
+      console.log('❌ خطا در افزودن ستون vpn_subscriptions:', describeError(e));
+    }
   }
 }
 
@@ -83,7 +135,8 @@ async function healthCheckServer(server) {
 }
 
 async function runHealthCheck(bot) {
-  await ensureVpnSchema();
+  // ensureVpnSchema() قبلاً اینجا هر ۴۵ ثانیه دوباره اجرا می‌شد (کاملاً زائد، چون schema یک‌بار در
+  // startVpnHealthCheck ساخته می‌شود) — حذف شد تا هم فشار اضافه به دیتابیس نباشد هم لاگ تکراری.
   const { rows: servers } = await pool.query('SELECT * FROM vpn_servers ORDER BY priority ASC');
   const now = new Date();
   const failureThreshold = parseInt(await getSetting('vpn_failure_threshold', '2'), 10);
@@ -125,8 +178,8 @@ async function runHealthCheck(bot) {
 }
 
 function startHealthCheckTimer(bot) {
-  runHealthCheck(bot).catch(err => console.log('خطا در سلامت‌سنجی اولیه:', err.message));
-  setInterval(() => runHealthCheck(bot).catch(err => console.log('خطا در سلامت‌سنجی:', err.message)), 45000);
+  runHealthCheck(bot).catch(err => console.log('❌ خطا در سلامت‌سنجی اولیه:', describeError(err)));
+  setInterval(() => runHealthCheck(bot).catch(err => console.log('❌ خطا در سلامت‌سنجی:', describeError(err))), 45000);
 }
 
 async function getLatestSub(userId) {
@@ -250,7 +303,12 @@ async function sendComingSoon(ctx) {
 }
 
 function registerVPNHandlers(bot) {
-  ensureVpnSchema().then(() => startHealthCheckTimer(bot)).catch(console.error);
+  // ⚠️ رفع ریشه‌ی باگ تکرارشونده‌ی «خطا در افزودن ستون vpn_servers»: قبلاً همین‌جا، همان لحظه‌ای
+  // که index.js این فایل را require می‌کرد (یعنی قبل از اینکه index.js به initDb() در db.js برسد
+  // و منتظرش بماند)، ensureVpnSchema() زودتر از ساخته‌شدن جدول‌های اصلی اجرا می‌شد — یک race واقعی.
+  // الان این فراخوانی حذف شده و راه‌انداز سلامت‌سنجی (startVpnHealthCheck) را خودِ index.js، بعد از
+  // await initDb()، صدا می‌زند. ensureVpnSchema() همچنان خودکفاست (جدول را خودش هم می‌سازد)، پس حتی
+  // اگر این ترتیب را رعایت نکنیم هم دیگر کرش نمی‌کند — ولی رعایت‌کردنش تمیزتر و بدون خطای گذرا است.
 
   // موقتاً «آماده‌سازی» نشان داده می‌شود؛ sendSpecialOffer دست‌نخورده و کامل زیر همین فایل باقی می‌ماند
   // تا وقتی سرور VPN فعال شد، فقط همین خط زیر به sendSpecialOffer برگردانده شود.
@@ -294,5 +352,13 @@ function registerVPNHandlers(bot) {
   });
 }
 
+// index.js این را بعد از await initDb() صدا می‌زند تا سلامت‌سنجی VPN بدون race شروع شود
+function startVpnHealthCheck(bot) {
+  ensureVpnSchema()
+    .then(() => startHealthCheckTimer(bot))
+    .catch(e => console.log('❌ خطا در راه‌اندازی سلامت‌سنجی VPN:', describeError(e)));
+}
+
 module.exports = registerVPNHandlers;
 module.exports.showVpnMenu = registerVPNHandlers.showVpnMenu = sendSpecialOffer;
+module.exports.startVpnHealthCheck = startVpnHealthCheck;
