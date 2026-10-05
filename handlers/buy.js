@@ -226,11 +226,17 @@ module.exports = function registerBuyHandlers(bot) {
     if (autoResult.executed) return; // کاربر و لاگ قبلاً داخل exchangeEngine مطلع شدند
 
     // اطلاع فوری به ادمین‌ها با اطلاعات کامل مشتری، همراه دکمه تحویل مستقیم
+    // ⚠️ اگه uWallet واقعاً وصل بود ولی موجودی کیف‌پول ما نزدش کافی نبود (کد 10022)، این
+    // یعنی سفارش واقعاً از uWallet اومده و باید دستی تحویل داده بشه — نه اینکه اصلاً وصل نیست.
+    const lowBalanceNote = autoResult.uwalletLowBalance
+      ? `🟢 این سفارش از uWallet اومده — موجودی کیف پول کافی نیست\nلطفاً این سفارش رو دستی تحویل بده\n\n`
+      : '';
     const custUser = await getUser(ctx.from.id);
     const ids = await adminIdsList();
     for (const id of ids) {
       try {
         await ctx.telegram.sendMessage(id,
+          lowBalanceNote +
           `🛒 سفارش خرید جدید\n` +
           `👤 آیدی مشتری: ${ctx.from.id}\n` +
           `👤 نام: ${custUser ? (custUser.full_name || 'ثبت نشده') : 'ثبت نشده'}\n` +
