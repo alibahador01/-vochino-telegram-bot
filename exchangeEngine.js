@@ -167,7 +167,9 @@ async function callProviderApi(apiSource, action, payload) {
     if (action === 'buy') {
       // خرید کاربر از ما = ما از uWallet یک ووچر با موجودی‌مان می‌سازیم و کدش را تحویل می‌دهیم
       const r = await uwallet.createVoucher(apiSource, { coin, amount: payload.amount });
-      if (!r.success) return { success: false, error: r.error };
+      // ⚠️ errorCode رو هم برمی‌گردونیم (نه فقط پیام) تا caller (tryAutoFulfillBuy) بتونه دقیقاً
+      // تشخیص بده خطا از نوع «موجودی کافی نیست» (کد ۱۰۰۲۲ طبق مستندات uWallet) بوده یا نه
+      if (!r.success) return { success: false, error: r.error, errorCode: r.errorCode };
       return {
         success: true,
         providerTxId: r.transactionId,
@@ -182,7 +184,7 @@ async function callProviderApi(apiSource, action, payload) {
       // فروش کاربر به ما = ما کد ووچر مشتری را روی uWallet فعال (use) می‌کنیم
       const voucherCode = (payload.meta && payload.meta.voucherCode) || '';
       const r = await uwallet.useVoucher(apiSource, { coin, code: voucherCode });
-      if (!r.success) return { success: false, error: r.error };
+      if (!r.success) return { success: false, error: r.error, errorCode: r.errorCode };
 
       // ⚠️ جداسازی دقیق کارمزد uWallet از کارمزد پنل: پاسخ همزمان POST /voucher/use فقط
       // receive برمی‌گردونه، نه fee یا amount (طبق مستندات رسمی uWallet). برای این‌که
@@ -280,12 +282,25 @@ async function callProviderApi(apiSource, action, payload) {
 // چون برای صرافی‌هایی مثل uWallet لازم است coin_code محصول (مثلاً UUSD/HotVoucher) را بدانیم —
 // چیزی که فقط از روی productKey قابل استخراج نیست و باید از ردیف محصول خوانده شود.
 async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trackingCode, product }, bot) {
-  if (!(await isAutoExecutionEnabled())) return { executed: false, reason: 'manual_mode' };
+  // 🔎 لاگ‌های واضح طبق درخواست: از همین خط مشخصه آیا اصلاً صرافی فراخوانی می‌شه یا نه، و چرا نه
+  if (!(await isAutoExecutionEnabled())) {
+    console.log(`ℹ️ [خرید خودکار] حالت اجرا روی «دستی»ست (تنظیمات پنل) — هیچ صرافی‌ای فراخوانی نمی‌شود. سفارش ${trackingCode} دستی می‌ماند.`);
+    return { executed: false, reason: 'manual_mode' };
+  }
 
   const chain = await getApiChainForProduct('buy', productKey);
-  if (chain.length === 0) return { executed: false, reason: 'no_api_link' };
+  if (chain.length === 0) {
+    console.log(`ℹ️ [خرید خودکار] هیچ صرافی‌ای به محصول «${productKey}» وصل نیست (product_api_links خالیه) — سفارش ${trackingCode} دستی می‌ماند.`);
+    return { executed: false, reason: 'no_api_link' };
+  }
+
+  console.log(`🔄 [خرید خودکار] ${chain.length} صرافی برای «${productKey}» پیدا شد: ${chain.map(a => `${a.name}(${a.type})`).join(', ')} — سفارش ${trackingCode}`);
+
+  let uwalletLowBalance = false;
+  let lastError = null;
 
   for (const apiSource of chain) {
+    console.log(`🔄 [خرید خودکار] در حال فراخوانی ${apiSource.name} (نوع: ${apiSource.type}, coin_code: ${product && product.coin_code || '—'}) برای سفارش ${trackingCode}...`);
     const result = await callProviderApi(apiSource, 'buy', {
       productKey,
       amount,
@@ -293,6 +308,7 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
       coinCode: product && product.coin_code
     });
     if (result.success) {
+      console.log(`✅ [خرید خودکار] ${apiSource.name} موفق شد — سفارش ${trackingCode}`);
       const updated = await setOrderFulfillment(orderId, {
         status: 'completed',
         apiSourceId: apiSource.id,
@@ -319,24 +335,41 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
       }
       return { executed: true, apiSource, result };
     }
-    console.log(`❌ صرافی ${apiSource.name} برای سفارش ${trackingCode} شکست خورد: ${result.error}`);
+
+    lastError = result.error;
+    console.log(`❌ [خرید خودکار] ${apiSource.name} شکست خورد برای سفارش ${trackingCode}: ${result.error}${result.errorCode ? ' (کد ' + result.errorCode + ')' : ''}`);
+
+    // کد ۱۰۰۲۲ طبق مستندات رسمی uWallet یعنی دقیقاً «Low balance» — موجودی کیف‌پول ما نزد uWallet کافی نیست
+    if (apiSource.type === 'uwallet' && result.errorCode === 10022) {
+      uwalletLowBalance = true;
+    }
   }
 
-  return { executed: false, reason: 'all_providers_failed' };
+  console.log(`⚠️ [خرید خودکار] همه‌ی صرافی‌های متصل شکست خوردند — سفارش ${trackingCode} دستی می‌ماند. آخرین خطا: ${lastError}`);
+  return { executed: false, reason: 'all_providers_failed', uwalletLowBalance, lastError };
 }
 
 // ==================== اجرای خودکار سفارش فروش ====================
 async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount, product, trackingCode, voucherCode }, bot) {
-  if (!(await isAutoExecutionEnabled())) return { executed: false, reason: 'manual_mode' };
+  if (!(await isAutoExecutionEnabled())) {
+    console.log(`ℹ️ [فروش خودکار] حالت اجرا روی «دستی»ست (تنظیمات پنل) — سفارش فروش ${trackingCode} دستی می‌ماند.`);
+    return { executed: false, reason: 'manual_mode' };
+  }
 
   const chain = await getApiChainForProduct('sell', productKey);
-  if (chain.length === 0) return { executed: false, reason: 'no_api_link' };
+  if (chain.length === 0) {
+    console.log(`ℹ️ [فروش خودکار] هیچ صرافی‌ای به محصول «${productKey}» وصل نیست — سفارش فروش ${trackingCode} دستی می‌ماند.`);
+    return { executed: false, reason: 'no_api_link' };
+  }
+
+  console.log(`🔄 [فروش خودکار] ${chain.length} صرافی برای «${productKey}» پیدا شد: ${chain.map(a => `${a.name}(${a.type})`).join(', ')} — سفارش فروش ${trackingCode}`);
 
   // کارمزد و مبلغ قابل‌پرداخت همیشه بر اساس «قیمت واحد دستی پنل» محاسبه می‌شود، نه عددی که
   // صرافی برمی‌گرداند — طبق تصمیم قطعی پروژه (uWallet قیمت لحظه‌ای ندارد).
   const { commission, payout } = calculateSellPayout(amount, product);
 
   for (const apiSource of chain) {
+    console.log(`🔄 [فروش خودکار] در حال فراخوانی ${apiSource.name} (نوع: ${apiSource.type}, coin_code: ${product && product.coin_code || '—'}) برای سفارش فروش ${trackingCode}...`);
     const result = await callProviderApi(apiSource, 'sell', {
       productKey,
       amount,
@@ -346,9 +379,10 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
     });
 
     if (!result.success) {
-      console.log(`❌ صرافی ${apiSource.name} برای فروش ${trackingCode} شکست خورد: ${result.error}`);
+      console.log(`❌ [فروش خودکار] ${apiSource.name} شکست خورد برای فروش ${trackingCode}: ${result.error}${result.errorCode ? ' (کد ' + result.errorCode + ')' : ''}`);
       continue;
     }
+    console.log(`✅ [فروش خودکار] ${apiSource.name} پاسخ داد — وضعیت: ${result.status || 'نامشخص'} — سفارش فروش ${trackingCode}`);
 
     // ==================== شاخه‌ی uWallet: ممکن است confirm / pending / reject باشد ====================
     if (apiSource.type === 'uwallet') {
