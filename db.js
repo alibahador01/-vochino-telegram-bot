@@ -337,6 +337,32 @@ async function deleteApiSource(id) {
   await pool.query('UPDATE api_sources SET is_active = 0 WHERE id = $1', [id]);
 }
 
+// حذف واقعی و کامل صرافی (نه فقط غیرفعال‌سازی) — برای وقتی ادمین می‌خواد یه صرافی با
+// تنظیمات اشتباه رو کاملاً پاک کنه و از صفر دوباره ثبت کنه.
+// ⚠️ product_api_links یه FK واقعی به api_sources داره (REFERENCES api_sources(id) بدون
+// ON DELETE CASCADE) — اگه اول این ردیف‌ها رو پاک نکنیم، DELETE روی api_sources با خطای
+// «foreign key constraint» شکست می‌خوره. orders/sell_orders/products/sell_products هم ستون
+// api_source_id دارن ولی FK واقعی نیستن (فقط INTEGER ساده)، پس مانع حذف نمی‌شن؛ برای تمیزی،
+// رفرنس‌های products/sell_products رو هم NULL می‌کنیم (سوابق orders/sell_orders دست‌نخورده
+// می‌مونه چون جزو تاریخچه‌ی مالیه و نباید تغییر کنه).
+async function hardDeleteApiSource(id) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM product_api_links WHERE api_source_id = $1', [id]);
+    await client.query('UPDATE products SET api_source_id = NULL WHERE api_source_id = $1', [id]);
+    await client.query('UPDATE sell_products SET api_source_id = NULL WHERE api_source_id = $1', [id]);
+    const res = await client.query('DELETE FROM api_sources WHERE id = $1 RETURNING *', [id]);
+    await client.query('COMMIT');
+    return res.rows[0] || null;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // ==================== product_api_links ====================
 async function getProductApiLinks(productType, productKey) {
   const res = await pool.query(
@@ -1284,6 +1310,7 @@ module.exports = {
   removeProductApiLink,
   getActiveApiForProduct,
   getApiChainForProduct,
+  hardDeleteApiSource,
   setOrderFulfillment,
   getOrderByProviderTxId,
   setSellOrderFulfillment,
