@@ -47,16 +47,24 @@ function translateError(data, httpStatus, rawText) {
   if (!isNaN(code) && ERROR_CODES_FA[code]) {
     return { code, message: `${ERROR_CODES_FA[code]} (کد ${code})` };
   }
-  const msg = (data && (data.message || data.error)) || rawText || `خطای HTTP ${httpStatus}`;
+  // نکته‌ی مهم از تست واقعی: پاسخ موفق uWallet به‌شکل {"message":200,"data":[]} هست — یعنی
+  // فیلد «message» خودش گاهی فقط همون کد HTTP خامه، نه یه توضیح متنی. برای همین اگه message
+  // عدد بود و با httpStatus یکی بود، به‌جاش دنبال data.error یا بدنه‌ی خام می‌گردیم تا چیز
+  // تکراری/بی‌فایده («401») به‌عنوان «توضیح» نشون داده نشه.
+  const rawMsg = data && data.message;
+  const msgLooksLikeStatusCode = typeof rawMsg === 'number' && rawMsg === httpStatus;
+  const msg = (!msgLooksLikeStatusCode && rawMsg) || (data && data.error) || rawText || `خطای HTTP ${httpStatus}`;
   return { code: isNaN(code) ? null : code, message: msg };
 }
 
+// ⚠️ .trim() اینجا هم (نه فقط موقع ذخیره تو admin.js): اگه یه توکن/base_url قبلاً با فاصله یا
+// خط جدید اضافه تو دیتابیس ذخیره شده، نیازی به حذف و دوباره‌ثبت صرافی نیست — همینجا خودش پاک می‌شه.
 function baseUrlOf(apiSource) {
-  return ((apiSource && apiSource.base_url) || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  return ((apiSource && apiSource.base_url) || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
 }
 
 function tokenOf(apiSource) {
-  return (apiSource && apiSource.api_key) || '';
+  return ((apiSource && apiSource.api_key) || '').trim();
 }
 
 async function callUwallet(apiSource, method, path, body) {
@@ -66,7 +74,10 @@ async function callUwallet(apiSource, method, path, body) {
       method,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': tokenOf(apiSource)
+        // دقیقاً طبق مستندات uWallet: «authorization: TOKEN» — حروف کوچک، بدون Bearer.
+        // (HTTP headers استاندارد case-insensitive ان، ولی برای مطابقت ۱۰۰٪ با چیزی که خودشون
+        // گفتن، همینجوری تحت‌اللفظی می‌فرستیم تا هیچ شکی نمونه)
+        'authorization': tokenOf(apiSource)
       },
       body: body !== undefined ? JSON.stringify(body) : undefined
     }, TIMEOUT_MS);
@@ -77,11 +88,20 @@ async function callUwallet(apiSource, method, path, body) {
 
     if (!res.ok) {
       const err = translateError(data, res.status, rawText);
-      return { success: false, error: err.message, errorCode: err.code, raw: data };
+      // ⚠️ رفع باگ «فقط کد 401 لاگ می‌شه»: قبلاً اینجا فقط err.message (که بعضی‌وقتا همون عدد
+      // خام data.message بود، نه توضیح) برمی‌گشت. الان همیشه وضعیت HTTP + بدنه‌ی خام پاسخ uWallet
+      // هم تو پیام خطا هست، صرف‌نظر از این‌که تونستیم کد خطا رو ترجمه کنیم یا نه.
+      const fullMessage = `HTTP ${res.status} — ${err.message} | بدنه پاسخ uWallet: ${rawText || '(خالی)'}`;
+      return { success: false, error: fullMessage, errorCode: err.code, httpStatus: res.status, raw: data };
     }
     return { success: true, data, raw: data };
   } catch (err) {
-    return { success: false, error: 'خطا در ارتباط با uWallet: ' + err.message, errorCode: null };
+    // خطای سطح شبکه (نه HTTP) — کد خطای Node (مثل ECONNREFUSED/ENOTFOUND/ETIMEDOUT) هم اضافه می‌شه
+    return {
+      success: false,
+      error: 'خطا در ارتباط با uWallet: ' + err.message + (err.code ? ' [کد: ' + err.code + ']' : ''),
+      errorCode: null
+    };
   }
 }
 
