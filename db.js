@@ -174,6 +174,19 @@ async function deleteProduct(key) {
   await pool.query('UPDATE products SET active = 0 WHERE key = $1', [key]);
 }
 
+// حذف کامل و واقعی محصول خرید (نه فقط غیرفعال‌سازی) — orders.product_type هیچ FK واقعی‌ای به
+// products.key نداره (فقط TEXT سادست)، پس این حذف چیزی رو تو دیتابیس قفل نمی‌کنه؛ فقط برای
+// اینکه ادمین قبل از حذف بدونه سابقه‌ی سفارش هست یا نه، یه شمارشگر جدا داریم (countOrdersForProduct).
+async function hardDeleteProduct(key) {
+  const res = await pool.query('DELETE FROM products WHERE key = $1 RETURNING *', [key]);
+  return res.rows[0] || null;
+}
+
+async function countOrdersForProduct(key) {
+  const res = await pool.query('SELECT COUNT(*)::int AS c FROM orders WHERE product_type = $1', [key]);
+  return res.rows[0].c;
+}
+
 // ==================== محصولات فروش ====================
 async function getSellProducts(activeOnly = true) {
   let query = 'SELECT * FROM sell_products';
@@ -209,6 +222,16 @@ async function updateSellProduct(key, data) {
 
 async function deleteSellProduct(key) {
   await pool.query('UPDATE sell_products SET active = 0 WHERE key = $1', [key]);
+}
+
+async function hardDeleteSellProduct(key) {
+  const res = await pool.query('DELETE FROM sell_products WHERE key = $1 RETURNING *', [key]);
+  return res.rows[0] || null;
+}
+
+async function countSellOrdersForProduct(key) {
+  const res = await pool.query('SELECT COUNT(*)::int AS c FROM sell_orders WHERE product_type = $1', [key]);
+  return res.rows[0].c;
 }
 
 // ==================== کوپن‌ها ====================
@@ -1214,9 +1237,13 @@ async function initDb() {
     );
   } catch (e) {}
 
-  // coin_code برای اتصال uWallet — یو ووچر = UUSD، هات ووچر = HotVoucher (طبق تصمیم قطعی پروژه)
+  // coin_code برای اتصال uWallet — یو ووچر = UUSD (تأیید شده، کار می‌کنه)
   try { await pool.query("UPDATE products SET coin_code = 'UUSD' WHERE key = 'voucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
-  try { await pool.query("UPDATE products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
+  // ⚠️ «HotVoucher» (حروف مخلوط) تست شد و uWallet با کد 10019 (Coin does not exist) ردش کرد —
+  // یعنی این اسم کوین اشتباهه. چون UUSD کاملاً حروف بزرگه، حدس بعدی (نه قطعی) «HOTVOUCHER» تمام‌بزرگه.
+  // این فقط یه حدسه، نه یه واقعیت تأییدشده — برای همین الان از پنل ادمین (مدیریت محصولات خرید/فروش
+  // → ویرایش Coin Code) قابل تغییره، بدون نیاز به دیپلوی کد، تا وقتی مقدار درست رو از uWallet بگیری.
+  try { await pool.query("UPDATE products SET coin_code = 'HOTVOUCHER' WHERE key = 'hotvoucher' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HotVoucher')"); } catch (e) {}
 
   const sellProducts = [
     { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
@@ -1239,7 +1266,7 @@ async function initDb() {
   // فیکس نصب‌های قبلی: فعال‌سازی فروش هات ووچر + coin_code برای اتصال uWallet
   try { await pool.query("UPDATE sell_products SET active = 1 WHERE key = 'hotvoucher_sell' AND active = 0"); } catch (e) {}
   try { await pool.query("UPDATE sell_products SET coin_code = 'UUSD' WHERE key = 'uvoucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
-  try { await pool.query("UPDATE sell_products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher_sell' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
+  try { await pool.query("UPDATE sell_products SET coin_code = 'HOTVOUCHER' WHERE key = 'hotvoucher_sell' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HotVoucher')"); } catch (e) {}
 
   // --- متون پیش‌فرض bot_texts ---
   // توجه: این حلقه همیشه اجرا می‌شود (نه فقط وقتی جدول خالیه) چون هر INSERT با
@@ -1311,6 +1338,10 @@ module.exports = {
   getActiveApiForProduct,
   getApiChainForProduct,
   hardDeleteApiSource,
+  hardDeleteProduct,
+  countOrdersForProduct,
+  hardDeleteSellProduct,
+  countSellOrdersForProduct,
   setOrderFulfillment,
   getOrderByProviderTxId,
   setSellOrderFulfillment,
