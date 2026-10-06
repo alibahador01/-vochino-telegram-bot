@@ -164,10 +164,24 @@ async function getTransactionStatus(apiSource, transactionId) {
   };
 }
 
+// ==================== موجودی کیف‌پول (ابزار تشخیصی برای پیدا کردن اسم واقعی کوین‌ها) ====================
+// GET /v1/wallet — آرایه‌ای از {coin, amount, free, blocked} برای هر کوینی که حساب uWallet واقعاً
+// توش موجودی/رکورد داره. وقتی پشتیبانی uWallet جواب نمی‌ده، این تنها راه رسمی و بدون‌حدسه که
+// می‌تونی خودت از API خودشون بپرسی «دقیقاً اسم کوین‌هایی که تو حسابم تعریف شدن چیه». توجه: اگه
+// حساب هیچ‌وقت تو یه کوین خاص (مثل Hot Voucher) تراکنش نداشته باشه، ممکنه اصلاً تو این لیست نباشه
+// — یعنی خالی‌بودن لیست لزوماً یعنی «کوین غلطه» نیست، می‌تونه یعنی «هنوز هیچ موجودی‌ای توش نساختی».
+async function getWalletBalances(apiSource) {
+  const result = await callUwallet(apiSource, 'GET', '/v1/wallet');
+  if (!result.success) return result;
+  const rows = Array.isArray(result.data) ? result.data : [];
+  return { success: true, balances: rows, raw: result.data };
+}
+
 module.exports = {
   ERROR_CODES_FA,
   translateError,
   createVoucher,
   useVoucher,
-  getTransactionStatus
+  getTransactionStatus,
+  getWalletBalances
 };
