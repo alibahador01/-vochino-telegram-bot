@@ -165,8 +165,16 @@ async function callProviderApi(apiSource, action, payload) {
     }
 
     if (action === 'buy') {
+      // ⚠️ رفع باگ ۱۰۰۲۹ (Minimum amount is not valid): طبق تست واقعی خودِ کاربر با curl،
+      // uWallet مقدار «amount» کوین HotVoucher رو به ریال می‌خواد، نه تومان (۱ تومان = ۱۰ ریال؛
+      // این با فرمت کد ووچرهای IRR-prefixed هم هم‌خونیه). {"amount":"20000"} رد شد (10029)،
+      // {"amount":"200000"} رد نشد (رسید به 10022 که یعنی فقط موجودی کمه، نه مقدار نامعتبر).
+      // این تبدیل فقط برای HotVoucher لازمه — UUSD (یو ووچر) از قبل درست کار می‌کنه و دست‌نخورده می‌مونه.
+      const RIAL_PEGGED_COINS = ['HotVoucher'];
+      const apiAmount = RIAL_PEGGED_COINS.includes(coin) ? Number(payload.amount) * 10 : payload.amount;
+
       // خرید کاربر از ما = ما از uWallet یک ووچر با موجودی‌مان می‌سازیم و کدش را تحویل می‌دهیم
-      const r = await uwallet.createVoucher(apiSource, { coin, amount: payload.amount });
+      const r = await uwallet.createVoucher(apiSource, { coin, amount: apiAmount });
       // ⚠️ errorCode رو هم برمی‌گردونیم (نه فقط پیام) تا caller (tryAutoFulfillBuy) بتونه دقیقاً
       // تشخیص بده خطا از نوع «موجودی کافی نیست» (کد ۱۰۰۲۲ طبق مستندات uWallet) بوده یا نه
       if (!r.success) return { success: false, error: r.error, errorCode: r.errorCode };
