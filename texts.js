@@ -4,6 +4,7 @@
 
 const { getText } = require('./textManager');
 const { DAILY_LIMIT_TEXT, MIN_WITHDRAW } = require('./constants');
+const { RULES_TEXT } = require('./defaultRules');
 
 /**
  * دریافت یک متن از کش با مقدار پیش‌فرض
@@ -24,7 +25,7 @@ const texts = {
     sharePhoneButton: t('sharePhoneButton', '📱 ارسال شماره تلفن'),
     requestName: t('requestName', 'لطفاً نام و نام خانوادگی خود را وارد کنید:'),
     requestCard: t('requestCard', 'لطفاً شماره کارت بانکی خود را وارد کنید (کارتی که برای واریز استفاده می‌کنید):'),
-    rulesText: t('rulesText', 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.'),
+    rulesText: t('rulesText', RULES_TEXT),
     confirmRulesButton: t('confirmRulesButton', '✅ قوانین را می‌پذیرم'),
     registrationSuccess: t('registrationSuccess', '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: ' + DAILY_LIMIT_TEXT + ' تومان'),
     welcomeBack: t('welcomeBack', 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋'),
