@@ -4,6 +4,7 @@ const { sessions, fillTemplate, backToMenuButton } = require('../utils');
 const { pool, getUser, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { tryAutoFulfillSell, getEffectiveUnitPrice } = require('../exchangeEngine');
+const { escapeMarkdown } = require('../util/http');
 const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
 
@@ -110,9 +111,11 @@ module.exports = function registerSellHandlers(bot) {
 
       delete sessions[ctx.from.id];
 
+      // ⚠️ productName اسم محصوله که از دیتابیس میاد (آزاد) — بدون escape، همون باگ
+      // «can't parse entities» رو برای خود کاربر (نه فقط پنل ادمین) هم ممکن بود بسازه
       ctx.reply(
         `✅ کد ووچر شما ثبت شد و در صف بررسی قرار گرفت.\n\n` +
-        `🛍 محصول: ${session.data.productName}\n` +
+        `🛍 محصول: ${escapeMarkdown(session.data.productName)}\n` +
         `📍 کد پیگیری: \`${trackingCode}\`\n\n` +
         `⏳ پس از بررسی توسط پشتیبانی، نتیجه و فاکتور برای شما ارسال می‌شود.`,
         { parse_mode: 'Markdown' }
