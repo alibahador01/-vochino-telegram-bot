@@ -243,6 +243,9 @@ require('./handlers/game')(bot);
 // ⚠️ orderAdmin باید قبل از admin ثبت شود
 require('./handlers/orderAdmin')(bot);
 require('./handlers/admin')(bot);
+// ⚠️ رفع باگ «مدیریت بونوس‌ها بی‌صداست»: این فایل اصلاً هیچ‌جا require نشده بود، پس
+// bot.action('admin_bonus_settings', ...) هیچ‌وقت ثبت نمی‌شد و دکمه‌اش هیچ هندلری نداشت.
+require('./handlers/adminBonus')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
 require('./handlers/profile')(bot);
@@ -264,7 +267,11 @@ process.on('uncaughtException', (err) => {
 });
 
 bot.catch((err, ctx) => {
+  // ⚠️ قبلاً فقط err.message لاگ می‌شد — برای باگ «message is too long» این کافی نیست، چون
+  // نمی‌فهمیم کدوم ctx.reply/sendMessage تو کدوم فایل این متن طولانی رو ساخته. الان stack
+  // trace کامل هم چاپ می‌شه تا خط دقیق مشخص بشه.
   console.log('BOT ERROR:', err.message);
+  console.log(err.stack);
   try {
     ctx.reply('⚠️ خطای موقت. لطفاً دوباره تلاش کنید.');
   } catch (e) {}
