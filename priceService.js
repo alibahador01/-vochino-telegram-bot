@@ -98,4 +98,11 @@ async function getLivePrice(type, productKey) {
   return { success: true, price: Number(prices[field]), stale: !!prices.stale };
 }
 
-module.exports = { getPrices, checkHealth, slowFluctuatingPercent, renderBar, getLivePrice };
+// آیا این محصولِ خرید «قیمت آنلاین» دارد؟ (یو ووچر، پریمیوم ووچر، پی‌اس ووچر)
+// این تنها منبع حقیقت برای تشخیص است: حداقل خرید = ۱ واحد با قیمت آنلاین، و مقدار سفارش
+// به uWallet = مبلغ ÷ قیمت واحد آنلاین. هات ووچر عمداً اینجا نیست (حداقل دستی از پنل).
+function isOnlineBuyProduct(productKey) {
+  return Object.prototype.hasOwnProperty.call(BUY_FIELD_MAP, productKey);
+}
+
+module.exports = { getPrices, checkHealth, slowFluctuatingPercent, renderBar, getLivePrice, isOnlineBuyProduct };
