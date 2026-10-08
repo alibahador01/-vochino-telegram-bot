@@ -1,8 +1,10 @@
 // textDefaults.js
+const { RULES_TEXT } = require('./defaultRules');
+
 module.exports = [
   // ثبت‌نام
   { key: 'chooseLanguage', category: 'register', value: '🌐 زبان خود را انتخاب کنید / Please choose your language:\n\n🇮🇷 فارسی | 🇬🇧 English | 🇹🇷 Türkçe' },
-  { key: 'rulesText', category: 'register', value: 'قوانین و شرایط استفاده:\n\n(متن قوانین بعداً از پنل مدیریت تکمیل می‌شود)\n\nتوجه: واریزی فقط از کارتی که به نام شما ثبت شده معتبر است.' },
+  { key: 'rulesText', category: 'register', value: RULES_TEXT },
   { key: 'confirmRulesButton', category: 'register', value: '✅ قوانین را می‌پذیرم' },
   { key: 'registrationSuccess', category: 'register', value: '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: {daily_limit} تومان' },
   { key: 'welcomeBack', category: 'register', value: 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋' },
