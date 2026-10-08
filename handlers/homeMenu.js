@@ -8,7 +8,7 @@
 // هندلرهای session-محور (خرید/فروش/پنل ادمین) در index.js ثبت می‌شوند تا دکمه‌ی Home همیشه،
 // حتی وسط یک فلوی نیمه‌کاره، کار کند (و آن سشن نیمه‌کاره را هم پاک می‌کند).
 
-const { sessions, showMainMenu } = require('../utils');
+const { sessions, showMainMenu, reactToMessage } = require('../utils');
 const priceService = require('../priceService');
 
 const HOME_BTN_TEXT = '☰ 𝑯𝒐𝒎𝒆';
@@ -88,6 +88,10 @@ function registerHomeMenuHandlers(bot) {
   // ☰ Home — از هرجای ربات، بدون نیاز به /start، کاربر را به منوی اصلی برمی‌گرداند
   bot.hears(HOME_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
+    // همون ری‌اکشن شناور/بزرگی که روی پیام /start می‌ذاشتیم، الان روی خودِ پیام «☰ Home» هم هست
+    if (ctx.message && ctx.message.message_id) {
+      reactToMessage(ctx, ctx.chat.id, ctx.message.message_id, true);
+    }
     return showMainMenu(ctx);
   });
 
