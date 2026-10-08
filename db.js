@@ -1,6 +1,7 @@
 // db.js
 const { Pool } = require('pg');
 const { DEFAULT_USD_RATE } = require('./constants');
+const { isOnlineBuyProduct } = require('./priceService');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -735,7 +736,9 @@ async function sendRatesToChannel(bot) {
   let message = `📊 **نرخ‌های امروز ووچینو⁰¹**\n\n💰 **نرخ دلار:** ${usdRate.toLocaleString('en-US')} تومان\n\n🛍 **محصولات قابل خرید:**\n`;
   for (const p of products) {
     if (Number(p.hide_price)) {
-      message += `• ${p.name}: حداقل خرید ${Number(p.min_amount).toLocaleString('en-US')} ${p.price_type === 'usd' ? 'دلار' : 'تومان'}\n`;
+      message += isOnlineBuyProduct(p.key)
+        ? `• ${p.name}: حداقل خرید ۱ واحد\n`
+        : `• ${p.name}: حداقل خرید ${Number(p.min_amount).toLocaleString('en-US')} ${p.price_type === 'usd' ? 'دلار' : 'تومان'}\n`;
       continue;
     }
     const unitPrice = Number(p.unit_price || 0);
@@ -1243,6 +1246,8 @@ async function initDb() {
   // درسته — حدس قبلی این فایل («HOTVOUCHER» تمام‌بزرگ) اشتباه بود و اینجا خودش رو اصلاح می‌کنه.
   // (مشکل واقعی ۱۰۰۱۹/۱۰۰۲۹ ربطی به اسم کوین نداشت، سر مقدار amount بود — رفع شد تو exchangeEngine.js)
   try { await pool.query("UPDATE products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HOTVOUCHER')"); } catch (e) {}
+  // یو/پریمیوم/پی‌اس ووچر قیمت آنلاین دارند و دیگه به نرخ دلار وابسته نیستند → price_type = تومان
+  try { await pool.query("UPDATE products SET price_type = 'toman' WHERE key IN ('voucher','premium_voucher','ps_voucher') AND price_type = 'usd'"); } catch (e) {}
 
   const sellProducts = [
     { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
