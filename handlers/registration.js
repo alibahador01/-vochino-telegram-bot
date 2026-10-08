@@ -1,7 +1,7 @@
 // handlers/registration.js
 const texts = require('../texts');
 const { sessions, showMainMenu, reactToMessage } = require('../utils');
-const { ensurePersistentKeyboard } = require('./homeMenu');
+const { ensurePersistentKeyboard, sendSticker, STICKERS } = require('./homeMenu');
 const { pool, getUser, createUser, updateUser, getSetting, checkMembership, getRequiredChannels } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { checkAndGrantBonuses } = require('./bonusEngine');
@@ -51,6 +51,8 @@ module.exports = function registerRegistrationHandlers(bot) {
     if (ctx.message && ctx.message.message_id) {
       reactToMessage(ctx, ctx.chat.id, ctx.message.message_id, true);
     }
+    // استیکر /start قبل از باز شدن منو
+    await sendSticker(ctx, STICKERS.START);
     showMainMenu(ctx);
     ensurePersistentKeyboard(ctx);
   });
