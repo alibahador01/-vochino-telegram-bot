@@ -14,6 +14,7 @@ const {
 } = require('./db');
 const uwallet = require('./uwallet');
 const priceService = require('./priceService');
+const { isOnlineBuyProduct } = require('./priceService');
 
 // ==================== محاسبه کارمزد (منبع واحد، هم برای دستی هم API) ====================
 function calculateCommission(commissionType, commissionValue, baseAmount) {
@@ -28,6 +29,14 @@ function calculateCommission(commissionType, commissionValue, baseAmount) {
 }
 
 // خرید: مبلغ نهایی‌ای که از کاربر کسر می‌شود = مبلغ + کارمزد (کارمزد سود ماست)
+// تعداد واحد کوین از روی مبلغ تومانی و قیمت واحد آنلاین — گرد به پایین تا ۲ رقم اعشار.
+// مثال: ۳۰۰,۰۰۰ تومان با قیمت واحد ۲۷۴,۵۱۹ → 1.09 واحد
+function unitsFromAmount(amountToman, unitPrice) {
+  const a = Number(amountToman), p = Number(unitPrice);
+  if (!a || !p || p <= 0) return 0;
+  return Math.floor((a / p) * 100) / 100;
+}
+
 function calculateBuyFinal(baseAmount, product) {
   const commission = calculateCommission(product.commission_type, product.commission_value, baseAmount);
   return { commission, finalAmount: baseAmount + commission };
@@ -171,7 +180,21 @@ async function callProviderApi(apiSource, action, payload) {
       // {"amount":"200000"} رد نشد (رسید به 10022 که یعنی فقط موجودی کمه، نه مقدار نامعتبر).
       // این تبدیل فقط برای HotVoucher لازمه — UUSD (یو ووچر) از قبل درست کار می‌کنه و دست‌نخورده می‌مونه.
       const RIAL_PEGGED_COINS = ['HotVoucher'];
-      const apiAmount = RIAL_PEGGED_COINS.includes(coin) ? Number(payload.amount) * 10 : payload.amount;
+      let apiAmount;
+      if (RIAL_PEGGED_COINS.includes(coin)) {
+        apiAmount = Number(payload.amount) * 10;
+      } else if (payload.isOnlinePriced) {
+        // ⚠️ یو ووچر/پریمیوم/پی‌اس قیمت آنلاین دارن: کاربر مبلغ «تومان» وارد می‌کند، ولی uWallet
+        // مقدار «واحد کوین» (مثلاً USD برای UUSD) می‌خواهد. پس مقدار = مبلغ ÷ قیمت واحد آنلاین،
+        // با گرد کردن رو به پایین به ۲ رقم اعشار (تا هیچ‌وقت بیشتر از پولی که کاربر داده ساخته نشه).
+        const units = unitsFromAmount(payload.amount, payload.unitPrice);
+        if (!units || units < 0.01) {
+          return { success: false, error: `مقدار محاسبه‌شده برای uWallet معتبر نیست (قیمت واحد آنلاین: ${payload.unitPrice || 0})` };
+        }
+        apiAmount = units.toFixed(2);
+      } else {
+        apiAmount = payload.amount;
+      }
 
       // خرید کاربر از ما = ما از uWallet یک ووچر با موجودی‌مان می‌سازیم و کدش را تحویل می‌دهیم
       const r = await uwallet.createVoucher(apiSource, { coin, amount: apiAmount });
@@ -304,6 +327,19 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
 
   console.log(`🔄 [خرید خودکار] ${chain.length} صرافی برای «${productKey}» پیدا شد: ${chain.map(a => `${a.name}(${a.type})`).join(', ')} — سفارش ${trackingCode}`);
 
+  // محصولات با قیمت آنلاین (یو/پریمیوم/پی‌اس ووچر): مقدار واحد کوین باید با قیمت واحد آنلاین
+  // محاسبه شود، نه مبلغ تومانی خام. قیمت واحد همین لحظه خوانده می‌شود (price-service، با فال‌بک دستی).
+  const isOnlinePriced = isOnlineBuyProduct(productKey);
+  let onlineUnitPrice = 0;
+  if (isOnlinePriced && product) {
+    const { price } = await getEffectiveUnitPrice(product, 'buy');
+    onlineUnitPrice = Number(price) || 0;
+    if (onlineUnitPrice <= 0) {
+      console.log(`⚠️ [خرید خودکار] قیمت واحد آنلاین برای «${productKey}» معتبر نیست — سفارش ${trackingCode} دستی می‌ماند.`);
+      return { executed: false, reason: 'no_unit_price' };
+    }
+  }
+
   let uwalletLowBalance = false;
   let lastError = null;
 
@@ -313,7 +349,9 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
       productKey,
       amount,
       trackingCode,
-      coinCode: product && product.coin_code
+      coinCode: product && product.coin_code,
+      isOnlinePriced,
+      unitPrice: onlineUnitPrice
     });
     if (result.success) {
       console.log(`✅ [خرید خودکار] ${apiSource.name} موفق شد — سفارش ${trackingCode}`);
@@ -469,6 +507,7 @@ module.exports = {
   calculateCommission,
   calculateBuyFinal,
   calculateSellPayout,
+  unitsFromAmount,
   isAutoExecutionEnabled,
   callProviderApi,
   fetchProviderPrice,
