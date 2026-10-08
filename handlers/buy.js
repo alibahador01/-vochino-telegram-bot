@@ -4,6 +4,8 @@ const { sessions, showMainMenu, fillTemplate, generateTrackingCode, backToMenuBu
 const { pool, getUser, getSetting, getProducts, getProductByKey, getAllAdmins, getUsdRate } = require('../db');
 const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
 const { calculateBuyFinal, tryAutoFulfillBuy, getEffectiveUnitPrice } = require('../exchangeEngine');
+const { isOnlineBuyProduct } = require('../priceService');
+const { unitsFromAmount } = require('../exchangeEngine');
 const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
 
@@ -58,10 +60,29 @@ module.exports = function registerBuyHandlers(bot) {
     // حداقل خرید ممکن است در پنل به دلار ثبت شده باشد (price_type='usd')؛ چون کاربر همیشه
     // مبلغ را به تومان وارد می‌کند، اینجا یک‌بار به تومان تبدیل می‌شود تا مقایسه‌ی بعدی درست باشد
     // (قبلاً این تبدیل انجام نمی‌شد و برای محصولات دلاری عملاً هیچ حداقلی اعمال نمی‌شد).
-    const usdRate = await getUsdRate();
-    const minAmountToman = product.price_type === 'usd'
-      ? Number(product.min_amount || 0) * usdRate
-      : Number(product.min_amount || 0);
+    // ⚠️ منطق جدید حداقل خرید:
+    // • یو/پریمیوم/پی‌اس ووچر (قیمت آنلاین): حداقل خرید = ۱ واحد با قیمت آنلاین همین لحظه.
+    //   نمایش به کاربر «۱ واحد» است و تنظیم دستی ندارد.
+    // • هات ووچر و بقیه: حداقل دستی از پنل ادمین، به تومان (بدون هیچ وابستگی به نرخ دلار).
+    // • محصولات قدیمی دلاری غیرآنلاین (price_type='usd') مثل قبل به دلار تبدیل می‌شوند.
+    const isOnline = isOnlineBuyProduct(key);
+    let onlineUnitPrice = 0;
+    let minAmountToman;
+    let minLabel;
+
+    if (isOnline) {
+      const { price } = await getEffectiveUnitPrice(product, 'buy');
+      onlineUnitPrice = Number(price) || 0;
+      minAmountToman = onlineUnitPrice; // ۱ واحد = قیمت واحد آنلاین
+      minLabel = '۱ واحد';
+    } else if (product.price_type === 'usd') {
+      const usdRate = await getUsdRate();
+      minAmountToman = Number(product.min_amount || 0) * usdRate;
+      minLabel = `${Number(product.min_amount || 0).toLocaleString('en-US')} دلار`;
+    } else {
+      minAmountToman = Number(product.min_amount || 0);
+      minLabel = `${minAmountToman.toLocaleString('en-US')} تومان`;
+    }
 
     sessions[ctx.from.id] = {
       flow: 'buy',
@@ -70,17 +91,11 @@ module.exports = function registerBuyHandlers(bot) {
         productType: key,
         productName: product.name,
         minAmount: minAmountToman,
-        maxAmount: Number(product.max_amount || 0)
+        maxAmount: Number(product.max_amount || 0),
+        isOnline,
+        unitPrice: onlineUnitPrice
       }
     };
-
-    // حداقل خرید همیشه به خود مشتری «به همون واحدی که ادمین از پنل تنظیم کرده» نشان داده می‌شود
-    // (مثلاً «۱ دلار») — بدون هیچ تبدیل زنده به تومان، چون آن تبدیل با تغییر نرخ دلار عوض می‌شد
-    // و باعث می‌شد انگار خود «حداقل خرید» با نرخ دلار جابه‌جا می‌شود؛ در حالی که حداقل خرید یک
-    // عدد ثابت و مستقل است که خود ادمین از «تنظیمات کلی» تنظیم می‌کند.
-    const minLabel = product.price_type === 'usd'
-      ? `${Number(product.min_amount || 0).toLocaleString('en-US')} دلار`
-      : `${minAmountToman.toLocaleString('en-US')} تومان`;
 
     // خط «قیمت واحد» فقط برای محصولاتی نمایش داده می‌شود که hide_price نخورده‌اند (مثلاً هات ووچر ندارد)
     let priceLine = '';
@@ -141,6 +156,9 @@ module.exports = function registerBuyHandlers(bot) {
       `📋 پیش‌فاکتور خرید\n` +
       `🛍 محصول: ${session.data.productName}\n` +
       `💰 مبلغ: ${amount.toLocaleString('en-US')} تومان\n` +
+      (session.data.isOnline && session.data.unitPrice > 0
+        ? `📦 مقدار: ${unitsFromAmount(amount, session.data.unitPrice).toFixed(2)} واحد\n`
+        : '') +
       `💳 کارمزد: ${commission.toLocaleString('en-US')} تومان\n` +
       `💵 قابل پرداخت: ${finalAmount.toLocaleString('en-US')} تومان\n\n` +
       `آیا تأیید می‌کنید؟`,
