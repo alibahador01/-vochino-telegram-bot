@@ -1239,11 +1239,10 @@ async function initDb() {
 
   // coin_code برای اتصال uWallet — یو ووچر = UUSD (تأیید شده، کار می‌کنه)
   try { await pool.query("UPDATE products SET coin_code = 'UUSD' WHERE key = 'voucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
-  // ⚠️ «HotVoucher» (حروف مخلوط) تست شد و uWallet با کد 10019 (Coin does not exist) ردش کرد —
-  // یعنی این اسم کوین اشتباهه. چون UUSD کاملاً حروف بزرگه، حدس بعدی (نه قطعی) «HOTVOUCHER» تمام‌بزرگه.
-  // این فقط یه حدسه، نه یه واقعیت تأییدشده — برای همین الان از پنل ادمین (مدیریت محصولات خرید/فروش
-  // → ویرایش Coin Code) قابل تغییره، بدون نیاز به دیپلوی کد، تا وقتی مقدار درست رو از uWallet بگیری.
-  try { await pool.query("UPDATE products SET coin_code = 'HOTVOUCHER' WHERE key = 'hotvoucher' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HotVoucher')"); } catch (e) {}
+  // ✅ تأیید نهایی با تست واقعی curl توسط خود کاربر: اسم کوین دقیقاً «HotVoucher» (حروف مخلوط)
+  // درسته — حدس قبلی این فایل («HOTVOUCHER» تمام‌بزرگ) اشتباه بود و اینجا خودش رو اصلاح می‌کنه.
+  // (مشکل واقعی ۱۰۰۱۹/۱۰۰۲۹ ربطی به اسم کوین نداشت، سر مقدار amount بود — رفع شد تو exchangeEngine.js)
+  try { await pool.query("UPDATE products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HOTVOUCHER')"); } catch (e) {}
 
   const sellProducts = [
     { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
@@ -1266,7 +1265,8 @@ async function initDb() {
   // فیکس نصب‌های قبلی: فعال‌سازی فروش هات ووچر + coin_code برای اتصال uWallet
   try { await pool.query("UPDATE sell_products SET active = 1 WHERE key = 'hotvoucher_sell' AND active = 0"); } catch (e) {}
   try { await pool.query("UPDATE sell_products SET coin_code = 'UUSD' WHERE key = 'uvoucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
-  try { await pool.query("UPDATE sell_products SET coin_code = 'HOTVOUCHER' WHERE key = 'hotvoucher_sell' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HotVoucher')"); } catch (e) {}
+  // ✅ همون تأیید نهایی بالا، برای سمت فروش
+  try { await pool.query("UPDATE sell_products SET coin_code = 'HotVoucher' WHERE key = 'hotvoucher_sell' AND (coin_code IS NULL OR coin_code = '' OR coin_code = 'HOTVOUCHER')"); } catch (e) {}
 
   // --- متون پیش‌فرض bot_texts ---
   // توجه: این حلقه همیشه اجرا می‌شود (نه فقط وقتی جدول خالیه) چون هر INSERT با
