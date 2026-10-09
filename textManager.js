@@ -1,6 +1,6 @@
 // textManager.js
 // سیستم کش و مدیریت متن‌های ربات
-const { getAllBotTexts, getBotTextByKey, updateBotText } = require('./db');
+const { getAllBotTexts, getBotTextByKey, updateBotText, deleteBotText } = require('./db');
 
 // کش در حافظه
 let textsCache = {};
@@ -192,12 +192,39 @@ function getTextInfo(key) {
  */
 function getAllCategories() {
   if (!cacheLoaded) return [];
-  
+
   const categories = new Set();
   for (const key in textsCache) {
     categories.add(textsCache[key].category);
   }
   return Array.from(categories).sort();
+}
+
+/**
+ * لیست کامل تمام کلیدهای موجود تو کش (یعنی همون چیزی که الان واقعاً توی جدول bot_texts هست)
+ * — برای پیداکردن متن‌های «یتیم» (کلیدهایی که توی DB موندن ولی دیگه توی textDefaults.js
+ * نیستن، مثلاً از یه نسخه‌ی قدیمی‌تر کد که اون کلید عوض/حذف شده ولی ردیفش توی دیتابیس
+ * باقی مونده — چون seed با ON CONFLICT DO NOTHING فقط اضافه می‌کنه، هیچ‌وقت پاک نمی‌کنه)
+ * @returns {Array<{key:string, category:string, value:string}>}
+ */
+function getAllCachedTexts() {
+  if (!cacheLoaded) return [];
+  return Object.keys(textsCache).map(key => ({
+    key,
+    category: textsCache[key].category,
+    value: textsCache[key].value
+  }));
+}
+
+/**
+ * حذف یک متنِ یتیم از دیتابیس و از کش. فقط برای کلیدهایی استفاده بشه که در textDefaults.js
+ * دیگه وجود ندارن (پنل ادمین قبل از صدازدن این تابع این چک رو می‌کنه).
+ * @param {string} key
+ */
+async function removeOrphanText(key) {
+  const deleted = await deleteBotText(key);
+  if (deleted) delete textsCache[key];
+  return !!deleted;
 }
 
 /**
@@ -219,6 +246,8 @@ module.exports = {
   refreshText,
   getTextInfo,
   getAllCategories,
+  getAllCachedTexts,
+  removeOrphanText,
   formatTextForDisplay,
   isCacheLoaded: () => cacheLoaded
 };
