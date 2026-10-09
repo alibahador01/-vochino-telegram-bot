@@ -8,27 +8,31 @@ function isAdmin(telegramId) {
   return ADMIN_IDS.includes(Number(telegramId));
 }
 
+// بازگشت به منو — آرام و بدون مزاحمت برای مشتری:
+// • بدون استیکر و بدون ری‌اکشن شناور (فقط ری‌اکشن ساده/غیرشناور)
+// • ری‌اکشن فقط روی پیام منوی تازه‌ارسال‌شده گذاشته می‌شود، نه روی پیامی که همین الان حذف شده
+//   (روی پیام حذف‌شده، تلگرام «message to react not found» می‌دهد)
+async function backToMenuQuietly(ctx) {
+  const sent = await showMainMenu(ctx);
+  if (sent && sent.message_id) {
+    await reactToMessage(ctx, ctx.chat.id, sent.message_id, false);
+  }
+}
+
 module.exports = function registerMiscHandlers(bot) {
 
   bot.action('back_main_menu', async (ctx) => {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
-    // ری‌اکشن ساده (غیرشناور) روی پیامی که «بازگشت به منو» رویش زده شد
-    if (ctx.callbackQuery && ctx.callbackQuery.message) {
-      reactToMessage(ctx, ctx.chat.id, ctx.callbackQuery.message.message_id, false);
-    }
     try { await ctx.deleteMessage(); } catch (e) {}
-    showMainMenu(ctx);
+    await backToMenuQuietly(ctx);
   });
 
   bot.action('cancel_flow', async (ctx) => {
     ctx.answerCbQuery();
     delete sessions[ctx.from.id];
-    if (ctx.callbackQuery && ctx.callbackQuery.message) {
-      reactToMessage(ctx, ctx.chat.id, ctx.callbackQuery.message.message_id, false);
-    }
     try { await ctx.deleteMessage(); } catch (e) {}
-    showMainMenu(ctx);
+    await backToMenuQuietly(ctx);
   });
 
   // توجه: هندلرهای menu_buy / menu_sell / menu_wallet / menu_bonus از اینجا حذف شدند —
