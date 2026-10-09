@@ -96,13 +96,19 @@ function registerHomeMenuHandlers(bot) {
   // ☰ Home — از هرجای ربات، بدون نیاز به /start، کاربر را به منوی اصلی برمی‌گرداند
   bot.hears(HOME_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
-    // ری‌اکشن شناور/بزرگ روی پیام «☰ Home» (همان رفتاری که روی /start داریم)
-    if (ctx.message && ctx.message.message_id) {
-      reactToMessage(ctx, ctx.chat.id, ctx.message.message_id, true);
-    }
+
     // استیکر Home قبل از باز شدن منو
     await sendSticker(ctx, STICKERS.HOME);
-    return showMainMenu(ctx);
+
+    // منو را می‌فرستیم. showMainMenu همان پیام ارسال‌شده‌ی تلگرام را برمی‌گرداند،
+    // پس message_id همین پیام منو است و قطعاً وجود دارد.
+    // ⚠️ ری‌اکشن قبلی حذف شد: قبلاً روی پیام «☰ Home» کاربر گذاشته می‌شد که گاهی
+    // «message to react not found» می‌داد. حالا ری‌اکشن شناور روی خود پیام منو می‌نشیند
+    // (همان رفتار /start: is_big=true، ایموجی از تنظیم start_reaction در پنل ادمین).
+    const sent = await showMainMenu(ctx);
+    if (sent && sent.message_id) {
+      await reactToMessage(ctx, ctx.chat.id, sent.message_id, true);
+    }
   });
 
   // 💱 Live Price — استیکر، سپس پیام متنی ساده قیمت‌ها (بدون هیچ دکمه‌ای)
