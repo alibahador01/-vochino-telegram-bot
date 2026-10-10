@@ -4,6 +4,7 @@ const { sessions, fillTemplate, backToMenuButton } = require('../utils');
 const { pool, getUser, getSellProducts, getSellProductByKey, getAllAdmins } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { tryAutoFulfillSell, getEffectiveUnitPrice } = require('../exchangeEngine');
+const { validateVoucherCodeFormat } = require('../uwallet');
 const { escapeMarkdown } = require('../util/http');
 const { startVerification, checkDailyLimit } = require('./verification');
 const R = require('./receipts');
@@ -72,7 +73,8 @@ module.exports = function registerSellHandlers(bot) {
       data: {
         productType: key,
         productName: product.name,
-        unitPrice: effectiveUnitPrice
+        unitPrice: effectiveUnitPrice,
+        sampleCode: product.sample_code || null
       }
     };
 
@@ -96,6 +98,15 @@ module.exports = function registerSellHandlers(bot) {
     const voucherCode = ctx.message.text.trim();
     if (voucherCode.length < 5) {
       return ctx.reply('❌ کد ووچر نامعتبر است. لطفاً یک کد صحیح وارد کنید.');
+    }
+
+    // ⚠️ رفع درخواست: اعتبارسنجی فرمت کد ووچر قبل از فرستادن به uWallet — فقط بر اساس
+    // sample_code همین محصول (که ادمین خودش از پنل تنظیم کرده)، نه یک فرض ثابتِ سراسری. این‌جوری
+    // هم یک فراخوانی بی‌فایده‌ی API صرفه‌جویی می‌شه، هم کاربر فوری متوجه اشتباه تایپی می‌شه،
+    // به‌جای این‌که اول «در صف بررسی» بشه و چند لحظه بعد رد.
+    const formatCheck = validateVoucherCodeFormat(voucherCode, session.data.sampleCode);
+    if (!formatCheck.valid) {
+      return ctx.reply(`❌ فرمت کد ووچر صحیح نیست.\n📝 ${formatCheck.reason}\n\nلطفاً دوباره کد را وارد کنید:`);
     }
 
     const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
@@ -134,11 +145,19 @@ module.exports = function registerSellHandlers(bot) {
 
       if (autoResult.executed) return; // کاربر و لاگ قبلاً داخل exchangeEngine مطلع شدند
 
+      // ⚠️ همون رفتار سمت خرید: اگه uWallet واقعاً وصل بود ولی موجودی کیف‌پول ما نزدش کافی
+      // نبود (کد ۱۰۰۲۲)، این یعنی باید دستی تحویل داده بشه چون مشکل از ماست، نه این‌که اصلاً
+      // API وصل نیست — این نکته باید به ادمین واضح گفته بشه.
+      const lowBalanceNote = autoResult.uwalletLowBalance
+        ? `🟢 این سفارش از uWallet اومده — موجودی کیف پول کافی نیست\nلطفاً این سفارش رو دستی تحویل بده\n\n`
+        : '';
+
       // برای ادمین: یک پیام واحد با کد ووچر مشتری و دکمه‌های تأیید/رد
       const ids = await adminIdsList();
       for (const id of ids) {
         try {
           await ctx.telegram.sendMessage(id,
+            lowBalanceNote +
             `♨️ سفارش فروش جدید\n` +
             `👤 کاربر: ${ctx.from.id}\n` +
             `🛍 محصول: ${session.data.productName}\n` +
