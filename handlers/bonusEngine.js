@@ -21,8 +21,15 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
         const activatedDate = new Date(regActivatedAt);
         const userRegDate = new Date(user.registered_at);
         if (userRegDate >= activatedDate) {
-          await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, reg_bonus_received = true WHERE telegram_id = $2', [regGift, userId]);
-          try { ctx.telegram.sendMessage(userId, `🎁 بونوس ثبت‌نام: ${regGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+          // ⚠️ اتمیک: شرط reg_bonus_received=false داخل خودِ UPDATE — جلوگیری از اعطای دوباره‌ی
+          // بونوس اگه این تابع دوبار (مثلاً دو event تقریباً هم‌زمان) برای یک کاربر صدا زده بشه.
+          const upd = await pool.query(
+            'UPDATE users SET bonus_balance = bonus_balance + $1, reg_bonus_received = true WHERE telegram_id = $2 AND reg_bonus_received = false',
+            [regGift, userId]
+          );
+          if (upd.rowCount > 0) {
+            try { ctx.telegram.sendMessage(userId, `🎁 بونوس ثبت‌نام: ${regGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+          }
         }
       }
     }
@@ -44,8 +51,14 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
       const res = await pool.query(query, params);
       const total = Number(res.rows[0].total);
       if (total >= buyMinAmount && total > 0) {
-        await pool.query('UPDATE users SET bonus_balance = bonus_balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2', [buyGift, userId]);
-        try { ctx.telegram.sendMessage(userId, `🎁 بونوس اولین خرید: ${buyGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+        // ⚠️ اتمیک: شرط first_purchase_bonus_received=false داخل خودِ UPDATE
+        const upd = await pool.query(
+          'UPDATE users SET bonus_balance = bonus_balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2 AND first_purchase_bonus_received = false',
+          [buyGift, userId]
+        );
+        if (upd.rowCount > 0) {
+          try { ctx.telegram.sendMessage(userId, `🎁 بونوس اولین خرید: ${buyGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+        }
       }
     }
   }
@@ -73,17 +86,26 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
         // شرط گردش: بونوس دعوت باید در بازی‌ها چرخانده شود تا قابل برداشت شود
         const wagerMultiplier = parseFloat(await getSetting('referral_wagering_multiplier', '1')) || 1;
         const wagerRequirement = Math.round(totalGift * wagerMultiplier);
-        await pool.query(
-          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4',
-          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId]
+        // ⚠️ اتمیک (compare-and-swap روی ref_bonus_count): اگه این تابع برای یک دعوت‌کننده دوبار
+        // تقریباً هم‌زمان صدا زده بشه (مثلاً دو نفر تقریباً هم‌زمان با لینکش ثبت‌نام کنن)، هر دو
+        // می‌تونستن همون receivedCount قدیمی رو بخونن و هر دو eligibleBonuses رو جدا محاسبه و
+        // اعطا کنن — یعنی بونوس دعوت دوبار حساب بشه. با شرط «AND ref_bonus_count = $5» (مقدار
+        // قدیمی که همین تابع خونده)، فقط همون تلاشی که هنوز مقدار رو عوض‌نشده می‌بینه برنده
+        // می‌شه؛ تلاش بازنده عملاً کاری نمی‌کنه (دفعه‌ی بعد که دوباره تریگر بشه، خودش را با
+        // مقدار جدید دوباره محاسبه می‌کنه، پس هیچ بونوسی گم نمی‌شه، فقط دوبار داده نمی‌شه).
+        const upd = await pool.query(
+          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4 AND ref_bonus_count = $5',
+          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId, receivedCount]
         );
-        try {
-          ctx.telegram.sendMessage(
-            userId,
-            `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
-            `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
-          );
-        } catch (e) {}
+        if (upd.rowCount > 0) {
+          try {
+            ctx.telegram.sendMessage(
+              userId,
+              `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
+              `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
+            );
+          } catch (e) {}
+        }
       }
     }
   }
