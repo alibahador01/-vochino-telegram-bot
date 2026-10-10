@@ -4,6 +4,7 @@ const { sessions } = require('../utils');
 const { pool, getUser, getSellProductByKey } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { calculateSellPayout } = require('../exchangeEngine');
+const { checkAndGrantBonuses } = require('./bonusEngine');
 const R = require('./receipts');
 
 function isAdmin(telegramId) {
@@ -46,12 +47,20 @@ module.exports = function registerOrderAdminHandlers(bot) {
   bot.action(/^admin_buy_cancel_(\d+)/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const orderId = ctx.match[1]; ctx.answerCbQuery();
-    const o = (await pool.query('SELECT * FROM orders WHERE id=$1', [orderId])).rows[0];
-    if (!o) return ctx.reply('⚠️ سفارش یافت نشد.');
-    if (o.status !== 'pending_delivery') return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
+    // ⚠️ رفع باگ ریس‌کاندیشن «بازگشت دوباره‌ی پول»: قبلاً وضعیت سفارش با یک SELECT جدا چک
+    // می‌شد و بعد با یک UPDATE کاملاً جدا کنسل می‌شد. اگه دو ادمین (یا یک ادمین با دابل‌تپ)
+    // تقریباً هم‌زمان روی «رد سفارش» بزنن، هر دو می‌تونستن status='pending_delivery' رو ببینن
+    // و هر دو مبلغ رو به کاربر برگردونن — یعنی کاربر دو برابر پول سفارشش رو پس می‌گرفت.
+    // الان خود UPDATE وضعیت اول و اتمیک انجام می‌شه (WHERE status='pending_delivery')؛ فقط
+    // دقیقاً یکی از دو تلاش هم‌زمان rowCount=1 می‌گیره و اجازه‌ی بازگشت پول پیدا می‌کنه.
+    const upd = await pool.query(
+      "UPDATE orders SET status='cancelled' WHERE id=$1 AND status='pending_delivery' RETURNING *",
+      [orderId]
+    );
+    if (upd.rows.length === 0) return ctx.reply('⚠️ این سفارش یافت نشد یا قبلاً تعیین تکلیف شده.');
+    const o = upd.rows[0];
     const refund = Number(o.amount) || 0;
     await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [refund, o.telegram_id]);
-    await pool.query("UPDATE orders SET status='cancelled' WHERE id=$1", [orderId]);
     const p = (await pool.query('SELECT name FROM products WHERE key=$1', [o.product_type])).rows[0]?.name || o.product_type;
     const u = await getUser(o.telegram_id);
     try {
@@ -99,10 +108,14 @@ module.exports = function registerOrderAdminHandlers(bot) {
   bot.action(/^admin_sell_reject_(\d+)/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const requestId = ctx.match[1];
-    const req = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
-    if (!req) { ctx.answerCbQuery('⚠️ یافت نشد', { show_alert: true }); return; }
-    if (req.status !== 'pending_review') { ctx.answerCbQuery('⚠️ قبلاً بررسی شده', { show_alert: true }); try { await ctx.deleteMessage(); } catch (e) {} return; }
-    await pool.query("UPDATE sell_orders SET status='rejected' WHERE id=$1", [requestId]);
+    // ⚠️ اتمیک: شرط status='pending_review' داخل خودِ UPDATE، نه یک SELECT جدا قبلش — جلوگیری از
+    // اینکه با دابل‌تپ یا دو ادمین هم‌زمان، پیام «رد شد» دوبار برای کاربر ارسال بشه.
+    const upd = await pool.query(
+      "UPDATE sell_orders SET status='rejected' WHERE id=$1 AND status='pending_review' RETURNING *",
+      [requestId]
+    );
+    if (upd.rows.length === 0) { ctx.answerCbQuery('⚠️ یافت نشد یا قبلاً بررسی شده', { show_alert: true }); try { await ctx.deleteMessage(); } catch (e) {} return; }
+    const req = upd.rows[0];
     const p = (await pool.query('SELECT name FROM sell_products WHERE key=$1', [req.product_type])).rows[0]?.name || req.product_type;
     try {
       await ctx.telegram.sendMessage(req.telegram_id, R.buildSellReceipt({
@@ -143,14 +156,14 @@ module.exports = function registerOrderAdminHandlers(bot) {
       const { orderId, voucherCode } = session.data;
       delete sessions[ctx.from.id];
 
-      const order = (await pool.query('SELECT * FROM orders WHERE id=$1', [orderId])).rows[0];
-      if (!order) return ctx.reply('⚠️ سفارش یافت نشد.');
-      if (order.status !== 'pending_delivery') return ctx.reply('⚠️ این سفارش قبلاً تعیین تکلیف شده.');
-
-      await pool.query(
-        "UPDATE orders SET status='completed', delivered_code=$1, delivered_hash=$2 WHERE id=$3",
+      // ⚠️ اتمیک: شرط status='pending_delivery' داخل خودِ UPDATE — جلوگیری از تحویل دوباره/ارسال
+      // دوباره‌ی کد ووچر برای یک سفارش اگه دو ادمین هم‌زمان مراحل تحویل رو طی کنن.
+      const upd = await pool.query(
+        "UPDATE orders SET status='completed', delivered_code=$1, delivered_hash=$2 WHERE id=$3 AND status='pending_delivery' RETURNING *",
         [voucherCode, voucherHash, orderId]
       );
+      if (upd.rows.length === 0) return ctx.reply('⚠️ این سفارش یافت نشد یا قبلاً تعیین تکلیف شده.');
+      const order = upd.rows[0];
 
       const p = (await pool.query('SELECT name FROM products WHERE key=$1', [order.product_type])).rows[0]?.name || order.product_type;
       const u = await getUser(order.telegram_id);
@@ -169,6 +182,10 @@ module.exports = function registerOrderAdminHandlers(bot) {
       } catch (e) {
         ctx.reply('⚠️ سفارش تکمیل شد اما ارسال پیام به کاربر ناموفق بود: ' + e.message);
       }
+      // ⚠️ رفع باگ: بونوس «اولین خرید» تا الان هیچ‌جا بعد از تکمیل سفارش خرید صدا زده نمی‌شد —
+      // یعنی حتی اگه ادمین از پنل فعالش می‌کرد، هیچ مشتری‌ای هیچ‌وقت این بونوس رو نمی‌گرفت.
+      // اینجا دقیقاً بعد از تکمیل واقعی سفارش (status='completed') صدا زده می‌شه.
+      try { await checkAndGrantBonuses(ctx, order.telegram_id, 'purchase'); } catch (e) {}
       return;
     }
 
@@ -177,10 +194,13 @@ module.exports = function registerOrderAdminHandlers(bot) {
       const reason = ctx.message.text.trim();
       const requestId = session.data.requestId;
       delete sessions[ctx.from.id];
-      const req = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
-      if (!req) return ctx.reply('⚠️ درخواست یافت نشد.');
-      if (req.status !== 'pending_review') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده.');
-      await pool.query("UPDATE sell_orders SET status='rejected' WHERE id=$1", [requestId]);
+      // ⚠️ اتمیک: شرط status='pending_review' داخل خودِ UPDATE
+      const upd = await pool.query(
+        "UPDATE sell_orders SET status='rejected' WHERE id=$1 AND status='pending_review' RETURNING *",
+        [requestId]
+      );
+      if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده.');
+      const req = upd.rows[0];
       const p = (await pool.query('SELECT name FROM sell_products WHERE key=$1', [req.product_type])).rows[0]?.name || req.product_type;
       try {
         await ctx.telegram.sendMessage(req.telegram_id, R.buildSellReceipt({
@@ -197,14 +217,27 @@ module.exports = function registerOrderAdminHandlers(bot) {
       const baseAmount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
       if (!baseAmount || baseAmount <= 0) return ctx.reply('⚠️ مبلغ نامعتبر. دوباره وارد کنید:');
       const requestId = session.data.requestId;
-      const req = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
-      if (!req || req.status !== 'pending_review') { delete sessions[ctx.from.id]; return ctx.reply('❌ این درخواست قبلاً بررسی شده.'); }
+      const reqCheck = (await pool.query('SELECT * FROM sell_orders WHERE id=$1', [requestId])).rows[0];
+      if (!reqCheck || reqCheck.status !== 'pending_review') { delete sessions[ctx.from.id]; return ctx.reply('❌ این درخواست قبلاً بررسی شده.'); }
 
-      const sellProduct = await getSellProductByKey(req.product_type);
+      const sellProduct = await getSellProductByKey(reqCheck.product_type);
       const { commission, payout } = calculateSellPayout(baseAmount, sellProduct || { commission_type: 'none', commission_value: 0 });
 
+      // ⚠️ رفع باگ حیاتی ریس‌کاندیشن (شارژ دوبرابر کاربر): قبلاً اول موجودی کاربر زیاد می‌شد و
+      // بعد، در یک کوئری کاملاً جدا، وضعیت سفارش فروش روی «approved» گذاشته می‌شد. اگه ادمین
+      // دوبار سریع مبلغ رو بفرسته (یا دو ادمین هم‌زمان روی همین درخواست کار کنن)، هر دو درخواست
+      // می‌تونستن status='pending_review' رو ببینن (چون چک بالا، reqCheck، قبل از هر دو UPDATE
+      // بوده) و کاربر برای فروش یک ووچر، دو بار پول می‌گرفت. الان اول خودِ UPDATE وضعیت به‌صورت
+      // اتمیک و شرطی (AND status='pending_review') انجام می‌شه؛ فقط دقیقاً یکی از دو تلاش
+      // هم‌زمان rowCount=1 می‌گیره و اجازه‌ی واریز به کیف پول کاربر رو پیدا می‌کنه.
+      const upd = await pool.query(
+        "UPDATE sell_orders SET status='approved', amount=$1, commission=$2, fulfillment_mode='manual' WHERE id=$3 AND status='pending_review' RETURNING *",
+        [payout, commission, requestId]
+      );
+      if (upd.rows.length === 0) { delete sessions[ctx.from.id]; return ctx.reply('❌ این درخواست قبلاً بررسی شده (احتمالاً توسط یک ادمین دیگر).'); }
+      const req = upd.rows[0];
+
       await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, req.telegram_id]);
-      await pool.query("UPDATE sell_orders SET status='approved', amount=$1, commission=$2, fulfillment_mode='manual' WHERE id=$3", [payout, commission, requestId]);
 
       const p = (await pool.query('SELECT name FROM sell_products WHERE key=$1', [req.product_type])).rows[0]?.name || req.product_type;
       const u = await getUser(req.telegram_id);
