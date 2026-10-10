@@ -422,12 +422,20 @@ module.exports = function registerWalletHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
-    const res = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [id]);
-    if (res.rows.length === 0) return ctx.reply('⚠️ درخواست یافت نشد.');
-    const req = res.rows[0];
-    if (req.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
+    // ⚠️ رفع باگ حیاتی: این درخواست واریز از Dو مسیر کاملاً جدا قابل تأییده — این دکمه (روی
+    // پیام رسید عکس) و دکمه‌ی «✅ تایید» توی لیست «درخواست‌های کیف پول» پنل ادمین
+    // (handlers/admin.js → admin_approve_). قبلاً هر دو مسیر جدا SELECT می‌کردن و جدا UPDATE،
+    // پس اگه یک ادمین از این دکمه و یکی دیگه (یا همون ادمین) از اون لیست تقریباً هم‌زمان تأیید
+    // می‌زدن، کاربر می‌تونست برای یک واریز، دو بار شارژ بشه. الان خودِ UPDATE وضعیت اول و اتمیک
+    // انجام می‌شه (AND status='pending')؛ هر دو مسیر روی همین یک شرط رقابت می‌کنن و فقط
+    // دقیقاً یکی‌شون می‌تونه برنده بشه — فرقی نمی‌کنه از کدوم دکمه باشه.
+    const upd = await pool.query(
+      `UPDATE wallet_requests SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
+      [id]
+    );
+    if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+    const req = upd.rows[0];
 
-    await pool.query(`UPDATE wallet_requests SET status = 'approved' WHERE id = $1`, [id]);
     await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [Number(req.amount), req.telegram_id]);
     try { await logTransaction(req.telegram_id, 'deposit', Number(req.amount), 'شارژ کیف پول'); } catch (e) {}
 
@@ -456,12 +464,14 @@ module.exports = function registerWalletHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
-    const res = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [id]);
-    if (res.rows.length === 0) return ctx.reply('⚠️ درخواست یافت نشد.');
-    const req = res.rows[0];
-    if (req.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
+    // ⚠️ اتمیک: همون الگوی رفع ریس‌کاندیشن بالا (شرط status='pending' داخل خودِ UPDATE)
+    const upd = await pool.query(
+      `UPDATE wallet_requests SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
+      [id]
+    );
+    if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+    const req = upd.rows[0];
 
-    await pool.query(`UPDATE wallet_requests SET status = 'approved' WHERE id = $1`, [id]);
     await pool.query(`UPDATE users SET verification_status = 'gold' WHERE telegram_id = $1`, [req.telegram_id]);
 
     const limit = await getSetting('gold_daily_limit', '10000000');
@@ -497,12 +507,13 @@ module.exports = function registerWalletHandlers(bot) {
       const reason = ctx.message.text.trim();
       const id = session.data.id;
       delete sessions[ctx.from.id];
-      const res = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [id]);
-      if (res.rows.length === 0) return ctx.reply('⚠️ درخواست یافت نشد.');
-      const req = res.rows[0];
-      if (req.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
-
-      await pool.query('UPDATE wallet_requests SET status = $1, reject_reason = $2 WHERE id = $3', ['rejected', reason, id]);
+      // ⚠️ اتمیک: شرط status='pending' داخل خودِ UPDATE
+      const upd = await pool.query(
+        "UPDATE wallet_requests SET status = 'rejected', reject_reason = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
+        [id, reason]
+      );
+      if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+      const req = upd.rows[0];
       try {
         await ctx.telegram.sendMessage(req.telegram_id, R.buildDepositReceipt({
           amount: Number(req.amount), status: 'failed', tracking: req.tracking_code, createdAt: new Date(), reason
@@ -515,11 +526,13 @@ module.exports = function registerWalletHandlers(bot) {
       const reason = ctx.message.text.trim();
       const id = session.data.id;
       delete sessions[ctx.from.id];
-      const res = await pool.query('SELECT * FROM wallet_requests WHERE id = $1', [id]);
-      if (res.rows.length === 0) return ctx.reply('⚠️ درخواست یافت نشد.');
-      const req = res.rows[0];
-      if (req.status !== 'pending') return ctx.reply('⚠️ این درخواست قبلاً بررسی شده است.');
-      await pool.query('UPDATE wallet_requests SET status = $1, reject_reason = $2 WHERE id = $3', ['rejected', reason, id]);
+      // ⚠️ اتمیک: شرط status='pending' داخل خودِ UPDATE
+      const upd = await pool.query(
+        "UPDATE wallet_requests SET status = 'rejected', reject_reason = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
+        [id, reason]
+      );
+      if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+      const req = upd.rows[0];
       try {
         await ctx.telegram.sendMessage(req.telegram_id,
           R.HEADER + `\n❌ احراز هویت طلایی رد شد\n\n📝 دلیل: ${reason}\n\nمی‌توانید مجدداً با مدارک صحیح اقدام کنید.`
