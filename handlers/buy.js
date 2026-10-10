@@ -196,25 +196,52 @@ module.exports = function registerBuyHandlers(bot) {
 
     try { await ctx.deleteMessage(); } catch (e) {}
 
-    if (!user || Number(user.balance) < finalAmount) {
+    if (!user) {
       delete sessions[ctx.from.id];
+      return ctx.reply('⚠️ اطلاعات کاربری شما یافت نشد. /start را بزنید.');
+    }
+
+    // ⚠️ رفع باگ ریس‌کاندیشن مالی (کسر موجودی): قبلاً موجودی با یک SELECT جدا (بالاتر، هنگام
+    // ساخت user) چک می‌شد و بعد با یک UPDATE کاملاً جدا کم می‌شد. اگه کاربر (یا دو درخواست
+    // هم‌زمان، مثلاً دابل‌تپ روی «تأیید خرید» با یک تأخیر شبکه) دو بار پشت‌سرهم این دکمه رو
+    // بفرسته، هر دو درخواست می‌تونستن همون موجودیِ قبل‌از‌کسر رو ببینن، هر دو تأیید بشن، و
+    // موجودی کاربر منفی بشه + برای پول یک خرید، دو سفارش واقعی ساخته بشه. الان با یک UPDATE
+    // اتمیک (شرط AND balance >= $1 داخل خودِ کوئری) این مشکل کاملاً حل می‌شه: یا دقیقاً یکی از
+    // دو درخواست هم‌زمان موفق می‌شه، یا هیچ‌کدوم — هیچ‌وقت هر دو با هم.
+    const deduct = await pool.query(
+      'UPDATE users SET balance = balance - $1 WHERE telegram_id = $2 AND balance >= $1 RETURNING balance',
+      [finalAmount, String(ctx.from.id)]
+    );
+
+    if (deduct.rows.length === 0) {
+      delete sessions[ctx.from.id];
+      const freshUser = await getUser(ctx.from.id);
       return ctx.reply(
-        `❌ موجودی کیف پول شما کافی نیست.\nمبلغ لازم: ${finalAmount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${user ? Number(user.balance).toLocaleString('en-US') : '0'} تومان`,
+        `❌ موجودی کیف پول شما کافی نیست.\nمبلغ لازم: ${finalAmount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${freshUser ? Number(freshUser.balance).toLocaleString('en-US') : '0'} تومان`,
         { reply_markup: { inline_keyboard: [[{ text: '🧳 شارژ کیف پول', callback_data: 'wallet_deposit' }], [backToMenuButton()]] } }
       );
     }
-
-    await pool.query('UPDATE users SET balance = balance - $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
 
     const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
     // هیچ کد/هش جعلی ساخته نمی‌شود؛ تحویل توسط ادمین یا API واقعی انجام می‌شود
     const orderStatus = 'pending_delivery';
 
-    const orderIns = await pool.query(
-      'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id',
-      [String(ctx.from.id), productKey, finalAmount, commission, orderStatus, trackingCode]
-    );
-    const orderId = orderIns.rows[0].id;
+    let orderId;
+    try {
+      const orderIns = await pool.query(
+        'INSERT INTO orders (telegram_id, product_type, amount, commission, status, created_at, tracking_code) VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id',
+        [String(ctx.from.id), productKey, finalAmount, commission, orderStatus, trackingCode]
+      );
+      orderId = orderIns.rows[0].id;
+    } catch (e) {
+      // ⚠️ موجودی قبلاً کسر شده (خط بالا) — اگه ساخت خود سفارش به هر دلیلی (قطعی لحظه‌ای DB و...)
+      // شکست بخوره، نباید پول کاربر بدون اینکه سفارشی ثبت بشه از دست بره. این‌جا همون مبلغ
+      // برمی‌گرده تا کاربر دقیقاً هرچی کم شده رو پس بگیره، هیچ پولی گم نمی‌شه.
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [finalAmount, String(ctx.from.id)]);
+      delete sessions[ctx.from.id];
+      console.error('خطا در ثبت سفارش خرید (موجودی بازگردانده شد):', e.message);
+      return ctx.reply('❌ خطایی در ثبت سفارش رخ داد و مبلغ به کیف پول شما بازگشت. لطفاً دوباره تلاش کنید.');
+    }
 
     delete sessions[ctx.from.id];
 
