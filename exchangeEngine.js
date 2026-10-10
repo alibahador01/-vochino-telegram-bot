@@ -13,6 +13,7 @@ const {
   logTransaction
 } = require('./db');
 const uwallet = require('./uwallet');
+const { isInvalidVoucherCodeError } = require('./uwallet');
 const priceService = require('./priceService');
 const { isOnlineBuyProduct } = require('./priceService');
 const { checkAndGrantBonuses } = require('./handlers/bonusEngine');
@@ -419,6 +420,9 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
   // صرافی برمی‌گرداند — طبق تصمیم قطعی پروژه (uWallet قیمت لحظه‌ای ندارد).
   const { commission, payout } = calculateSellPayout(amount, product);
 
+  let uwalletLowBalance = false;
+  let lastError = null;
+
   for (const apiSource of chain) {
     console.log(`🔄 [فروش خودکار] در حال فراخوانی ${apiSource.name} (نوع: ${apiSource.type}, coin_code: ${product && product.coin_code || '—'}) برای سفارش فروش ${trackingCode}...`);
     const result = await callProviderApi(apiSource, 'sell', {
@@ -431,6 +435,33 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
 
     if (!result.success) {
       console.log(`❌ [فروش خودکار] ${apiSource.name} شکست خورد برای فروش ${trackingCode}: ${result.error}${result.errorCode ? ' (کد ' + result.errorCode + ')' : ''}`);
+      lastError = result.error;
+
+      // ⚠️ رفع درخواست: کد ووچر نامعتبر/قبلاً استفاده‌شده (۱۰۰۰۹/۱۰۰۲۸/۱۰۰۴۹) مشکل از خودِ
+      // کاربره، نه چیزی که با بررسی دستی ادمین حل بشه. این‌جا فوری و قطعی رد می‌کنیم، یک پیام
+      // واضح به خودِ کاربر می‌دیم، و دیگه نه ادمین رو با یه سفارش «نیاز به بررسی» مزاحم می‌کنیم
+      // نه صرافی بعدی تو زنجیره رو امتحان می‌کنیم (چون کد قطعاً غلطه، صرافی دیگه فرقی نمی‌کنه).
+      if (apiSource.type === 'uwallet' && isInvalidVoucherCodeError(result.errorCode)) {
+        const fin = await finalizeSellOrderUwallet(sellOrderId, { outcome: 'rejected', payout: 0, commission: 0, apiCost: 0 });
+        if (!fin.applied) return { executed: true, apiSource, result, duplicate: true };
+        if (bot) {
+          try {
+            await bot.telegram.sendMessage(telegramId,
+              `❌ کد ووچر نامعتبر است یا قبلاً استفاده شده است.\n` +
+              `📝 دلیل دقیق: ${uwallet.ERROR_CODES_FA[result.errorCode] || 'کد نامعتبر'}\n` +
+              `🆔 ${trackingCode}\n\n` +
+              `لطفاً از صحت کد ووچر مطمئن شوید و در صورت نیاز با پشتیبانی تماس بگیرید.`
+            );
+          } catch (e) {}
+        }
+        return { executed: true, apiSource, result, invalidCode: true, outcome: 'rejected' };
+      }
+
+      // کد ۱۰۰۲۲ («Low balance») طبق مستندات رسمی uWallet — یعنی موجودی کیف‌پول ما نزد uWallet
+      // کافی نیست؛ مشکل از ماست نه از کاربر، پس باید مثل خرید به ادمین اطلاع واضح داده بشه.
+      if (apiSource.type === 'uwallet' && Number(result.errorCode) === 10022) {
+        uwalletLowBalance = true;
+      }
       continue;
     }
     console.log(`✅ [فروش خودکار] ${apiSource.name} پاسخ داد — وضعیت: ${result.status || 'نامشخص'} — سفارش فروش ${trackingCode}`);
@@ -482,8 +513,10 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
       return { executed: true, apiSource, result, payout: outcome === 'approved' ? payout : 0, commission, outcome };
     }
 
-    // ==================== شاخه‌ی عمومی (صرافی‌های غیر uWallet — رفتار قبلی بدون تغییر) ====================
-    await setSellOrderFulfillment(sellOrderId, {
+    // ==================== شاخه‌ی عمومی (صرافی‌های غیر uWallet) ====================
+    // ⚠️ همون گارد idempotency که شاخه‌ی uWallet بالاتر داره (fin.applied): اگه این سفارش از قبل
+    // پردازش شده بود (نتیجه‌ی null)، دیگه کیف‌پول کاربر دوباره شارژ نمی‌شه.
+    const fulfilled = await setSellOrderFulfillment(sellOrderId, {
       status: 'approved',
       amount: payout,
       commission,
@@ -491,6 +524,7 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
       apiCost: result.apiCost,
       fulfillmentMode: 'auto'
     });
+    if (!fulfilled) return { executed: true, apiSource, result, duplicate: true };
     await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [payout, String(telegramId)]);
     try {
       await logTransaction(telegramId, 'sell', payout, `فروش خودکار API (${trackingCode}) — صرافی: ${apiSource.name} — کارمزد: ${commission}`);
@@ -505,7 +539,8 @@ async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount,
     return { executed: true, apiSource, result, payout, commission };
   }
 
-  return { executed: false, reason: 'all_providers_failed' };
+  console.log(`⚠️ [فروش خودکار] همه‌ی صرافی‌های متصل شکست خوردند — سفارش فروش ${trackingCode} دستی می‌ماند. آخرین خطا: ${lastError}`);
+  return { executed: false, reason: 'all_providers_failed', uwalletLowBalance, lastError };
 }
 
 module.exports = {
