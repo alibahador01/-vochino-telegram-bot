@@ -15,6 +15,7 @@ const {
 const uwallet = require('./uwallet');
 const priceService = require('./priceService');
 const { isOnlineBuyProduct } = require('./priceService');
+const { checkAndGrantBonuses } = require('./handlers/bonusEngine');
 
 // ==================== محاسبه کارمزد (منبع واحد، هم برای دستی هم API) ====================
 function calculateCommission(commissionType, commissionValue, baseAmount) {
@@ -378,6 +379,10 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
             (result.deliveredHash ? `\n🔐 هش ووچر:\n${result.deliveredHash}` : '')
           );
         } catch (e) {}
+        // ⚠️ همون رفع باگ «بونوس اولین خرید هیچ‌وقت صدا زده نمی‌شد» — برای مسیر خودکار (API) هم لازمه،
+        // نه فقط تحویل دستی. checkAndGrantBonuses فقط از ctx.telegram.sendMessage استفاده می‌کنه،
+        // پس همین { telegram: bot.telegram } جای ctx کاملاً کافیه.
+        try { await checkAndGrantBonuses({ telegram: bot.telegram }, telegramId, 'purchase'); } catch (e) {}
       }
       return { executed: true, apiSource, result };
     }
