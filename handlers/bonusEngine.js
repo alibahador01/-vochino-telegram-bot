@@ -70,7 +70,10 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
     const refGift = parseInt(await getSetting('bonus_referral_gift', '0'), 10);
     const refActivatedAt = await getSetting('bonus_referral_activated_at', null);
     if (refActive && refGift > 0 && refThreshold > 0) {
-      let query = "SELECT COUNT(*)::int AS cnt FROM users WHERE referrer_id = $1";
+      // ⚠️ رفع حفره‌ی سوءاستفاده: قبلاً این شمارش هر ردیفی با referrer_id=$1 رو می‌شمرد، یعنی صرفِ
+      // /start زدنِ یه اکانت الکی هم «دعوت موفق» حساب می‌شد. الان فقط کاربرهایی شمرده می‌شن که
+      // واقعاً احراز هویت نقره‌ای رو کامل کردن (پرچم referral_counted که در verification.js ست می‌شه).
+      let query = "SELECT COUNT(*)::int AS cnt FROM users WHERE referrer_id = $1 AND referral_counted = true";
       const params = [userId];
       if (refActivatedAt) {
         query += ' AND registered_at >= $2';
