@@ -16,7 +16,7 @@ const uwallet = require('./uwallet');
 const { isInvalidVoucherCodeError } = require('./uwallet');
 const priceService = require('./priceService');
 const { isOnlineBuyProduct } = require('./priceService');
-const { checkAndGrantBonuses } = require('./handlers/bonusEngine');
+const { checkAndGrantBonuses, checkAndGrantReferralCommission } = require('./handlers/bonusEngine');
 
 // ==================== محاسبه کارمزد (منبع واحد، هم برای دستی هم API) ====================
 function calculateCommission(commissionType, commissionValue, baseAmount) {
@@ -384,6 +384,11 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
         // نه فقط تحویل دستی. checkAndGrantBonuses فقط از ctx.telegram.sendMessage استفاده می‌کنه،
         // پس همین { telegram: bot.telegram } جای ctx کاملاً کافیه.
         try { await checkAndGrantBonuses({ telegram: bot.telegram }, telegramId, 'purchase'); } catch (e) {}
+        // ⚠️ رفع باگ: «طرح سود مادام‌العمر» (checkAndGrantReferralCommission) هیچ‌جای پروژه صدا زده
+        // نمی‌شد — یعنی با وجود این‌که تو منوی کیف‌پول به کاربر «♾️ طرح سود مادام‌العمر / هر خریدِ
+        // دعوت‌شده برای شما سهم ایجاد می‌کند» نشون داده می‌شد، عملاً هیچ سودی هیچ‌وقت واریز نمی‌شد.
+        // amount همون مبلغ پایه‌ی خرید قبل از کارمزد خودمونه (از caller در buy.js همینه).
+        try { await checkAndGrantReferralCommission({ telegram: bot.telegram }, telegramId, amount); } catch (e) {}
       }
       return { executed: true, apiSource, result };
     }
