@@ -4,7 +4,7 @@ const { sessions } = require('../utils');
 const { pool, getUser, getSellProductByKey } = require('../db');
 const { ADMIN_IDS } = require('../constants');
 const { calculateSellPayout } = require('../exchangeEngine');
-const { checkAndGrantBonuses } = require('./bonusEngine');
+const { checkAndGrantBonuses, checkAndGrantReferralCommission } = require('./bonusEngine');
 const R = require('./receipts');
 
 function isAdmin(telegramId) {
@@ -186,6 +186,9 @@ module.exports = function registerOrderAdminHandlers(bot) {
       // یعنی حتی اگه ادمین از پنل فعالش می‌کرد، هیچ مشتری‌ای هیچ‌وقت این بونوس رو نمی‌گرفت.
       // اینجا دقیقاً بعد از تکمیل واقعی سفارش (status='completed') صدا زده می‌شه.
       try { await checkAndGrantBonuses(ctx, order.telegram_id, 'purchase'); } catch (e) {}
+      // ⚠️ رفع باگ: «طرح سود مادام‌العمر» (checkAndGrantReferralCommission) هیچ‌جا صدا زده نمی‌شد —
+      // برای تحویل دستی هم لازمه، نه فقط مسیر خودکار. base یعنی مبلغ پایه‌ی خرید قبل از کارمزد.
+      try { await checkAndGrantReferralCommission(ctx, order.telegram_id, base); } catch (e) {}
       return;
     }
 
