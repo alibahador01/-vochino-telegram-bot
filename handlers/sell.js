@@ -54,6 +54,14 @@ module.exports = function registerSellHandlers(bot) {
 
     const limitCheck = await checkDailyLimit(ctx.from.id, effectiveUnitPrice);
     if (!limitCheck.ok) {
+      // ⚠️ پیام باید بر اساس سطح واقعی کاربر باشد: برای کاربر «طلایی» که به سقف روزانه‌اش
+      // رسیده، دیگه سطح بالاتری برای پیشنهاد نیست (قبلاً این پیام همیشه «نقره‌ای» می‌گفت
+      // و دکمه‌ی «احراز طلایی» رو حتی به کاربر طلایی هم نشون می‌داد).
+      if (limitCheck.tier === 'gold') {
+        return ctx.reply(
+          `🔒 سقف روزانه‌ی احراز هویت طلایی شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان است و برای امروز استفاده شده.\nفردا دوباره می‌توانید معامله کنید.`
+        );
+      }
       return ctx.reply(
         `🔒 سقف احراز هویت نقره‌ای شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان در روز است.\nبرای افزایش سقف معاملات، احراز هویت طلایی را انجام دهید.`,
         { reply_markup: { inline_keyboard: [[{ text: '👑 احراز هویت طلایی', callback_data: 'profile_verification' }]] } }
