@@ -498,7 +498,14 @@ async function setSellOrderFulfillment(sellOrderId, { status, amount, commission
   if (apiSourceId !== undefined) { fields.push(`api_source_id = $${i++}`); values.push(apiSourceId); }
   if (apiCost !== undefined) { fields.push(`api_cost = $${i++}`); values.push(apiCost); }
   if (fulfillmentMode !== undefined) { fields.push(`fulfillment_mode = $${i++}`); values.push(fulfillmentMode); }
-  const res = await pool.query(`UPDATE sell_orders SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, values);
+  // ⚠️ همون گارد idempotency که setOrderFulfillment و setSellOrderPendingUwallet دارن — برای
+  // یکدستی و اطمینان (caller این تابع الان فقط از pending_review صدا می‌زنه، ولی اگه یه صرافی
+  // غیر-uWallet در آینده وصل بشه و caller تغییر کنه، این شرط جلوی شارژ دوباره‌ی کیف‌پول کاربر
+  // رو برای یک سفارش فروش از قبل تسویه‌شده می‌گیره).
+  const res = await pool.query(
+    `UPDATE sell_orders SET ${fields.join(', ')} WHERE id = $1 AND status = 'pending_review' RETURNING *`,
+    values
+  );
   return res.rows[0] || null;
 }
 
@@ -1027,6 +1034,11 @@ async function initDb() {
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_gift_received BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_wagering_remaining INTEGER DEFAULT 0',
+    // کد ملی — بخش ثابت احراز هویت نقره‌ای (تلفن، نام و فامیل، کد ملی)
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS national_id TEXT',
+    // بونوس دعوت باید فقط بعد از احراز نقره‌ای واقعی کاربر دعوت‌شده حساب بشه، نه فقط با /start؛
+    // این پرچم همون لحظه‌ای که کاربرِ دعوت‌شده نقره‌ای می‌شه ست می‌شه و شمارش دعوت از همین پرچم میاد.
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_counted BOOLEAN DEFAULT FALSE',
 
     // settings
     'ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
@@ -1216,7 +1228,7 @@ async function initDb() {
     { key: 'hotvoucher', name: '🎟 هات ووچر', min_amount: 50000, price_type: 'toman', active: 1, hidden: 0 },
     // ⚠️ باگ قبلی: این دو محصول با hidden:1 ساخته می‌شدند و در بخش خرید اصلاً دیده نمی‌شدند.
     // طبق تصمیم پروژه باید توی جدول باشند و در لیست خرید دیده شوند (اتصال API‌شان جداگانه و بعداً انجام می‌شود).
-    { key: 'premium_voucher', name: '🎟 پرمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 1, hidden: 0 },
+    { key: 'premium_voucher', name: '🎟 پریمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 1, hidden: 0 },
     { key: 'ps_voucher', name: '🔵 پی‌اس ووچر', min_amount: 185081, price_type: 'toman', active: 1, hidden: 0 },
     { key: 'perfect_money', name: '💵 پرفکت مانی', min_amount: 1, price_type: 'usd', active: 0, hidden: 1 },
     { key: 'crypto_dollar', name: '💲 دلار (کریپتو)', min_amount: 10, price_type: 'usd', active: 0, hidden: 1 },
@@ -1225,7 +1237,7 @@ async function initDb() {
     { key: 'telegram_stars', name: '⭐️ استارز تلگرام', min_amount: 50, price_type: 'toman', active: 0, hidden: 1 },
     { key: 'telegram_gift_stars', name: '🎁 گیفت استارزی', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
     { key: 'telegram_gift_collection', name: '🎁 گیفت کلکسیونی', min_amount: 100, price_type: 'toman', active: 0, hidden: 1 },
-    { key: 'telegram_premium', name: '💎 پرمیوم تلگرام', min_amount: 50000, price_type: 'toman', active: 0, hidden: 1 },
+    { key: 'telegram_premium', name: '💎 پریمیوم تلگرام', min_amount: 50000, price_type: 'toman', active: 0, hidden: 1 },
     { key: 'channel_boost', name: '🚀 بوست کانال', min_amount: 100000, price_type: 'toman', active: 0, hidden: 1 },
     { key: 'post_reaction', name: '❤️ ری‌اکشن پست', min_amount: 500, price_type: 'toman', active: 0, hidden: 1 },
     { key: 'post_view', name: '👁 بازدید پست', min_amount: 500, price_type: 'toman', active: 0, hidden: 1 },
@@ -1252,6 +1264,11 @@ async function initDb() {
     );
   } catch (e) {}
 
+  // اصلاح املای «پرمیوم» → «پریمیوم» روی نصب‌های قبلی (فقط اگر هنوز همون نام قدیمی اشتباه ثبت شده باشد؛
+  // اگر ادمین خودش از پنل اسم دیگه‌ای گذاشته باشه، این شرط فعال نمی‌شه و دست‌نخورده می‌مونه)
+  try { await pool.query("UPDATE products SET name = '🎟 پریمیوم ووچر' WHERE key = 'premium_voucher' AND name = '🎟 پرمیوم ووچر'"); } catch (e) {}
+  try { await pool.query("UPDATE products SET name = '💎 پریمیوم تلگرام' WHERE key = 'telegram_premium' AND name = '💎 پرمیوم تلگرام'"); } catch (e) {}
+
   // coin_code برای اتصال uWallet — یو ووچر = UUSD (تأیید شده، کار می‌کنه)
   try { await pool.query("UPDATE products SET coin_code = 'UUSD' WHERE key = 'voucher' AND (coin_code IS NULL OR coin_code = '')"); } catch (e) {}
   // ✅ تأیید نهایی با تست واقعی curl توسط خود کاربر: اسم کوین دقیقاً «HotVoucher» (حروف مخلوط)
@@ -1262,8 +1279,8 @@ async function initDb() {
   try { await pool.query("UPDATE products SET price_type = 'toman' WHERE key IN ('voucher','premium_voucher','ps_voucher') AND price_type = 'usd'"); } catch (e) {}
 
   const sellProducts = [
-    { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ', active: 1 },
-    { key: 'premiumvoucher', name: '🎟 پرمیوم ووچر', unit_price: 100000, sample_code: 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog', active: 1 },
+    { key: 'uvoucher', name: '🎟 یوووچر', unit_price: 173031, sample_code: 'USD-I2RV-FKQH-65BM-4CDE-JAZQ', active: 1 },
+    { key: 'premiumvoucher', name: '🎟 پریمیوم ووچر', unit_price: 100000, sample_code: 'PSVouchers-1_28-PSV-7-77brrao0xo3llyu738e88qcdpdog', active: 1 },
     { key: 'psvoucher', name: '🔵 پی‌اس ووچر', unit_price: 100000, sample_code: 'PS-4KF8-92AD-7QPW-XM2L', active: 1 },
     // هات ووچر فروش هم طبق تصمیم پروژه باید فعال باشد (اتصال uWallet)
     { key: 'hotvoucher_sell', name: '🎟 هات ووچر', unit_price: 50000, sample_code: HOT_VOUCHER_SAMPLE, active: 1 },
@@ -1285,6 +1302,15 @@ async function initDb() {
   // نمونه کد فروش هات ووچر روی نصب‌های قبلی: فقط اگر هنوز placeholder قدیمی است عوض می‌شود
   // (امن برای هر ری‌استارت، چون شرطش فقط روی مقدار قدیمی است)
   try { await pool.query("UPDATE sell_products SET sample_code = $1 WHERE key = 'hotvoucher_sell' AND sample_code = 'HOT-XXXX-XXXX'", [HOT_VOUCHER_SAMPLE]); } catch (e) {}
+
+  // ⚠️ اصلاح نمونه‌کدهای یو ووچر و پریمیوم ووچر روی نصب‌های قبلی (مقادیر قبلی ساختگی/قدیمی بودند؛
+  // مقادیر درست توسط خود کاربر با تست واقعی تأیید شد). فقط وقتی مقدار هنوز همون مقدار قدیمی اشتباهه
+  // جایگزین می‌شه — اگر ادمین از پنل عوضش کرده باشه، دست‌نخورده می‌مونه.
+  try { await pool.query("UPDATE sell_products SET sample_code = $1 WHERE key = 'uvoucher' AND sample_code = 'USD-7T3H-C2QG-P6YA-D4UW-XOIQ'", ['USD-I2RV-FKQH-65BM-4CDE-JAZQ']); } catch (e) {}
+  try { await pool.query("UPDATE sell_products SET sample_code = $1 WHERE key = 'premiumvoucher' AND sample_code = 'PSVouchers-1_58-PSV-7-67brrac0xo2llpu738e33sftpdog'", ['PSVouchers-1_28-PSV-7-77brrao0xo3llyu738e88qcdpdog']); } catch (e) {}
+
+  // اصلاح املای «پرمیوم» → «پریمیوم» برای محصول فروش روی نصب‌های قبلی
+  try { await pool.query("UPDATE sell_products SET name = '🎟 پریمیوم ووچر' WHERE key = 'premiumvoucher' AND name = '🎟 پرمیوم ووچر'"); } catch (e) {}
 
   // متن قوانین جدید: فقط «یک‌بار» روی نصب‌های قبلی اعمال می‌شود (با پرچم در settings).
   // اگر هر بار اجرا می‌شد، هر ری‌استارت هر تغییری که ادمین روی متن قوانین داده بود را پاک می‌کرد.
