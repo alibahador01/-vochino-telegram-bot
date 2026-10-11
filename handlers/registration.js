@@ -11,18 +11,24 @@ module.exports = function registerRegistrationHandlers(bot) {
   bot.start(async (ctx) => {
     const userId = ctx.from.id;
     let user = await getUser(userId);
-    const referrerId = ctx.startPayload || null;
+    let referrerId = ctx.startPayload || null;
+
+    // ⚠️ رفع باگ امنیتی/سوءاستفاده: جلوگیری از «خوددعوتی». هر کسی آیدی عددی تلگرام خودش رو می‌تونه
+    // از قبل بدونه (مثلاً از @userinfobot) و با لینک t.me/bot?start=<آیدی_خودش> اولین بارش وارد بشه؛
+    // چون این موقع هنوز کاربری در دیتابیس نیست (!user)، بدون این چک، referrer_id خودِ همون کاربر
+    // ثبت می‌شد و بلافاصله بونوس دعوت به «خودش» اعطا می‌شد.
+    if (referrerId && String(referrerId) === String(userId)) {
+      referrerId = null;
+    }
 
     // اگر کاربر جدید است، با زبان null و ورود ناقص بساز
+    // ⚠️ تصمیم کسب‌وکاری: دیگه همین‌جا (صرفِ /start زدن با لینک دعوت) بونوس دعوت اعطا نمی‌شه —
+    // referrer_id فقط ذخیره می‌شه؛ بونوس واقعی وقتی اعطا می‌شه که همین کاربر دعوت‌شده واقعاً
+    // احراز هویت نقره‌ای رو کامل کنه (نگاه کن به verify_confirm در handlers/verification.js).
+    // این جلوی سوءاستفاده با ساخت اکانت‌های الکی تلگرام که فقط /start می‌زنن رو می‌گیره.
     if (!user) {
       await createUser(userId, null, null, null, null, referrerId);
       user = await getUser(userId);
-
-      if (referrerId) {
-        try {
-          await checkAndGrantBonuses(ctx, referrerId, 'referral');
-        } catch (e) { console.log('خطا در بونوس دعوت:', e.message); }
-      }
     }
 
     // اگر ورود کامل نشده
