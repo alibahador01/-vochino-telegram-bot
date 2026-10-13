@@ -1,10 +1,20 @@
 // textDefaults.js
 const { RULES_TEXT } = require('./defaultRules');
+const { RULES_EN, RULES_TR } = require('./i18n/rules');
 
 module.exports = [
   // ثبت‌نام
+  // ⚠️ chooseLanguage/confirmRulesButton/registrationSuccess/welcomeBack دیگر در فلوی جدید ثبت‌نام
+  // (handlers/registration.js + i18n/) استفاده نمی‌شوند؛ آن فلو اکنون از ساختار ترجمه‌ی مرکزیِ i18n/
+  // می‌خواند، نه از این جدول. این چهار کلید عمداً حذف نشده‌اند (طبق قاعده‌ی پروژه، چیزی که استفاده‌اش
+  // اثبات نشده کورکورانه پاک نمی‌شود) و همچنان در پنل مدیریت قابل مشاهده/ویرایش‌اند، صرفاً دیگر اثری
+  // روی تجربه‌ی واقعی کاربر ندارند.
   { key: 'chooseLanguage', category: 'register', value: '🌐 زبان خود را انتخاب کنید / Please choose your language:\n\n🇮🇷 فارسی | 🇬🇧 English | 🇹🇷 Türkçe' },
+  // rulesText همان منبع اصلیِ متن قوانین فارسی است که از قبل در پروژه بود (بدون تغییر)؛
+  // rulesText_en/rulesText_tr تازه اضافه شده‌اند تا ادمین نسخه‌ی انگلیسی/ترکی را هم از همین پنل ویرایش کند.
   { key: 'rulesText', category: 'register', value: RULES_TEXT },
+  { key: 'rulesText_en', category: 'register', value: RULES_EN },
+  { key: 'rulesText_tr', category: 'register', value: RULES_TR },
   { key: 'confirmRulesButton', category: 'register', value: '✅ قوانین را می‌پذیرم' },
   { key: 'registrationSuccess', category: 'register', value: '🎉 ثبت‌نام شما با موفقیت انجام شد!\nاز همین حالا می‌تونی با خیال راحت خرید کنی.\nسقف خرید روزانه‌ت: {daily_limit} تومان' },
   { key: 'welcomeBack', category: 'register', value: 'خوش برگشتی، خوشحالیم دوباره می‌بینیمت! 👋' },
