@@ -10,6 +10,7 @@
 const { sessions, showMainMenu, reactToMessage } = require('../utils');
 const priceService = require('../priceService');
 const { describeError } = require('../util/http');
+const { getUser } = require('../db');
 
 const HOME_BTN_TEXT = '☰ 𝑯𝒐𝒎𝒆';
 const LIVE_PRICE_BTN_TEXT = '💱 𝑳𝒊𝒗𝒆 𝑷𝒓𝒊𝒄𝒆';
@@ -94,8 +95,17 @@ async function buildLivePriceText() {
 
 function registerHomeMenuHandlers(bot) {
   // ☰ Home — از هرجای ربات، بدون نیاز به /start، کاربر را به منوی اصلی برمی‌گرداند
+  // ⚠️ از وقتی ورود/احراز هویت پیش از منوی اصلی اجباری شده، این دکمه برای کاربری که هنوز ثبت‌نامش
+  // کامل نیست دیگر منو را باز نمی‌کند (قبلاً این‌طور بود و عملاً مسیر ثبت‌نام را دور می‌زد)؛ به‌جایش
+  // دقیقاً همان مرحله‌ی ناتمام را (بدون پاک کردن اطلاعات قبلی) دوباره نشان می‌دهد.
   bot.hears(HOME_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
+
+    const user = await getUser(ctx.from.id);
+    if (!user || user.registration_step !== 'completed') {
+      const { renderCurrentState } = require('./registration');
+      return user ? renderCurrentState(ctx, user) : null;
+    }
 
     // استیکر Home قبل از باز شدن منو
     await sendSticker(ctx, STICKERS.HOME);
