@@ -1,7 +1,9 @@
 // utils.js
 const { mainMenuButtons, ADMIN_BUTTON, ADMIN_IDS, AI_THEMES, AI_DEFAULT_THEME } = require('./constants');
-const { getSetting } = require('./db');
+const { getSetting, getUser, getRequiredChannels } = require('./db');
 const { getText } = require('./textManager');
+const i18n = require('./i18n');
+const { normalizeTelegramLink } = require('./util/validators');
 
 const sessions = {};
 
@@ -67,20 +69,59 @@ async function sendTracked(ctx, session, text, extra) {
   return sent;
 }
 
+// کلید i18n متنِ هر دکمه‌ی منو بر اساس key داخلی مشترک (زبان‌مستقل) در constants.mainMenuButtons.
+// شناسه‌ی callback_data («menu_buy» و ...) همیشه همین key ثابت می‌ماند؛ فقط متنِ روی دکمه ترجمه می‌شود.
+const MENU_BUTTON_I18N_KEY = {
+  buy: 'menu.buy',
+  sell: 'menu.sell',
+  wallet: 'menu.wallet',
+  bonus: 'menu.bonus',
+  hochino_chat: 'menu.hochino_chat',
+  hochino_main: 'menu.hochino_main',
+  support: 'menu.support'
+};
+
+// گزینه‌ی «کانال و نرخ‌های آنلاین» فقط وقتی برگردانده می‌شود که حداقل یک کانال/گروهِ فعال با لینک واقعاً
+// معتبر در پنل مدیریت ثبت شده باشد؛ در غیر این صورت null (یعنی دکمه‌ای ساخته نمی‌شود، نه دکمه‌ی خالی).
+async function getActiveMenuChannel() {
+  let channels;
+  try {
+    channels = await getRequiredChannels();
+  } catch (e) {
+    return null;
+  }
+  let sawInvalidLink = false;
+  for (const ch of channels || []) {
+    const link = normalizeTelegramLink(ch.invite_link);
+    if (link) return { ...ch, invite_link: link };
+    sawInvalidLink = true;
+  }
+  if (sawInvalidLink) {
+    // خطای پیکربندی قابل‌تشخیص برای ادمین: کانال فعال است ولی لینکش یک آدرس واقعی تلگرام نیست —
+    // به‌جای ساختن دکمه‌ی خراب، فقط لاگ می‌کنیم و دکمه را کلاً نشان نمی‌دهیم.
+    console.error('[menu] کانال(های) فعال در required_channels بدون لینک معتبر تلگرام — دکمه‌ی «کانال و نرخ‌های آنلاین» پنهان ماند. لینک را در پنل مدیریت بررسی کنید.');
+  }
+  return null;
+}
+
 /**
- * نمایش منوی اصلی با چیدمان جدید:
- * خرید (چپ) - فروش (راست)
- * جیب (چپ) - بونوس (راست)
- * ویژه ووچینو⁰۱ (چپ) - وب‌سایت (راست)
- * پشتیبانی (وسط)
+ * نمایش منوی اصلی، به زبان ذخیره‌شده‌ی کاربر (fa/en/tr)، با چیدمان دوستونه‌ی فعلی؛
+ * اگر در پنل مدیریت کانال/گروه معتبری تنظیم شده باشد، دکمه‌ی «کانال و نرخ‌های آنلاین» هم اضافه می‌شود.
  */
 async function showMainMenu(ctx) {
   const isAdmin = ADMIN_IDS.includes(Number(ctx.from.id));
+  const user = await getUser(ctx.from.id).catch(() => null);
+  const lang = i18n.normalizeLang(user && user.language) || 'en';
 
-  const buttons = [...mainMenuButtons];
+  const buttons = mainMenuButtons.map(b => ({ key: b.key, text: i18n.t(lang, MENU_BUTTON_I18N_KEY[b.key]) }));
+
+  const activeChannel = await getActiveMenuChannel();
+  if (activeChannel) {
+    buttons.push({ key: 'channel', text: i18n.t(lang, 'menu.channel') });
+  }
 
   if (isAdmin) {
-    buttons.push(ADMIN_BUTTON);
+    buttons.push({ key: ADMIN_BUTTON.key, text: i18n.t(lang, 'menu.admin_panel') });
   }
 
   // رنگ دکمه‌های شیشه‌ای منو از تنظیم «تم دکمه‌ها»ی پنل ادمین خونده می‌شه
@@ -104,13 +145,9 @@ async function showMainMenu(ctx) {
 
   const headerText =
     '╭〰 ➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫ 〰╮\n' +
-    '                                             ⫹⫺ صرافی ووچینو⁰¹\n' +
+    '                                             ' + i18n.t(lang, 'menu.title') + '\n' +
     '╰〰💲 𓆩𓆩🏦𓆪𓆪 💲〰╯\n' +
-    '⎙ مرجع تخصصی معاملات | ووچر\n' +
-    '⏧  تمرکز بر سرعت رویکرد نقدشوندگی\n' +
-    '⎚ دقت در اجرا پیگیری منظم سفارش‌ها\n' +
-    '☏ ارتباط مستقیم با پشتیبانی آنلاین\n' +
-    '☟مسیر موردنظر را انتخاب کنید';
+    i18n.t(lang, 'menu.header');
   return ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 }
 
@@ -164,6 +201,7 @@ module.exports = {
   fillTemplate,
   sendTracked,
   showMainMenu,
+  getActiveMenuChannel,
   reactToMessage,
   sendMessageToUser,
   sendMessageToUserWithPhoto,
