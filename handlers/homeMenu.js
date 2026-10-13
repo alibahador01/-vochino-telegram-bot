@@ -41,9 +41,10 @@ function persistentKeyboard() {
 
 // این پیام را هرجا که منوی اصلی نشان داده می‌شود صدا بزنید تا کیبورد پایین صفحه
 // (اگر توسط یک کیبورد موقت دیگر—مثل درخواست شماره تلفن—بازنویسی شده) برگردد.
+// از کاراکتر نامرئی (Zero-Width Space) استفاده می‌شود تا هیچ متن دیده‌شدنی‌ای ارسال نشود.
 async function ensurePersistentKeyboard(ctx) {
   try {
-    await ctx.reply('🔘', { reply_markup: persistentKeyboard() });
+    await ctx.reply('\u200B', { reply_markup: persistentKeyboard() });
   } catch (e) {}
 }
 
