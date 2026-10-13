@@ -6,7 +6,9 @@ const { ADMIN_IDS } = require('../constants');
 const { tryAutoFulfillSell, getEffectiveUnitPrice } = require('../exchangeEngine');
 const { validateVoucherCodeFormat } = require('../uwallet');
 const { escapeMarkdown } = require('../util/http');
-const { startVerification, checkDailyLimit } = require('./verification');
+const { checkDailyLimit } = require('./limits');
+const i18n = require('../i18n');
+const { requireCompletedRegistration } = require('./registration');
 const R = require('./receipts');
 
 module.exports = function registerSellHandlers(bot) {
@@ -36,6 +38,8 @@ module.exports = function registerSellHandlers(bot) {
 
   bot.action('menu_sell', async (ctx) => {
     ctx.answerCbQuery();
+    const gate = await requireCompletedRegistration(ctx);
+    if (!gate.ok) return;
     try { await ctx.deleteMessage(); } catch (e) {}
     return showSellList(ctx);
   });
@@ -43,29 +47,33 @@ module.exports = function registerSellHandlers(bot) {
   bot.action(/^sell_pick_(.+)$/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
+    const gate = await requireCompletedRegistration(ctx);
+    if (!gate.ok) return;
     const product = await getSellProductByKey(key);
     if (!product || !product.active) return ctx.reply('❌ این محصول فروش در دسترس نیست.');
-    const user = await getUser(ctx.from.id);
-    if (!user || !user.verification_status || user.verification_status === 'none') {
-      return startVerification(ctx, 'sell', key);
-    }
+    const user = gate.user;
 
     const { price: effectiveUnitPrice } = await getEffectiveUnitPrice(product, 'sell');
 
     const limitCheck = await checkDailyLimit(ctx.from.id, effectiveUnitPrice);
     if (!limitCheck.ok) {
+      const limitLang = i18n.normalizeLang(user && user.language) || 'en';
       // ⚠️ پیام باید بر اساس سطح واقعی کاربر باشد: برای کاربر «طلایی» که به سقف روزانه‌اش
       // رسیده، دیگه سطح بالاتری برای پیشنهاد نیست (قبلاً این پیام همیشه «نقره‌ای» می‌گفت
       // و دکمه‌ی «احراز طلایی» رو حتی به کاربر طلایی هم نشون می‌داد).
+      const limitMsg = i18n.t(limitLang, 'access.limit_exceeded', {
+        limit: i18n.formatNumber(limitCheck.limit, limitLang),
+        used: i18n.formatNumber(limitCheck.used, limitLang),
+        remaining: i18n.formatNumber(limitCheck.remaining, limitLang)
+      });
       if (limitCheck.tier === 'gold') {
-        return ctx.reply(
-          `🔒 سقف روزانه‌ی احراز هویت طلایی شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان است و برای امروز استفاده شده.\nفردا دوباره می‌توانید معامله کنید.`
-        );
+        return ctx.reply(limitMsg);
       }
-      return ctx.reply(
-        `🔒 سقف احراز هویت نقره‌ای شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان در روز است.\nبرای افزایش سقف معاملات، احراز هویت طلایی را انجام دهید.`,
-        { reply_markup: { inline_keyboard: [[{ text: '👑 احراز هویت طلایی', callback_data: 'profile_verification' }]] } }
-      );
+      // ⚠️ همان رفع باگ دکمه‌ی بدون عملکرد که در buy.js انجام شد: مسیر واقعی wallet_gold_verify است،
+      // نه callback_data قدیمیِ حذف‌شده‌ی «profile_verification».
+      return ctx.reply(limitMsg + '\n\n' + i18n.t(limitLang, 'access.limit_gold_hint'), {
+        reply_markup: { inline_keyboard: [[{ text: i18n.t(limitLang, 'access.limit_gold_button'), callback_data: 'wallet_gold_verify' }]] }
+      });
     }
 
     const minAmount = Number(product.min_amount || 0);
