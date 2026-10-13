@@ -4,10 +4,11 @@
   "description": "Vochino Telegram Bot",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node tests/run.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "express": "^4.21.2",
     "pg": "^8.11.5",
     "telegraf": "^4.16.3",
     "ejs": "^3.1.10",
