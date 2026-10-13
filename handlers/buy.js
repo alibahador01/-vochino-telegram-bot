@@ -6,7 +6,9 @@ const { ADMIN_IDS, ADMIN_LEVELS } = require('../constants');
 const { calculateBuyFinal, tryAutoFulfillBuy, getEffectiveUnitPrice } = require('../exchangeEngine');
 const { isOnlineBuyProduct } = require('../priceService');
 const { unitsFromAmount } = require('../exchangeEngine');
-const { startVerification, checkDailyLimit } = require('./verification');
+const { checkDailyLimit } = require('./limits');
+const i18n = require('../i18n');
+const { requireCompletedRegistration } = require('./registration');
 const R = require('./receipts');
 
 module.exports = function registerBuyHandlers(bot) {
@@ -36,6 +38,10 @@ module.exports = function registerBuyHandlers(bot) {
 
   bot.action('menu_buy', async (ctx) => {
     ctx.answerCbQuery();
+    // کنترل دسترسی سمت سرور: حتی اگر این callback از یک دکمه/پیام قدیمی صدا زده شود، کاربری که
+    // ثبت‌نامش کامل نیست به منوی خرید راه پیدا نمی‌کند — به مرحله‌ی ناتمام خودش هدایت می‌شود.
+    const gate = await requireCompletedRegistration(ctx);
+    if (!gate.ok) return;
     try { await ctx.deleteMessage(); } catch (e) {}
     return showBuyList(ctx);
   });
@@ -50,12 +56,13 @@ module.exports = function registerBuyHandlers(bot) {
   bot.action(/^buy_pick_(.+)$/, async (ctx) => {
     const key = ctx.match[1];
     ctx.answerCbQuery();
+    // همان کنترل دسترسی سمت سرور، این‌بار روی خودِ callback انتخاب محصول (نه فقط روی لیست خرید) —
+    // چون طبق سند، احراز هویت دیگر نباید از وسط خرید/فروش آغاز شود؛ کاربر ناقص به مرحله‌ی ثبت‌نامش برمی‌گردد.
+    const gate = await requireCompletedRegistration(ctx);
+    if (!gate.ok) return;
     const product = await getProductByKey(key);
     if (!product || !product.active) return ctx.reply('❌ این محصول در دسترس نیست.');
-    const user = await getUser(ctx.from.id);
-    if (!user || !user.verification_status || user.verification_status === 'none') {
-      return startVerification(ctx, 'buy', key);
-  }
+    const user = gate.user;
 
     // حداقل خرید ممکن است در پنل به دلار ثبت شده باشد (price_type='usd')؛ چون کاربر همیشه
     // مبلغ را به تومان وارد می‌کند، اینجا یک‌بار به تومان تبدیل می‌شود تا مقایسه‌ی بعدی درست باشد
@@ -133,19 +140,26 @@ module.exports = function registerBuyHandlers(bot) {
     const limitCheck = await checkDailyLimit(ctx.from.id, amount);
     if (!limitCheck.ok) {
       delete sessions[ctx.from.id];
+      const limitUser = await getUser(ctx.from.id);
+      const limitLang = i18n.normalizeLang(limitUser && limitUser.language) || 'en';
       // ⚠️ پیام باید بر اساس سطح واقعی کاربر باشد: برای کاربر «طلایی» که به سقف روزانه‌اش
       // رسیده، دیگه سطح بالاتری برای پیشنهاد نیست (قبلاً این پیام همیشه «نقره‌ای» می‌گفت
       // و دکمه‌ی «احراز طلایی» رو حتی به کاربر طلایی هم نشون می‌داد).
+      const limitMsg = i18n.t(limitLang, 'access.limit_exceeded', {
+        limit: i18n.formatNumber(limitCheck.limit, limitLang),
+        used: i18n.formatNumber(limitCheck.used, limitLang),
+        remaining: i18n.formatNumber(limitCheck.remaining, limitLang)
+      });
       if (limitCheck.tier === 'gold') {
-        return ctx.reply(
-          `🔒 سقف روزانه‌ی احراز هویت طلایی شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان است و برای امروز استفاده شده.\nفردا دوباره می‌توانید معامله کنید.`
-        );
+        return ctx.reply(limitMsg);
       }
-      return ctx.reply(
-        `🔒 سقف احراز هویت نقره‌ای شما ${Number(limitCheck.limit).toLocaleString('en-US')} تومان در روز است.\nبرای افزایش سقف معاملات، احراز هویت طلایی را انجام دهید.`,
-        { reply_markup: { inline_keyboard: [[{ text: '👑 احراز هویت طلایی', callback_data: 'profile_verification' }]] } }
-      );
-      }
+      // ⚠️ رفع باگ دکمه‌ی بدون عملکرد: callback_data قبلی («profile_verification») به هیچ هندلری وصل
+      // نبود (خودِ profile.js این فلوی قدیمی را عمداً حذف کرده بود)؛ مسیر واقعی و کاری همان
+      // wallet_gold_verify در handlers/wallet.js است.
+      return ctx.reply(limitMsg + '\n\n' + i18n.t(limitLang, 'access.limit_gold_hint'), {
+        reply_markup: { inline_keyboard: [[{ text: i18n.t(limitLang, 'access.limit_gold_button'), callback_data: 'wallet_gold_verify' }]] }
+      });
+    }
     const product = await getProductByKey(session.data.productType);
     let commission = 0, finalAmount = amount;
     if (product) {
