@@ -231,8 +231,10 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
 // ==================== هندلرهای صرافی (دست‌نخورده) ====================
+// ⚠️ registration.js اکنون کل مسیر ورود (زبان ← قوانین ← شماره ← نام ← کد ملی ← کارت ← بررسی ← نتیجه)
+// را یکپارچه پیاده می‌کند؛ فایل جداگانه‌ی handlers/verification.js (فلوی قدیمیِ session-محور که وسط
+// خرید/فروش فعال می‌شد) حذف شده — سقف روزانه‌ی آن اکنون در handlers/limits.js است (بدون تغییر منطق).
 require('./handlers/registration')(bot);
-require('./handlers/verification')(bot);
 // ⚠️ باید زودتر از هندلرهای سشن‌محور (خرید/فروش/...) ثبت شود تا دکمه‌ی ☰ Home همیشه،
 // حتی وسط یک فلوی نیمه‌کاره، کار کند
 require('./handlers/homeMenu')(bot);
