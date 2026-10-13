@@ -1040,6 +1040,17 @@ async function initDb() {
     // این پرچم همون لحظه‌ای که کاربرِ دعوت‌شده نقره‌ای می‌شه ست می‌شه و شمارش دعوت از همین پرچم میاد.
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_counted BOOLEAN DEFAULT FALSE',
 
+    // ==================== وضعیت پایدار ثبت‌نام (مسیر ورود یکپارچه) ====================
+    // registration_step: rules | phone | name | national_id | card | processing | completed
+    //   (NULL = هنوز وارد مسیر جدید نشده؛ در کد، از روی language/rules_accepted_at مشتق می‌شود)
+    // registration_data: اطلاعات موقت مراحل (phone/full_name/national_id/card) تا لحظه‌ی تکمیل واقعی؛
+    //   فقط در همان لحظه به ستون‌های اصلی منتقل و این ستون خالی می‌شود.
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS registration_step TEXT',
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS registration_data JSONB DEFAULT '{}'::jsonb",
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS rules_accepted_at TIMESTAMP',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS rules_version TEXT',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS registration_completed_at TIMESTAMP',
+
     // settings
     'ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
 
@@ -1158,7 +1169,21 @@ async function initDb() {
     try { await pool.query(sql); } catch (e) { console.log('خطا در افزودن ستون:', e.message); }
   }
 
+  // مهاجرت داده‌ی سازگار (idempotent و غیرمخرب): کاربرانی که قبلاً احراز نقره‌ای/طلایی کامل داشته‌اند،
+  // مسیر ثبت‌نام جدید را «تکمیل‌شده» حساب می‌شوند تا مجبور به ثبت‌نام دوباره نشوند. هیچ داده‌ای پاک نمی‌شود.
+  try {
+    await pool.query(
+      `UPDATE users
+          SET registration_step = 'completed',
+              registration_completed_at = COALESCE(registration_completed_at, NOW())
+        WHERE registration_step IS NULL AND verification_status IN ('silver', 'gold')`
+    );
+  } catch (e) { console.log('خطا در مهاجرت وضعیت ثبت‌نام:', e.message); }
+
   // --- تنظیمات پیش‌فرض ---
+  // ⚠️ رفع باگ پایداری تنظیمات: قبلاً این INSERT با «ON CONFLICT DO UPDATE» در هر راه‌اندازیِ مجدد، همه‌ی
+  // مقادیر تنظیم‌شده از پنل مدیریت (سقف روزانه‌ی نقره‌ای/طلایی، نرخ دلار، بونوس‌ها، عضویت اجباری، ...) را
+  // به پیش‌فرض برمی‌گرداند. حالا فقط کلیدهای ناموجود درج می‌شوند و مقدار موجود دست‌نخورده می‌ماند.
   try {
     await pool.query(`
       INSERT INTO settings (key, value, updated_at) VALUES 
@@ -1207,18 +1232,26 @@ async function initDb() {
         ('gold_daily_limit', '10000000', NOW()),
         ('silver_daily_limit', '2000000', NOW()),
         ('bonus_referral_activated_at', NULL, NOW())
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+      ON CONFLICT (key) DO NOTHING
     `);
   } catch (e) { console.log('خطا در تنظیمات پیش‌فرض:', e.message); }
 
   // --- کانال پیش‌فرض ---
+  // ⚠️ فقط «یک‌بار» (با پرچم در settings) درج می‌شود. قبلاً در هر راه‌اندازی، اگر مدیر این کانال را از پنل حذف
+  // کرده بود دوباره ساخته می‌شد؛ در نتیجه گزینه‌ی «کانال و نرخ‌های آنلاین» هیچ‌وقت واقعاً پنهان نمی‌شد.
+  // نصب‌های قبلی که از قبل هر کانالی دارند، فقط پرچم را می‌گیرند و چیزی درج نمی‌شود.
   try {
-    const existingChannel = await pool.query('SELECT chat_id FROM required_channels WHERE chat_id = $1', ['-1003953090902']);
-    if (existingChannel.rows.length === 0) {
-      await pool.query(
-        `INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
-         VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)`
-      );
+    const seeded = await getSetting('default_channel_seeded', null);
+    if (!seeded) {
+      const anyChannel = await pool.query('SELECT 1 FROM required_channels LIMIT 1');
+      if (anyChannel.rows.length === 0) {
+        await pool.query(
+          `INSERT INTO required_channels (chat_id, invite_link, title, active, force_join_enabled) 
+           VALUES ('-1003953090902', 'https://t.me/+DpU8DAaQei00YTFk', 'کانال اصلی', 1, 1)
+           ON CONFLICT (chat_id) DO NOTHING`
+        );
+      }
+      await setSetting('default_channel_seeded', '1');
     }
   } catch (e) { console.log('خطا در کانال پیش‌فرض:', e.message); }
 
