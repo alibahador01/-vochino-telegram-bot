@@ -7,9 +7,9 @@ class AntiSleepBot {
     constructor(appUrl = 'https://your-app.onrender.com') {
         this.appUrl = appUrl;
         this.lastPingAt = Date.now();
-        this.primaryIntervalMs = 5 * 60 * 1000;   // رباب کتی: هر ۵ دقیقه
-        this.watchdogCheckMs = 60 * 1000;         // علی دیوانه: هر ۱ دقیقه فقط چک می‌کند
-        this.overdueMs = 6 * 60 * 1000;           // اگر بیش از ۶ دقیقه از آخرین پینگ گذشت، دیر مانده حساب می‌شود
+        this.primaryIntervalMs = 7 * 60 * 1000;   // رباب کتی: هر ۷ دقیقه
+        this.watchdogCheckMs = 120 * 1000;         // علی دیوانه: هر ۲ دقیقه فقط چک می‌کند
+        this.overdueMs = 7 * 60 * 1000;           // اگر بیش از ۷ دقیقه از آخرین پینگ گذشت، دیر مانده حساب می‌شود
         this.alive = true;
     }
 
@@ -34,7 +34,7 @@ class AntiSleepBot {
         } catch (e) {}
     }
 
-    // لایه اول - رباب کتی💃: هر ۵ دقیقه یک‌بار وارد می‌شود
+    // لایه اول - رباب کتی💃: هر ۷ دقیقه یک‌بار وارد می‌شود
     startPrimary() {
         const tick = () => {
             if (!this.alive) return;
