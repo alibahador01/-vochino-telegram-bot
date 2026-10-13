@@ -1,8 +1,9 @@
 // handlers/misc.js
 const texts = require('../texts');
-const { sessions, showMainMenu, reactToMessage } = require('../utils');
+const { sessions, showMainMenu, getActiveMenuChannel, reactToMessage, backToMenuButton } = require('../utils');
 const { pool, getUser, getAllUsers } = require('../db');
 const { ADMIN_IDS } = require('../constants');
+const i18n = require('../i18n');
 
 function isAdmin(telegramId) {
   return ADMIN_IDS.includes(Number(telegramId));
@@ -46,5 +47,30 @@ module.exports = function registerMiscHandlers(bot) {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
     return require('./aiSupport').showSupportMenu(ctx);
+  });
+
+  // گزینه‌ی اختیاری «کانال و نرخ‌های آنلاین» — طبق مرحله‌ی پنجم سند: فقط وقتی در utils.showMainMenu
+  // دکمه‌اش ساخته شده (یعنی کانال معتبری در پنل مدیریت تنظیم است) این هندلر هم واقعاً چیزی برای نمایش دارد؛
+  // اگر بین باز شدن منو و کلیک کاربر، ادمین کانال را حذف/غیرفعال کرده باشد، پیام «تنظیم نشده» نشان داده می‌شود
+  // (وضعیت لحظه‌ای از دیتابیس خوانده می‌شود، نه مقدار ثابت).
+  bot.action('menu_channel', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    const lang = i18n.normalizeLang(user && user.language) || 'en';
+    const channel = await getActiveMenuChannel();
+    if (!channel) {
+      return ctx.reply(i18n.t(lang, 'channel.not_configured'), {
+        reply_markup: { inline_keyboard: [[backToMenuButton()]] }
+      });
+    }
+    return ctx.reply(i18n.t(lang, 'channel.message'), {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: i18n.t(lang, 'channel.open'), url: channel.invite_link }],
+          [backToMenuButton()]
+        ]
+      }
+    });
   });
 };
