@@ -10,7 +10,7 @@
 const { sessions, showMainMenu, reactToMessage } = require('../utils');
 const priceService = require('../priceService');
 const { describeError } = require('../util/http');
-const { getUser } = require('../db');
+const { getUser, getUsdRate } = require('../db');
 
 const HOME_BTN_TEXT = '☰ 𝑯𝒐𝒎𝒆';
 const LIVE_PRICE_BTN_TEXT = '💱 𝑳𝒊𝒗𝒆 𝑷𝒓𝒊𝒄𝒆';
@@ -41,10 +41,9 @@ function persistentKeyboard() {
 
 // این پیام را هرجا که منوی اصلی نشان داده می‌شود صدا بزنید تا کیبورد پایین صفحه
 // (اگر توسط یک کیبورد موقت دیگر—مثل درخواست شماره تلفن—بازنویسی شده) برگردد.
-// از کاراکتر نامرئی (Zero-Width Space) استفاده می‌شود تا هیچ متن دیده‌شدنی‌ای ارسال نشود.
 async function ensurePersistentKeyboard(ctx) {
   try {
-    await ctx.reply('\u200B', { reply_markup: persistentKeyboard() });
+    await ctx.reply('🔘', { reply_markup: persistentKeyboard() });
   } catch (e) {}
 }
 
@@ -55,38 +54,91 @@ function fmtPrice(n) {
   return Number.isInteger(num) || Math.abs(num) >= 1000 ? num.toLocaleString('en-US') : String(num);
 }
 
+// اسپرد خرید/فروش دلار و یوتوپیا هنگام تبدیل به تومان (طبق سند: ±۰.۳٪)
+const USD_TOMAN_SPREAD = 0.003;
+// میانه‌ی بازه‌ی slowFluctuatingPercent پیش‌فرض (min=20,max=90) — برای تعیین جهت پیکان 🔺/🔻
+const PCT_MIDPOINT = 55;
+
+// یک خط «Buy/Sell + نوار درصد» می‌سازد. priceKey برای هم نوسان درصد و هم چرخش تزئینیِ سه‌رقم آخر
+// به‌کار می‌رود (با پسوند متفاوت، تا کاملاً هم‌فاز نباشند و طبیعی‌تر دیده شوند).
+// ⚠️ decoratePrice فقط روی عدد نمایشی اثر می‌گذارد؛ قیمت واقعیِ خرید/فروش در buy.js/sell.js
+// همیشه از price-service/getEffectiveUnitPrice خوانده می‌شود، نه از اینجا.
+function buildPriceLine(emoji, label, realPrice, priceKey, barChar, emptyChar, segments) {
+  const pct = priceService.slowFluctuatingPercent(priceKey + '_pct');
+  const bar = priceService.renderBar(pct, barChar, emptyChar, segments);
+  const arrow = pct >= PCT_MIDPOINT ? '🔺' : '🔻';
+  const displayPrice = priceService.decoratePrice(realPrice, priceKey + '_digits');
+  return `${emoji}${label}: ${fmtPrice(displayPrice)}\n${arrow} ${bar} ${pct}%`;
+}
+
 async function buildLivePriceText() {
-  const prices = await priceService.getPrices(); // ممکنه null باشه یا stale:true داشته باشه
-
-  const uPct = priceService.slowFluctuatingPercent('u_voucher');
-  const premiumPct = priceService.slowFluctuatingPercent('premium_voucher');
-  const dollarPct = priceService.slowFluctuatingPercent('dollar');
-  const utopiaPct = priceService.slowFluctuatingPercent('utopia');
-
-  const uBar = priceService.renderBar(uPct, '▰', '▱', 8);
-  const premiumBar = priceService.renderBar(premiumPct, '▰', '▱', 8);
-  const dollarBar = priceService.renderBar(dollarPct, '⬢', '⬡', 5);
-  const utopiaBar = priceService.renderBar(utopiaPct, '⬢', '⬡', 5);
-
+  // ۱. مقادیر پیش‌فرض (فال‌بک) از سرویس داخلی
+  const prices = await priceService.getPrices(); 
   const p = prices || {};
+  let usdRate = await getUsdRate(); 
+  
+  let u_buy = p.u_buy;
+  let u_sell = p.u_sell;
+  let premium_buy = p.premium_buy;
+  let premium_sell = p.premium_sell;
+  let baseTetherToman = usdRate; 
+  let tetherUsd = Number(p.tether_usd);
+  let utopiaUsd = Number(p.utopia_usd);
 
-  let text =
-    `🔷️ 𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.u_buy)}\n` +
-    `🔶️ 𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.u_sell)}\n` +
-    `💱 ${uBar} ${uPct}%\n\n` +
+  try {
+    // ۲. اتصال به منبع مادر (لینک رندر)
+    const res = await fetch('https://price-service-bxfy.onrender.com/');
+    if (res.ok) {
+      const data = await res.json();
+      
+      // قیمت ووچرها از منبع مادر
+      if (data && data.ali1377) {
+        if (data.ali1377.u_buy != null) u_buy = data.ali1377.u_buy;
+        if (data.ali1377.u_sell != null) u_sell = data.ali1377.u_sell;
+        if (data.ali1377.premium_buy != null) premium_buy = data.ali1377.premium_buy;
+        if (data.ali1377.premium_sell != null) premium_sell = data.ali1377.premium_sell;
+        
+        if (data.ali1377.tether_usd != null) tetherUsd = Number(data.ali1377.tether_usd);
+        if (data.ali1377.utopia_usd != null) utopiaUsd = Number(data.ali1377.utopia_usd);
+      }
+      // قیمت پایه تتر به تومان از منبع مادر
+      if (data && data.meta && data.meta.poster && data.meta.poster.swapwallet_prices && data.meta.poster.swapwallet_prices["USDT/IRT"]) {
+        baseTetherToman = Number(data.meta.poster.swapwallet_prices["USDT/IRT"]);
+      }
+    }
+  } catch (e) {
+    console.log('⚠️ خطا در دریافت از منبع مادر (رندر):', e.message);
+  }
 
-    `🔷️ 𝑩𝒖𝒚 𝑷𝒓𝒆𝒎𝒊𝒖𝒎 𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.premium_buy)}\n` +
-    `🔶️ 𝑺𝒆𝒍𝒍 𝑷𝒓𝒆𝒎𝒊𝒖𝒎 𝑽𝒐𝒖𝒄𝒉𝒆𝒓: ${fmtPrice(p.premium_sell)}\n` +
-    `💱 ${premiumBar} ${premiumPct}%\n\n` +
+  // ۳. محاسبه قیمت دلار و یوتوپیا
+  const dollarBuyToman = isFinite(baseTetherToman) && baseTetherToman > 0 ? baseTetherToman * (1 + USD_TOMAN_SPREAD) : NaN;
+  const dollarSellToman = isFinite(baseTetherToman) && baseTetherToman > 0 ? baseTetherToman * (1 - USD_TOMAN_SPREAD) : NaN;
+  
+  const utopiaBaseToman = isFinite(baseTetherToman) && isFinite(utopiaUsd) ? utopiaUsd * baseTetherToman : NaN;
+  const utopiaBuyToman = isFinite(utopiaBaseToman) ? utopiaBaseToman * (1 + USD_TOMAN_SPREAD) : NaN;
+  const utopiaSellToman = isFinite(utopiaBaseToman) ? utopiaBaseToman * (1 - USD_TOMAN_SPREAD) : NaN;
 
-    `💱 𝑫𝒐𝒍𝒍𝒂𝒓: ${fmtPrice(p.tether_usd)}\n` +
-    `${dollarBar} ${dollarPct}%\n\n` +
+  const SEP = '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️';
 
-    `✨ 𝑼𝒕𝒐𝒑𝒊𝒂: ${fmtPrice(p.utopia_usd)}\n` +
-    `${utopiaBar} ${utopiaPct}%`;
+  // ۴. ساخت پیام
+  const blocks = [
+    buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_buy, 'buy_u_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_sell, 'sell_u_voucher', '▰', '▱', 8),
+
+    buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_buy, 'buy_pr_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_sell, 'sell_pr_voucher', '▰', '▱', 8),
+
+    buildPriceLine('💲', '𝑩𝒖𝒚 𝑫𝒐𝒍𝒍𝒂𝒓', dollarBuyToman, 'buy_dollar', '⬢', '⬡', 5) + '\n\n' +
+      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑫𝒐𝒍𝒍𝒂𝒓', dollarSellToman, 'sell_dollar', '⬢', '⬡', 5),
+
+    buildPriceLine('💲', '𝑩𝒖𝒚 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaBuyToman, 'buy_utopia', '⬢', '⬡', 5) + '\n\n' +
+      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaSellToman, 'sell_utopia', '⬢', '⬡', 5)
+  ];
+
+  let text = '╭〰 ➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫ 〰╮\n\n' + blocks.join('\n' + SEP + '\n\n');
 
   if (!prices) {
-    text = '⚠️ سرویس قیمت موقتاً در دسترس نیست — این لیست بدون قیمت لحظه‌ای است.\n\n' + text;
+    text += '\n\n⚠️ سرویس قیمت موقتاً در دسترس نیست — این لیست بدون قیمت لحظه‌ای است.';
   } else if (prices.stale) {
     text += '\n\n⚠️ آخرین قیمت معتبر نمایش داده شد (اتصال لحظه‌ای برقرار نشد).';
   }
@@ -96,9 +148,6 @@ async function buildLivePriceText() {
 
 function registerHomeMenuHandlers(bot) {
   // ☰ Home — از هرجای ربات، بدون نیاز به /start، کاربر را به منوی اصلی برمی‌گرداند
-  // ⚠️ از وقتی ورود/احراز هویت پیش از منوی اصلی اجباری شده، این دکمه برای کاربری که هنوز ثبت‌نامش
-  // کامل نیست دیگر منو را باز نمی‌کند (قبلاً این‌طور بود و عملاً مسیر ثبت‌نام را دور می‌زد)؛ به‌جایش
-  // دقیقاً همان مرحله‌ی ناتمام را (بدون پاک کردن اطلاعات قبلی) دوباره نشان می‌دهد.
   bot.hears(HOME_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
 
@@ -108,21 +157,15 @@ function registerHomeMenuHandlers(bot) {
       return user ? renderCurrentState(ctx, user) : null;
     }
 
-    // استیکر Home قبل از باز شدن منو
     await sendSticker(ctx, STICKERS.HOME);
 
-    // منو را می‌فرستیم. showMainMenu همان پیام ارسال‌شده‌ی تلگرام را برمی‌گرداند،
-    // پس message_id همین پیام منو است و قطعاً وجود دارد.
-    // ⚠️ ری‌اکشن قبلی حذف شد: قبلاً روی پیام «☰ Home» کاربر گذاشته می‌شد که گاهی
-    // «message to react not found» می‌داد. حالا ری‌اکشن شناور روی خود پیام منو می‌نشیند
-    // (همان رفتار /start: is_big=true، ایموجی از تنظیم start_reaction در پنل ادمین).
     const sent = await showMainMenu(ctx);
     if (sent && sent.message_id) {
       await reactToMessage(ctx, ctx.chat.id, sent.message_id, true);
     }
   });
 
-  // 💱 Live Price — استیکر، سپس پیام متنی ساده قیمت‌ها (بدون هیچ دکمه‌ای)
+  // 💱 Live Price — استیکر، سپس پیام متنی ساده قیمت‌ها
   bot.hears(LIVE_PRICE_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
     await sendSticker(ctx, STICKERS.LIVE_PRICE);
