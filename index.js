@@ -13,7 +13,7 @@ const { ADMIN_IDS } = require('./constants');
 const { loadTextsCache } = require('./textManager');
 const AntiSleepBot = require('./AntiSleepBot');
 const { calculateSellPayout } = require('./exchangeEngine');
-const exchangePolling = require('./exchangePolling');
+const exchangePolling = require('./exePolling');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
