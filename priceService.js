@@ -78,11 +78,15 @@ function renderBar(percent, filledChar, emptyChar, totalSegments) {
 }
 
 // ==================== نگاشت محصول ← فیلد price-service (مشکل ۳) ====================
-// فقط محصولاتی که واقعاً روی price-service تعریف شدن اینجا هستن. هات ووچر عمداً نیست —
-// نه price-service همچین فیلدی داره نه uWallet اندپوینت قیمت داره؛ برای هات ووچر همیشه
-// باید قیمت دستی پنل استفاده بشه (fallback طبیعی، نه یک حالت خطا).
-const BUY_FIELD_MAP = { voucher: 'u_buy', premium_voucher: 'premium_buy', ps_voucher: 'ps_buy' };
-const SELL_FIELD_MAP = { uvoucher: 'u_sell', premiumvoucher: 'premium_sell', psvoucher: 'ps_sell' };
+// فقط محصولاتی که واقعاً روی price-service تعریف شدن اینجا هستن.
+// ✅ آپدیت: price-service حالا فیلدهای hot_buy/hot_sell رو هم برمی‌گردونه (زیر همون کلید
+// بیرونی ali1377، دقیقاً مثل u_buy/premium_buy/...)، پس هات ووچر هم مثل بقیه از همین مسیر
+// (همون endpoint، همون کش ۶۰ ثانیه‌ای بالا، بدون هیچ polling جدید) قیمت زنده می‌گیره.
+// ⚠️ نکته‌ی مهم: این فقط برای «نمایش قیمت واحد» هاته. حداقل خرید هات ووچر عمداً به این
+// وصل نیست — isOnlineBuyProduct پایین‌تر جدا و مستقل تعریف شده (چون زیر یک واحد هم
+// قابل خریده، برخلاف یو/پریمیوم/پی‌اس ووچر که حداقلشون همیشه دقیقاً ۱ واحده).
+const BUY_FIELD_MAP = { voucher: 'u_buy', premium_voucher: 'premium_buy', ps_voucher: 'ps_buy', hotvoucher: 'hot_buy' };
+const SELL_FIELD_MAP = { uvoucher: 'u_sell', premiumvoucher: 'premium_sell', psvoucher: 'ps_sell', hotvoucher_sell: 'hot_sell' };
 
 // خروجی: { success:false } اگه این محصول روی price-service نیست یا سرویس جواب نداد
 // (caller باید خودش fallback به قیمت دستی بزنه)، وگرنه { success:true, price, stale? }
@@ -98,11 +102,18 @@ async function getLivePrice(type, productKey) {
   return { success: true, price: Number(prices[field]), stale: !!prices.stale };
 }
 
-// آیا این محصولِ خرید «قیمت آنلاین» دارد؟ (یو ووچر، پریمیوم ووچر، پی‌اس ووچر)
+// آیا این محصولِ خرید «قیمت آنلاین کامل» دارد؟ (یو ووچر، پریمیوم ووچر، پی‌اس ووچر)
 // این تنها منبع حقیقت برای تشخیص است: حداقل خرید = ۱ واحد با قیمت آنلاین، و مقدار سفارش
-// به uWallet = مبلغ ÷ قیمت واحد آنلاین. هات ووچر عمداً اینجا نیست (حداقل دستی از پنل).
+// به uWallet = مبلغ ÷ قیمت واحد آنلاین.
+// ⚠️ عمداً از BUY_FIELD_MAP مشتق نمی‌شود (قبلاً می‌شد): از وقتی هات ووچر هم به BUY_FIELD_MAP
+// اضافه شد (فقط برای نمایش قیمت زنده)، اگه این تابع همچنان بر اساس عضویت در همون مپ تصمیم
+// می‌گرفت، هات ووچر هم ناخواسته «آنلاین کامل» می‌شد و حداقل خریدش (که طبق تصمیم کسب‌وکاری باید
+// دستی/پنل و مستقل از قیمت واحد بمونه، چون زیر یک واحد هم قابل خریده) به ۱ واحد قفل می‌شد.
+// برای همین یک لیست جدا و صریح اینجاست — هات ووچر همیشه عمداً بیرون این لیست می‌ماند.
+const FULL_ONLINE_PRODUCTS = ['voucher', 'premium_voucher', 'ps_voucher'];
+
 function isOnlineBuyProduct(productKey) {
-  return Object.prototype.hasOwnProperty.call(BUY_FIELD_MAP, productKey);
+  return FULL_ONLINE_PRODUCTS.includes(productKey);
 }
 
 module.exports = { getPrices, checkHealth, slowFluctuatingPercent, renderBar, getLivePrice, isOnlineBuyProduct };
