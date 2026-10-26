@@ -7,13 +7,15 @@ const path = require('path');
 const {
   pool, initDb, sendRatesToChannel,
   getSellOrderByProviderTxId, getOrderByProviderTxId, getSellProductByKey,
-  finalizeSellOrderUwallet, logTransaction
+  finalizeSellOrderUwallet, logTransaction,
+  getWalletRequestByInvoiceId, finalizeGatewayDeposit
 } = require('./db');
 const { ADMIN_IDS } = require('./constants');
 const { loadTextsCache } = require('./textManager');
 const AntiSleepBot = require('./AntiSleepBot');
 const { calculateSellPayout } = require('./exchangeEngine');
 const exchangePolling = require('./exchangePolling');
+const abanGateway = require('./abanGateway');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -201,6 +203,48 @@ app.post('/webhook/uwallet', express.json(), async (req, res) => {
     }
   } catch (err) {
     console.log('❌ خطا در پردازش وبهوک uWallet:', err.message);
+  }
+});
+
+// ==================== وبهوک آبان گیت‌وی (شارژ خودکار کیف پول از درگاه پرداخت) ====================
+// درباره‌ی امضا: صفحه‌ی «مستندات API» که برای این قابلیت فرستاده شد فقط API فاکتورها را مستند
+// می‌کند — هیچ بخش/هدر امضای وب‌هوکی در آن نیست. به‌جای حدس‌زدن یک الگوریتم امضا (که اگر غلط
+// باشد از نبودنش هم خطرناک‌تره)، دقیقاً همان الگویی پیاده شده که بسته‌ی رسمی PHP آبان توصیه
+// می‌کند: به بدنه‌ی وب‌هوک اعتماد نکن، فقط محرک بگیرش و بلافاصله با توکن Bearer واقعی‌مان از
+// endpoint یک‌بارمصرف verify تأیید بگیر. امنیتش از توکن واقعی ماست، و idempotency یک‌بارمصرف
+// verify (۴۰۹ already_verified) هم رایگان میاد — روی همین finalizeGatewayDeposit یک گارد محلی
+// دوم هم دارد (db.js)، دقیقاً مثل finalizeSellOrderUwallet برای وبهوک uWallet بالا.
+app.post('/webhook/aban', express.json(), async (req, res) => {
+  res.status(200).send('OK'); // طبق همان منطق وبهوک uWallet بالا: همیشه فوری 200، وگرنه آبان دوباره تلاش می‌کند
+  try {
+    const body = req.body || {};
+    const invoiceId = body.invoice_id || (body.data && body.data.invoice_id) || (body.invoice && body.invoice.invoice_id);
+    if (!invoiceId) { console.log('⚠️ وبهوک آبان بدون invoice_id:', JSON.stringify(body)); return; }
+
+    const reqRow = await getWalletRequestByInvoiceId(invoiceId);
+    if (!reqRow) { console.log('⚠️ وبهوک آبان برای فاکتور ناشناخته:', invoiceId); return; }
+    if (reqRow.gateway_credited) return; // قبلاً شارژ شده — کاری نیست (وبهوک تکراری)
+
+    const verify = await abanGateway.verifyInvoice(invoiceId);
+    // هم verified:true (اولین تأیید موفق) و هم alreadyVerified (مثلاً وبهوک قبلی رسیده ولی بین
+    // verify موفق و شارژ کیف‌پول کرش کرده بودیم) باید منجر به شارژ شوند — چون reqRow.gateway_credited
+    // بالا false بود، یعنی هنوز خودمان شارژش نکرده‌ایم، صرف‌نظر از اینکه آبان قبلاً verify کرده یا نه.
+    if (!verify.success && !verify.alreadyVerified) {
+      console.log(`ℹ️ وبهوک آبان برای فاکتور ${invoiceId}: ${verify.error || 'هنوز تأیید نشده'}`);
+      return;
+    }
+
+    const fin = await finalizeGatewayDeposit(reqRow.id);
+    if (fin.applied) {
+      try {
+        await bot.telegram.sendMessage(
+          reqRow.telegram_id,
+          `✅ پرداخت شما تأیید شد.\n💰 ${Number(reqRow.amount).toLocaleString('en-US')} تومان به کیف پول اضافه شد.\n🔖 ${reqRow.tracking_code}`
+        );
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.log('❌ خطا در پردازش وبهوک آبان گیت‌وی:', err.message);
   }
 });
 
