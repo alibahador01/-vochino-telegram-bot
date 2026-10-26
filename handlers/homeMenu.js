@@ -81,6 +81,8 @@ async function buildLivePriceText() {
   let u_sell = p.u_sell;
   let premium_buy = p.premium_buy;
   let premium_sell = p.premium_sell;
+  let hot_buy = p.hot_buy;
+  let hot_sell = p.hot_sell;
   let baseTetherToman = usdRate; 
   let tetherUsd = Number(p.tether_usd);
   let utopiaUsd = Number(p.utopia_usd);
@@ -94,6 +96,8 @@ async function buildLivePriceText() {
         if (data.ali1377.u_sell != null) u_sell = data.ali1377.u_sell;
         if (data.ali1377.premium_buy != null) premium_buy = data.ali1377.premium_buy;
         if (data.ali1377.premium_sell != null) premium_sell = data.ali1377.premium_sell;
+        if (data.ali1377.hot_buy != null) hot_buy = data.ali1377.hot_buy;
+        if (data.ali1377.hot_sell != null) hot_sell = data.ali1377.hot_sell;
         if (data.ali1377.tether_usd != null) tetherUsd = Number(data.ali1377.tether_usd);
         if (data.ali1377.utopia_usd != null) utopiaUsd = Number(data.ali1377.utopia_usd);
       }
@@ -120,6 +124,9 @@ async function buildLivePriceText() {
 
     buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_buy, 'buy_pr_voucher', '▰', '▱', 8) + '\n\n' +
       buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_sell, 'sell_pr_voucher', '▰', '▱', 8),
+
+    buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_buy, 'buy_hot_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_sell, 'sell_hot_voucher', '▰', '▱', 8),
 
     buildPriceLine('💲', '𝑩𝒖𝒚 𝑫𝒐𝒍𝒍𝒂𝒓', dollarBuyToman, 'buy_dollar', '⬢', '⬡', 5) + '\n\n' +
       buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑫𝒐𝒍𝒍𝒂𝒓', dollarSellToman, 'sell_dollar', '⬢', '⬡', 5),
