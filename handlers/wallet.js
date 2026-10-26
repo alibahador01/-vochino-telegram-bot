@@ -5,6 +5,7 @@ const { pool, getUser, updateUser, getUserCards, getTransactionLogs, logTransact
 const { calculateCommission } = require('../exchangeEngine');
 const { MIN_WITHDRAW, ADMIN_IDS } = require('../constants');
 const R = require('./receipts');
+const abanGateway = require('../abanGateway');
 
 module.exports = function registerWalletHandlers(bot) {
 
@@ -283,9 +284,15 @@ module.exports = function registerWalletHandlers(bot) {
 
   bot.action('deposit_gateway', async (ctx) => {
     ctx.answerCbQuery();
-    return ctx.reply('🌐 درگاه پرداخت به‌زودی فعال می‌شود.', {
-      reply_markup: { inline_keyboard: [[{ text: '🟡 بازگشت', callback_data: 'wallet_deposit' }]] }
-    });
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    sessions[ctx.from.id] = { flow: 'gateway_deposit', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: {} };
+    return ctx.reply(
+      R.HEADER +
+      '🌐 پرداخت از طریق درگاه\n\n' +
+      '✅ پرداخت شما کارت‌به‌کارت و کاملاً خودکار تأیید می‌شود — نیازی به ارسال رسید نیست.\n\n' +
+      '📥 لطفاً مبلغ واریزی خود را به تومان وارد کنید:'
+    );
   });
 
   bot.action('wallet_cancel', async (ctx) => {
@@ -549,6 +556,62 @@ module.exports = function registerWalletHandlers(bot) {
       session.amount = amount;
       session.step = 'waiting_photo';
       return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
+    }
+
+    if (session.flow === 'gateway_deposit' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (!amount || amount <= 0) {
+        return ctx.reply('❌ مبلغ نامعتبر. یک عدد وارد کنید:');
+      }
+      delete sessions[ctx.from.id];
+
+      const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
+      // یک رکورد pending محلی قبل از صدا زدن API: هم برای نمایش در «گزارش تراکنش‌ها» مثل بقیه
+      // انواع واریز، هم گارد idempotency ما وقتی وبهوک می‌رسد (finalizeGatewayDeposit در db.js)
+      const ins = await pool.query(
+        `INSERT INTO wallet_requests (telegram_id, type, amount, status, created_at, tracking_code, gateway)
+         VALUES ($1, 'deposit', $2, 'pending', NOW(), $3, 'aban') RETURNING id`,
+        [String(ctx.from.id), amount, trackCode]
+      );
+      const reqId = ins.rows[0].id;
+
+      const appUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com';
+      const invoice = await abanGateway.createInvoice({
+        amountToman: amount,
+        orderId: trackCode,
+        callbackUrl: `${appUrl}/webhook/aban`,
+        description: `شارژ کیف پول Vochino — ${ctx.from.id}`,
+        metadata: { telegram_id: String(ctx.from.id), wallet_request_id: reqId }
+      });
+
+      if (!invoice.success) {
+        await pool.query(`UPDATE wallet_requests SET status = 'failed' WHERE id = $1`, [reqId]);
+        console.log('❌ خطا در ساخت فاکتور آبان گیت‌وی:', invoice.error);
+        return ctx.reply('⚠️ در حال حاضر امکان اتصال به درگاه پرداخت نیست. لطفاً از «💳 کارت به کارت» استفاده کنید یا کمی بعد دوباره تلاش کنید.');
+      }
+
+      await pool.query(
+        `UPDATE wallet_requests SET gateway_invoice_id = $2, payable_toman = $3 WHERE id = $1`,
+        [reqId, invoice.invoiceId, invoice.payableToman]
+      );
+
+      return ctx.reply(
+        R.HEADER +
+        `🌐 فاکتور شما ساخته شد\n\n` +
+        `💰 مبلغ دقیق پرداخت: ${invoice.payableToman.toLocaleString('en-US')} تومان\n` +
+        `⚠️ دقیقاً همین مبلغ را واریز کنید؛ چند تومان با مبلغ درخواستی شما فرق دارد و همین اختلاف فاکتورتان را شناسایی می‌کند.\n` +
+        `🔖 کد پیگیری: ${trackCode}\n\n` +
+        `روی دکمه‌ی زیر بزنید، پرداخت را انجام دهید و برگردید — موجودی‌تان خودکار شارژ می‌شود.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `💳 پرداخت ${invoice.payableToman.toLocaleString('en-US')} تومان`, url: invoice.paymentUrl }],
+              [{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]
+            ]
+          }
+        }
+      );
     }
 
     if (session.flow === 'withdraw' && session.step === 'waiting_amount') {
