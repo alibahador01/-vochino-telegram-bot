@@ -1,7 +1,7 @@
 // handlers/homeMenu.js
 const { sessions, showMainMenu, reactToMessage } = require('../utils');
 const priceService = require('../priceService');
-const { describeError } = require('../util/http');
+const { describeError, fetchWithTimeout } = require('../util/http');
 const { getUser, getUsdRate } = require('../db');
 
 const HOME_BTN_TEXT = '☰ 𝑯𝒐𝒎𝒆';
@@ -13,9 +13,9 @@ const STICKERS = {
   HOME: 'CAACAgIAAxkBAAEjSKxqxpgW2yxDcPW2mmO0RtWriXRk_gACCScAApL5eEnHopTScSGNzz0E'
 };
 
-async function sendSticker(ctx, fileId) {
+async function sendSticker(ctx, fileId, extra) {
   try {
-    await ctx.replyWithSticker(fileId);
+    await ctx.replyWithSticker(fileId, extra);
   } catch (e) {
     console.log('❌ خطا در ارسال استیکر:', describeError(e));
   }
@@ -88,7 +88,13 @@ async function buildLivePriceText() {
   let utopiaUsd = Number(p.utopia_usd);
 
   try {
-    const res = await fetch('https://price-service-bxfy.onrender.com/');
+    // ⚠️ رفع باگ «ربات گاهی یک دقیقه‌ای ساکت می‌شود، بعد یهو همه‌چیز با هم می‌رسد»: این fetch قبلاً
+    // بدون هیچ سقف زمانی بود (برخلاف همه‌ی fetchهای دیگر پروژه که از fetchWithTimeout استفاده
+    // می‌کنند) — اگر همین price-service (یک سرویس رندر دیگر) کمی دیر جواب بدهد یا خوابیده باشد،
+    // این fetch می‌توانست دقایقی معلق بماند، و چون Telegraf آپدیت‌ها را پشت‌سرهم (نه هم‌زمان)
+    // پردازش می‌کند، همین یک درخواست کل صف ربات را قفل می‌کرد تا وقتی خودش تمام شود. الان حداکثر
+    // ۸ ثانیه صبر می‌کند و بعد (مثل حالت خطا) بی‌صدا به قیمت‌های کش‌شده‌ی بالا برمی‌گردد.
+    const res = await fetchWithTimeout('https://price-service-bxfy.onrender.com/', {}, 8000);
     if (res.ok) {
       const data = await res.json();
       if (data && data.ali1377) {
@@ -116,26 +122,42 @@ async function buildLivePriceText() {
   const utopiaBuyToman = isFinite(utopiaBaseToman) ? utopiaBaseToman * (1 + USD_TOMAN_SPREAD) : NaN;
   const utopiaSellToman = isFinite(utopiaBaseToman) ? utopiaBaseToman * (1 - USD_TOMAN_SPREAD) : NaN;
 
-  const SEP = '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️';
+  // ⚠️ بازطراحی ظاهری (درخواست: شبیه کارت‌های تمیز یک کانال نمونه): تلگرام جدول/کارت واقعی
+  // تو پیام متنی رندر نمی‌کند (آن نمونه یک رسید پرداخت بومی تلگرام بود، نه متن ساده)، پس همان
+  // مکانیزم فعلی (نوار + درصد) عیناً حفظ شده و فقط هر جفت خرید/فروش داخل یک قاب ساده بسته‌بندی
+  // شده تا مثل یک کارت جدا و تمیز دیده شود.
+  function frameBlock(content) {
+    return '┌─────────────────┐\n\n' + content + '\n\n└─────────────────┘';
+  }
 
   const blocks = [
-    buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_buy, 'buy_u_voucher', '▰', '▱', 8) + '\n\n' +
-      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_sell, 'sell_u_voucher', '▰', '▱', 8),
+    frameBlock(
+      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_buy, 'buy_u_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_sell, 'sell_u_voucher', '▰', '▱', 8)
+    ),
 
-    buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_buy, 'buy_pr_voucher', '▰', '▱', 8) + '\n\n' +
-      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_sell, 'sell_pr_voucher', '▰', '▱', 8),
+    frameBlock(
+      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_buy, 'buy_pr_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_sell, 'sell_pr_voucher', '▰', '▱', 8)
+    ),
 
-    buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_buy, 'buy_hot_voucher', '▰', '▱', 8) + '\n\n' +
-      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_sell, 'sell_hot_voucher', '▰', '▱', 8),
+    frameBlock(
+      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_buy, 'buy_hot_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_sell, 'sell_hot_voucher', '▰', '▱', 8)
+    ),
 
-    buildPriceLine('💲', '𝑩𝒖𝒚 𝑫𝒐𝒍𝒍𝒂𝒓', dollarBuyToman, 'buy_dollar', '⬢', '⬡', 5) + '\n\n' +
-      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑫𝒐𝒍𝒍𝒂𝒓', dollarSellToman, 'sell_dollar', '⬢', '⬡', 5),
+    frameBlock(
+      buildPriceLine('💲', '𝑩𝒖𝒚 𝑫𝒐𝒍𝒍𝒂𝒓', dollarBuyToman, 'buy_dollar', '⬢', '⬡', 5) + '\n\n' +
+      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑫𝒐𝒍𝒍𝒂𝒓', dollarSellToman, 'sell_dollar', '⬢', '⬡', 5)
+    ),
 
-    buildPriceLine('💲', '𝑩𝒖𝒚 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaBuyToman, 'buy_utopia', '⬢', '⬡', 5) + '\n\n' +
+    frameBlock(
+      buildPriceLine('💲', '𝑩𝒖𝒚 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaBuyToman, 'buy_utopia', '⬢', '⬡', 5) + '\n\n' +
       buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaSellToman, 'sell_utopia', '⬢', '⬡', 5)
+    )
   ];
 
-  let text = '╭〰 ➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫ 〰╮\n\n' + blocks.join('\n' + SEP + '\n\n');
+  let text = '╭〰 ➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫ 〰╮\n\n' + blocks.join('\n\n');
 
   if (!prices) {
     text += '\n\n⚠️ سرویس قیمت موقتاً در دسترس نیست — این لیست بدون قیمت لحظه‌ای است.';
