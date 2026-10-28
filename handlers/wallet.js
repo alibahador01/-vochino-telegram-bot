@@ -59,12 +59,12 @@ module.exports = function registerWalletHandlers(bot) {
       `👥 افراد دعوت‌شده: ${inviteCount} نفر`;
 
     const keyboard = [
-      [{ text: '🧳 افزایش موجودی', callback_data: 'wallet_deposit' }],
-      [{ text: '💸 برداشت موجودی', callback_data: 'wallet_withdraw' }],
-      [{ text: '🪪 افزایش سقف خرید', callback_data: 'wallet_gold_verify' }],
-      [{ text: '💳 افزودن کارت جدید', callback_data: 'wallet_add_card' }],
-      [{ text: '♻️ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
-      [{ text: '🪎 کسب درآمد', callback_data: 'wallet_referral' }],
+      [{ text: '⊕ افزایش موجودی', callback_data: 'wallet_deposit' }],
+      [{ text: '⊖ برداشت موجودی', callback_data: 'wallet_withdraw' }],
+      [{ text: '𖣠 افزایش سقف خرید', callback_data: 'wallet_gold_verify' }],
+      [{ text: '⧉ افزودن کارت جدید', callback_data: 'wallet_add_card' }],
+      [{ text: '⟳ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
+      [{ text: '✦ کسب درآمد', callback_data: 'wallet_referral' }],
       [backToMenuButton()]
     ];
 
@@ -232,7 +232,10 @@ module.exports = function registerWalletHandlers(bot) {
         inline_keyboard: [
           [{ text: '💳 کارت به کارت', callback_data: 'deposit_card' }],
           [{ text: '🪙 ترون (تتر)', callback_data: 'deposit_crypto' }],
-          [{ text: '🌐 درگاه پرداخت', callback_data: 'deposit_gateway' }],
+          // ⚠️ موقتاً مخفی (تا تأیید اینماد): فقط همین دکمه از لیست برداشته شده؛ هندلر
+          // deposit_gateway و کل مسیر آبان گیت‌وی دست‌نخورده و متصل مانده — برای فعال‌سازی
+          // دوباره، کافیست همین یک خط را از کامنت دربیاورید
+          // [{ text: '🌐 درگاه پرداخت', callback_data: 'deposit_gateway' }],
           [{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]
         ]
       }
