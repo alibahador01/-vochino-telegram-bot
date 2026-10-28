@@ -144,9 +144,9 @@ async function showMainMenu(ctx) {
   }
 
   const headerText =
-    '╭〰 ➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫ 〰╮\n' +
-    '                                             ' + i18n.t(lang, 'menu.title') + '\n' +
-    '╰〰💲 𓆩𓆩🏦𓆪𓆪 💲〰╯\n' +
+    '╭〰✨⫹𓆩🏦𓆪⫺✨〰╮\n' +
+    '⚡️                              ⚡️\n' +
+    '╰〰➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫〰╯\n' +
     i18n.t(lang, 'menu.header');
   return ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 }
