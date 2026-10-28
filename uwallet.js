@@ -1,230 +1,774 @@
-// uwallet.js
-// کلاینت اختصاصی API واقعی uWallet (مطابق مستندات رسمی‌شان، نه قرارداد عمومی exchangeEngine).
-// این فایل فقط «حرف زدن با uWallet» را بلد است؛ هیچ منطق سفارش/کیف‌پولی اینجا نیست —
-// آن منطق در exchangeEngine.js (برای فراخوانی) و exchangePolling.js / index.js (برای پیگیری) است.
-//
-// همه‌ی توابع این فایل یک «apiSource» از جدول api_sources (type='uwallet') می‌گیرند که شامل
-// base_url و api_key (= TOKEN) است. اگر ادمین base_url را خالی گذاشته باشد، آدرس پیش‌فرض رسمی
-// uWallet استفاده می‌شود.
+// handlers/wallet.js
+const texts = require('../texts');
+const { sessions, showMainMenu, fillTemplate, generateTrackingCode, backToMenuButton } = require('../utils');
+const { pool, getUser, updateUser, getUserCards, getTransactionLogs, logTransaction, getAdmin, getAllAdmins, getSetting, setSetting } = require('../db');
+const { calculateCommission } = require('../exchangeEngine');
+const { MIN_WITHDRAW, ADMIN_IDS } = require('../constants');
+const R = require('./receipts');
+const abanGateway = require('../abanGateway');
 
-const { fetchWithTimeout } = require('./util/http');
+module.exports = function registerWalletHandlers(bot) {
 
-const DEFAULT_BASE_URL = 'https://api.uwallet.biz';
-const TIMEOUT_MS = 15000;
+  // migration خودکار (بدون دستور دستی): ستون دلیل رد برای درخواست‌های کیف پول
+  pool.query('ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS reject_reason TEXT').catch(() => {});
 
-// ==================== ترجمه‌ی فارسی کدهای خطای uWallet (صفحه ۷ مستندات) ====================
-const ERROR_CODES_FA = {
-  10001: 'ایمیل تکراری است',
-  10002: 'ایمیل معتبر نیست',
-  10009: 'کد نامعتبر است',
-  10010: 'کد اشتباه است',
-  10018: 'مبلغ نامعتبر است',
-  10019: 'کوین موردنظر وجود ندارد',
-  10020: 'کوین نامعتبر است',
-  10022: 'موجودی کافی نیست',
-  10024: 'گیرنده نامعتبر است',
-  10028: 'این کد قبلاً ساخته شده است',
-  10029: 'حداقل مبلغ رعایت نشده است',
-  10030: 'حداکثر مبلغ رعایت نشده است',
-  10035: 'ارز نامعتبر است',
-  10039: 'ارز مطابقت ندارد',
-  10041: 'این پرداخت قبلاً انجام شده است',
-  10042: 'آدرس خالی است',
-  10045: 'شناسه‌ی یکتا تکراری است',
-  10046: 'فلگ نامعتبر است',
-  10047: 'شناسه‌ی کاربری نامعتبر است',
-  10048: 'شناسه‌ی یکتا نامعتبر است',
-  10049: 'این کد قبلاً استفاده شده است',
-  10050: 'این کد در حال پردازش است'
-};
-
-// پاسخ خطای uWallet مستندسازی نشده (نمونه‌ی دقیق JSON خطا در مستندات نیست — فقط جدول کد←معنی
-// هست، نه شکل دقیق بدنه‌ی خطا)، پس این تابع به‌صورت تدافعی چند شکل محتمل را پوشش می‌دهد.
-function translateError(data, httpStatus, rawText) {
-  let code = Number(
-    (data && (data.code ?? data.error_code ?? data.errorCode)) ?? NaN
-  );
-  // ⚠️ یافته‌ی مهم (مبتنی بر رفتار تأییدشده‌ی uWallet، نه حدس تصادفی): خودِ تست curl ادمین نشون
-  // داد پاسخ موفق uWallet به‌شکل {"message":200,"data":[]} هست — یعنی uWallet عادت داره کد رو مستقیم
-  // تو فیلد «message» بذاره، نه یه فیلد اختصاصی مثل code/error_code. این شکل برای خطاها مستند
-  // نشده، ولی چون این همون الگوییه که خودشون برای موفقیت استفاده می‌کنن، به‌عنوان حالت دوم
-  // (fallback) امتحانش می‌کنیم: اگه فیلدهای اختصاصی بالا چیزی نداشتن ولی message یه عدد بود و
-  // دقیقاً برابر با کد HTTP نبود (یعنی صرفاً تکرار status نیست)، همون رو به‌عنوان کد خطای واقعی
-  // در نظر می‌گیریم. rawText همیشه تو لاگ کامل می‌مونه (پایین‌تر) تا اگه این فرض یه روز اشتباه
-  // از آب دراومد، با یک پیام خطای واقعی بشه این تابع رو اصلاح کرد — نه با حدسِ دوباره.
-  if (isNaN(code) && data && typeof data.message === 'number' && data.message !== httpStatus) {
-    code = data.message;
+  async function adminIdsList() {
+    const ids = ADMIN_IDS.map(x => Number(x));
+    try {
+      const admins = await getAllAdmins();
+      admins.forEach(a => { if (!ids.includes(Number(a.telegram_id))) ids.push(Number(a.telegram_id)); });
+    } catch (e) {}
+    return ids;
   }
-  if (!isNaN(code) && ERROR_CODES_FA[code]) {
-    return { code, message: `${ERROR_CODES_FA[code]} (کد ${code})` };
+
+  async function isAdminUser(id) {
+    if (ADMIN_IDS.includes(Number(id))) return true;
+    try { const a = await getAdmin(id); return !!a; } catch (e) { return false; }
   }
-  // نکته‌ی مهم از تست واقعی: پاسخ موفق uWallet به‌شکل {"message":200,"data":[]} هست — یعنی
-  // فیلد «message» خودش گاهی فقط همون کد HTTP خامه، نه یه توضیح متنی. برای همین اگه message
-  // عدد بود و با httpStatus یکی بود، به‌جاش دنبال data.error یا بدنه‌ی خام می‌گردیم تا چیز
-  // تکراری/بی‌فایده («401») به‌عنوان «توضیح» نشون داده نشه.
-  const rawMsg = data && data.message;
-  const msgLooksLikeStatusCode = typeof rawMsg === 'number' && rawMsg === httpStatus;
-  const msg = (!msgLooksLikeStatusCode && rawMsg) || (data && data.error) || rawText || `خطای HTTP ${httpStatus}`;
-  return { code: isNaN(code) ? null : code, message: msg };
-}
 
-// ⚠️ .trim() اینجا هم (نه فقط موقع ذخیره تو admin.js): اگه یه توکن/base_url قبلاً با فاصله یا
-// خط جدید اضافه تو دیتابیس ذخیره شده، نیازی به حذف و دوباره‌ثبت صرافی نیست — همینجا خودش پاک می‌شه.
-function baseUrlOf(apiSource) {
-  return ((apiSource && apiSource.base_url) || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
-}
-
-function tokenOf(apiSource) {
-  return ((apiSource && apiSource.api_key) || '').trim();
-}
-
-async function callUwallet(apiSource, method, path, body) {
-  const url = baseUrlOf(apiSource) + path;
-  try {
-    const res = await fetchWithTimeout(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        // دقیقاً طبق مستندات uWallet: «authorization: TOKEN» — حروف کوچک، بدون Bearer.
-        // (HTTP headers استاندارد case-insensitive ان، ولی برای مطابقت ۱۰۰٪ با چیزی که خودشون
-        // گفتن، همینجوری تحت‌اللفظی می‌فرستیم تا هیچ شکی نمونه)
-        'authorization': tokenOf(apiSource)
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined
-    }, TIMEOUT_MS);
-
-    const rawText = await res.text();
-    let data = null;
-    try { data = rawText ? JSON.parse(rawText) : null; } catch (e) { /* پاسخ JSON نبود */ }
-
-    if (!res.ok) {
-      const err = translateError(data, res.status, rawText);
-      // ⚠️ رفع باگ «فقط کد 401 لاگ می‌شه»: قبلاً اینجا فقط err.message (که بعضی‌وقتا همون عدد
-      // خام data.message بود، نه توضیح) برمی‌گشت. الان همیشه وضعیت HTTP + بدنه‌ی خام پاسخ uWallet
-      // هم تو پیام خطا هست، صرف‌نظر از این‌که تونستیم کد خطا رو ترجمه کنیم یا نه.
-      const fullMessage = `HTTP ${res.status} — ${err.message} | بدنه پاسخ uWallet: ${rawText || '(خالی)'}`;
-      return { success: false, error: fullMessage, errorCode: err.code, httpStatus: res.status, raw: data };
-    }
-    return { success: true, data, raw: data };
-  } catch (err) {
-    // خطای سطح شبکه (نه HTTP) — کد خطای Node (مثل ECONNREFUSED/ENOTFOUND/ETIMEDOUT) هم اضافه می‌شه
-    return {
-      success: false,
-      error: 'خطا در ارتباط با uWallet: ' + err.message + (err.code ? ' [کد: ' + err.code + ']' : ''),
-      errorCode: null
-    };
-  }
-}
-
-// ==================== ساخت ووچر (سمت خرید ما: از موجودی uWallet یک کد ووچر می‌سازیم) ====================
-// ورودی: coin (مثلاً UUSD یا HotVoucher)، amount (مقدار به واحد همان کوین، به‌صورت رشته طبق نمونه‌ی مستندات)
-// خروجی: { success, transactionId, code, error, errorCode }
-async function createVoucher(apiSource, { coin, amount }) {
-  const result = await callUwallet(apiSource, 'POST', '/v1/voucher', {
-    coin,
-    amount: String(amount)
+  bot.action('menu_wallet', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return showWalletPage(ctx);
   });
-  if (!result.success) return result;
-  const data = result.data || {};
-  if (!data.code || !data.transactionId) {
-    return { success: false, error: 'پاسخ ساخت ووچر از uWallet ناقص بود (بدون code یا transactionId).', raw: data };
+
+  async function showWalletPage(ctx) {
+    const user = await getUser(ctx.from.id);
+    if (!user) {
+      return ctx.reply('⚠️ اطلاعات کاربری شما یافت نشد. /start را بزنید.');
+    }
+
+    const balance = Number(user.balance);
+    const bonusBalance = Number(user.bonus_balance || 0);
+    const name = user.full_name || 'ثبت نشده';
+    const phone = user.phone || 'ثبت نشده';
+    const card = user.card_number || 'ثبت نشده';
+    const level = user.verification_status === 'gold' ? '🥇 طلایی' : (user.verification_status === 'silver' ? '🥈 نقره‌ای' : '⚪ مهمان');
+    const inviteRes = await pool.query('SELECT COUNT(*)::int AS count FROM users WHERE referrer_id = $1', [String(ctx.from.id)]);
+    const inviteCount = inviteRes.rows[0].count;
+
+    const profileText =
+      R.HEADER +
+      `🧢 پروفایل: \`${user.telegram_id}\`\n` +
+      `👤 نام و نام خانوادگی: ${name}\n` +
+      `📱 شماره تلفن: ${phone}\n` +
+      `💳 شماره کارت: ${card}\n` +
+      `💰 موجودی: ${balance.toLocaleString('en-US')} تومان\n` +
+      `🪎 موجودی بونوس: ${bonusBalance.toLocaleString('en-US')} تومان\n` +
+      `🎗 سطح احراز: ${level}\n` +
+      `👥 افراد دعوت‌شده: ${inviteCount} نفر`;
+
+    const keyboard = [
+      [{ text: '⊕ افزایش موجودی', callback_data: 'wallet_deposit' }],
+      [{ text: '⊖ برداشت موجودی', callback_data: 'wallet_withdraw' }],
+      [{ text: '𖣠 افزایش سقف خرید', callback_data: 'wallet_gold_verify' }],
+      [{ text: '⧉ افزودن کارت جدید', callback_data: 'wallet_add_card' }],
+      [{ text: '⟳ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
+      [{ text: '✦ کسب درآمد', callback_data: 'wallet_referral' }],
+      [backToMenuButton()]
+    ];
+
+    ctx.reply(profileText, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
   }
-  return { success: true, transactionId: data.transactionId, code: data.code, raw: data };
-}
 
-// ==================== فعال‌سازی ووچر (سمت فروش ما: کد ووچر مشتری را روی uWallet فعال می‌کنیم) ====================
-// خروجی: { success, status: 'confirm'|'pending'|'reject', transactionId, receive, batchId, error, errorCode }
-async function useVoucher(apiSource, { coin, code }) {
-  const result = await callUwallet(apiSource, 'POST', '/v1/voucher/use', { coin, code });
-  if (!result.success) return result;
-  const data = result.data || {};
-  if (!data.transactionId || !data.status) {
-    return { success: false, error: 'پاسخ فعال‌سازی ووچر از uWallet ناقص بود (بدون status یا transactionId).', raw: data };
+  // ==================== توابع کمکی گزارش تراکنش‌ها ====================
+  function statusInfo(status) {
+    if (['completed', 'approved', 'delivered', 'paid'].includes(status)) return { emoji: '🟢', label: 'موفق' };
+    if (['rejected', 'cancelled', 'failed'].includes(status)) return { emoji: '🔴', label: 'رد شده' };
+    return { emoji: '🟠', label: 'در انتظار' };
   }
-  return {
-    success: true,
-    status: data.status, // 'confirm' | 'reject' | 'pending' (طبق مستندات، هرچیز غیر از 'reject' که فوری نیست را باید پول کرد)
-    transactionId: data.transactionId,
-    receive: data.receive !== undefined ? Number(data.receive) : undefined,
-    batchId: data.batchId,
-    raw: data
-  };
-}
 
-// ==================== پیگیری وضعیت یک تراکنش (برای پندینگ‌ها، هر ۳۰ ثانیه) ====================
-// خروجی: { success, status, receive, error }
-async function getTransactionStatus(apiSource, transactionId) {
-  const result = await callUwallet(
-    apiSource,
-    'GET',
-    '/v1/transaction?id=' + encodeURIComponent(transactionId)
-  );
-  if (!result.success) return result;
-  // طبق مستندات، GET /v1/transaction آرایه برمی‌گرداند؛ وقتی با id فیلتر می‌شود انتظار یک آیتم داریم
-  const data = result.data;
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row || !row.status) {
-    return { success: false, error: 'تراکنش با این شناسه روی uWallet پیدا نشد.' };
+  async function fetchUserTransactions(userId) {
+    const list = [];
+    try {
+      const ordersRes = await pool.query(
+        `SELECT o.id, 'buy' AS kind, o.product_type, p.name AS product_name, o.amount, o.commission, o.status, o.tracking_code, o.created_at
+         FROM orders o LEFT JOIN products p ON o.product_type = p.key
+         WHERE o.telegram_id = $1`, [userId]);
+      ordersRes.rows.forEach(r => list.push({ kind: 'buy', id: r.id, productName: r.product_name || r.product_type, amount: Number(r.amount || 0), commission: Number(r.commission || 0), status: r.status, tracking_code: r.tracking_code, created_at: r.created_at }));
+    } catch (e) { console.log('خطا در خواندن orders:', e.message); }
+
+    try {
+      const sellRes = await pool.query(
+        `SELECT s.id, 'sell' AS kind, s.product_type, sp.name AS product_name, s.amount, s.commission, s.status, s.tracking_code, s.created_at
+         FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key
+         WHERE s.telegram_id = $1`, [userId]);
+      sellRes.rows.forEach(r => list.push({ kind: 'sell', id: r.id, productName: r.product_name || r.product_type, amount: Number(r.amount || 0), commission: Number(r.commission || 0), status: r.status, tracking_code: r.tracking_code, created_at: r.created_at }));
+    } catch (e) { console.log('خطا در خواندن sell_orders:', e.message); }
+
+    try {
+      const walletRes = await pool.query(
+        `SELECT id, type, amount, status, tracking_code, created_at, card_number
+         FROM wallet_requests WHERE telegram_id = $1`, [userId]);
+      walletRes.rows.forEach(r => list.push({ kind: r.type, id: r.id, productName: null, amount: Number(r.amount || 0), commission: 0, status: r.status, tracking_code: r.tracking_code, created_at: r.created_at, card_number: r.card_number }));
+    } catch (e) { console.log('خطا در خواندن wallet_requests:', e.message); }
+
+    list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return list;
   }
-  return {
-    success: true,
-    status: row.status, // 'confirm' | 'reject' | در حال بررسی
-    receive: row.receive !== undefined ? Number(row.receive) : undefined,
-    fee: row.fee !== undefined ? Number(row.fee) : undefined,
-    raw: row
-  };
-}
 
-// ==================== موجودی کیف‌پول (ابزار تشخیصی برای پیدا کردن اسم واقعی کوین‌ها) ====================
-// GET /v1/wallet — آرایه‌ای از {coin, amount, free, blocked} برای هر کوینی که حساب uWallet واقعاً
-// توش موجودی/رکورد داره. وقتی پشتیبانی uWallet جواب نمی‌ده، این تنها راه رسمی و بدون‌حدسه که
-// می‌تونی خودت از API خودشون بپرسی «دقیقاً اسم کوین‌هایی که تو حسابم تعریف شدن چیه». توجه: اگه
-// حساب هیچ‌وقت تو یه کوین خاص (مثل Hot Voucher) تراکنش نداشته باشه، ممکنه اصلاً تو این لیست نباشه
-// — یعنی خالی‌بودن لیست لزوماً یعنی «کوین غلطه» نیست، می‌تونه یعنی «هنوز هیچ موجودی‌ای توش نساختی».
-async function getWalletBalances(apiSource) {
-  const result = await callUwallet(apiSource, 'GET', '/v1/wallet');
-  if (!result.success) return result;
-  const rows = Array.isArray(result.data) ? result.data : [];
-  return { success: true, balances: rows, raw: result.data };
-}
-
-// ==================== کدهای خطایی که «قطعاً مشکل از کد ووچر کاربره» (نه از ما/uWallet) ====================
-// 10009=Code is not valid, 10028=Code already exists, 10049=Code already used — هر سه دقیقاً
-// یعنی خودِ کدی که کاربر فرستاده یا فرمتش غلطه یا قبلاً مصرف/ساخته شده. این‌ها با چیزهایی مثل
-// موجودی کم (10022) یا قطعی شبکه فرق دارن: نیازی به بررسی دستی ادمین ندارن، باید فوری و واضح
-// به خودِ کاربر گفته بشه. فقط همین سه کد اینجان — هر کد دیگه‌ای (ناشناخته یا غیرمستند) محتاطانه
-// هنوز می‌ره سمت فال‌بک بررسی دستی قبلی، نه این مسیر جدید.
-const INVALID_CODE_ERROR_CODES = [10009, 10028, 10049];
-function isInvalidVoucherCodeError(errorCode) {
-  return INVALID_CODE_ERROR_CODES.includes(Number(errorCode));
-}
-
-// ==================== اعتبارسنجی فرمت کد ووچر قبل از فرستادن به API (رفع درخواست: صرفه‌جویی در
-// یک فراخوانی بی‌فایده‌ی API + پیام فوری به کاربر به‌جای این‌که اول صف بررسی بشه بعد رد شود) ====================
-// ⚠️ به‌جای قفل‌کردن فرمت رو «IRR + ۶۴ هگز» برای همه‌ی محصولات (که فقط برای Hot Voucher با تست
-// واقعی تأیید شده، نه برای بقیه)، این تابع فرمت مورد انتظار رو مستقیم از روی sample_code همون
-// محصول (که ادمین خودش از پنل تنظیم کرده) می‌سازه — یعنی فقط چیزی رو چک می‌کنه که واقعاً
-// می‌دونیم، نه فرضی که برای یه محصول دیگه تأیید نشده.
-function validateVoucherCodeFormat(code, sampleCode) {
-  if (!sampleCode) return { valid: true }; // بدون نمونه برای مقایسه، فرمتی رد نمی‌کنیم
-  const trimmed = (code || '').trim();
-  if (trimmed.length !== sampleCode.length) {
-    return { valid: false, reason: `طول کد باید دقیقاً ${sampleCode.length} کاراکتر باشد (کد واردشده ${trimmed.length} کاراکتر است).` };
+  function buttonLabel(t) {
+    const st = statusInfo(t.status);
+    const amount = t.amount.toLocaleString('en-US');
+    let firstLine;
+    if (st.label === 'رد شده') firstLine = '🔴 رد شده';
+    else if (t.kind === 'buy') firstLine = `🟢 خرید ${t.productName || ''}`.trim();
+    else if (t.kind === 'sell') firstLine = `🔵 فروش ${t.productName || ''}`.trim();
+    else if (t.kind === 'withdraw') firstLine = '🟣 برداشت';
+    else if (t.kind === 'deposit') firstLine = '🟡 شارژ';
+    else firstLine = `⚪️ ${t.kind}`;
+    return `${firstLine} | ${amount} تومان`;
   }
-  const prefixMatch = sampleCode.match(/^[A-Za-z]+/);
-  if (prefixMatch && !trimmed.startsWith(prefixMatch[0])) {
-    return { valid: false, reason: `کد باید با «${prefixMatch[0]}» شروع شود.` };
-  }
-  return { valid: true };
-}
 
-module.exports = {
-  ERROR_CODES_FA,
-  translateError,
-  createVoucher,
-  useVoucher,
-  getTransactionStatus,
-  getWalletBalances,
-  isInvalidVoucherCodeError,
-  validateVoucherCodeFormat
+  bot.action('wallet_history', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return showTransactionHistory(ctx);
+  });
+
+  async function showTransactionHistory(ctx) {
+    const userId = String(ctx.from.id);
+    const list = await fetchUserTransactions(userId);
+    if (list.length === 0) return ctx.reply('📋 شما هنوز تراکنشی ندارید.');
+
+    const recent = list.slice(0, 10);
+    const buttons = recent.map(t => [{ text: buttonLabel(t), callback_data: `tx_detail:${t.kind}:${t.id}` }]);
+    buttons.push([{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]);
+
+    ctx.reply('🧾 **گزارش تراکنش‌های شما**\n\nبرای مشاهده جزئیات، روی هر تراکنش بزنید:', {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: buttons }
+    });
+  }
+
+  // ==================== جزئیات تراکنش (با بررسی مالکیت) ====================
+  bot.action(/^tx_detail:(\w+):(\d+)$/, async (ctx) => {
+    ctx.answerCbQuery();
+    const kind = ctx.match[1];
+    const id = parseInt(ctx.match[2], 10);
+    const userId = String(ctx.from.id);
+
+    if (kind === 'buy') {
+      const res = await pool.query(
+        `SELECT o.*, p.name AS product_name FROM orders o LEFT JOIN products p ON o.product_type = p.key
+         WHERE o.id = $1 AND o.telegram_id = $2`, [id, userId]);
+      if (res.rows.length === 0) return ctx.reply('⚠️ تراکنش یافت نشد یا متعلق به شما نیست.');
+      const t = res.rows[0];
+      const user = await getUser(userId);
+      const paid = Number(t.amount || 0);
+      const commission = Number(t.commission || 0);
+      const st = statusInfo(t.status);
+      const state = st.label === 'موفق' ? 'success' : (st.label === 'رد شده' ? 'failed' : 'pending');
+      return ctx.reply(R.buildBuyReceipt({
+        productName: t.product_name || t.product_type,
+        base: paid - commission, commission, paid,
+        status: state, tracking: null,
+        card: user ? user.card_number : null,
+        voucherCode: t.delivered_code || t.voucher_code,
+        voucherHash: t.provider_tx_id,
+        createdAt: t.created_at,
+        reason: t.reject_reason
+      }));
+    }
+
+    if (kind === 'sell') {
+      const res = await pool.query(
+        `SELECT s.*, sp.name AS product_name FROM sell_orders s LEFT JOIN sell_products sp ON s.product_type = sp.key
+         WHERE s.id = $1 AND s.telegram_id = $2`, [id, userId]);
+      if (res.rows.length === 0) return ctx.reply('⚠️ تراکنش یافت نشد یا متعلق به شما نیست.');
+      const t = res.rows[0];
+      const user = await getUser(userId);
+      const amount = Number(t.amount || 0);
+      const commission = Number(t.commission || 0);
+      const st = statusInfo(t.status);
+      const state = st.label === 'موفق' ? 'success' : (st.label === 'رد شده' ? 'failed' : 'pending');
+      return ctx.reply(R.buildSellReceipt({
+        productName: t.product_name || t.product_type,
+        amount, commission, received: amount - commission,
+        status: state, tracking: null,
+        card: user ? user.card_number : null,
+        newBalance: user ? user.balance : 0,
+        createdAt: t.created_at,
+        reason: t.reject_reason
+      }));
+    }
+
+    if (kind === 'withdraw' || kind === 'deposit') {
+      const res = await pool.query(`SELECT * FROM wallet_requests WHERE id = $1 AND telegram_id = $2`, [id, userId]);
+      if (res.rows.length === 0) return ctx.reply('⚠️ تراکنش یافت نشد یا متعلق به شما نیست.');
+      const t = res.rows[0];
+      const amount = Number(t.amount || 0);
+      const st = statusInfo(t.status);
+      const user = await getUser(userId);
+      const state = st.label === 'موفق' ? 'success' : (st.label === 'رد شده' ? 'failed' : 'pending');
+
+      if (t.type === 'withdraw') {
+        return ctx.reply(R.buildWithdrawReceipt({
+          amount, commission: 0, net: amount,
+          status: state, tracking: null,
+          card: t.card_number, newBalance: user ? user.balance : 0,
+          createdAt: t.created_at, reason: t.reject_reason
+        }));
+      }
+      return ctx.reply(R.buildDepositReceipt({
+        amount, status: state, tracking: null,
+        newBalance: user ? user.balance : 0,
+        createdAt: t.created_at, reason: t.reject_reason
+      }));
+    }
+
+    return ctx.reply('⚠️ نوع تراکنش ناشناخته است.');
+  });
+
+  // ==================== افزایش موجودی ====================
+  bot.action('wallet_deposit', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return ctx.reply(R.HEADER + 'روش افزایش موجودی را انتخاب کنید:', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💳 کارت به کارت', callback_data: 'deposit_card' }],
+          [{ text: '🪙 ترون (تتر)', callback_data: 'deposit_crypto' }],
+          // ⚠️ موقتاً مخفی (تا تأیید اینماد): فقط همین دکمه از لیست برداشته شده؛ هندلر
+          // deposit_gateway و کل مسیر آبان گیت‌وی دست‌نخورده و متصل مانده — برای فعال‌سازی
+          // دوباره، کافیست همین یک خط را از کامنت دربیاورید
+          // [{ text: '🌐 درگاه پرداخت', callback_data: 'deposit_gateway' }],
+          [{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]
+        ]
+      }
+    });
+  });
+
+  bot.action('deposit_card', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const cards = require('../constants').DEPOSIT_CARDS;
+    let msg = R.HEADER + '💳 کارت به کارت\n\n✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:\n';
+    cards.forEach(c => { msg += `💳 ${c.number} (${c.owner})\n`; });
+
+    const user = await getUser(ctx.from.id);
+    const myCards = await getUserCards(ctx.from.id);
+
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
+
+    if (myCards.length > 1) {
+      sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_source_card', lang: (user && user.language) || 'fa', data: {} };
+      const buttons = myCards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `dcard:${i}` }]);
+      return ctx.reply('واریز را از کدام کارت خودتان انجام می‌دهید؟', { reply_markup: { inline_keyboard: buttons } });
+    }
+
+    sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { sourceCard: myCards[0] ? myCards[0].card_number : null } };
+    return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
+  });
+
+  bot.action(/^dcard:(\d+)$/, async (ctx) => {
+    ctx.answerCbQuery();
+    const session = sessions[ctx.from.id];
+    if (!session || session.flow !== 'deposit_card' || session.step !== 'waiting_source_card') return;
+    const myCards = await getUserCards(ctx.from.id);
+    const idx = parseInt(ctx.match[1], 10);
+    const card = myCards[idx];
+    if (!card) return ctx.reply('❌ کارت یافت نشد. دوباره تلاش کنید.');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    session.data.sourceCard = card.card_number;
+    session.step = 'waiting_amount';
+    return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
+  });
+
+  bot.action('deposit_crypto', async (ctx) => {
+    ctx.answerCbQuery();
+    return ctx.reply('🪙 بخش ارز دیجیتال به‌زودی فعال می‌شود.', {
+      reply_markup: { inline_keyboard: [[{ text: '🟡 بازگشت', callback_data: 'wallet_deposit' }]] }
+    });
+  });
+
+  bot.action('deposit_gateway', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    sessions[ctx.from.id] = { flow: 'gateway_deposit', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: {} };
+    return ctx.reply(
+      R.HEADER +
+      '🌐 پرداخت از طریق درگاه\n\n' +
+      '✅ پرداخت شما کارت‌به‌کارت و کاملاً خودکار تأیید می‌شود — نیازی به ارسال رسید نیست.\n\n' +
+      '📥 لطفاً مبلغ واریزی خود را به تومان وارد کنید:'
+    );
+  });
+
+  bot.action('wallet_cancel', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    delete sessions[ctx.from.id];
+    return showWalletPage(ctx);
+  });
+
+  // ==================== برداشت ====================
+  async function withdrawAmountPrompt() {
+    const minWithdraw = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
+    const feeType = await getSetting('withdraw_fee_type', 'none');
+    const feeValue = await getSetting('withdraw_fee_value', '0');
+    let feeLine = '';
+    if (feeType === 'percentage' && Number(feeValue) > 0) feeLine = `\n💳 کارمزد برداشت: ${feeValue}٪`;
+    else if (feeType === 'fixed' && Number(feeValue) > 0) feeLine = `\n💳 کارمزد برداشت: ${Number(feeValue).toLocaleString('en-US')} تومان`;
+    return `مبلغ برداشت خود را به تومان وارد کنید (حداقل ${minWithdraw.toLocaleString('en-US')} تومان):${feeLine}`;
+  }
+
+  bot.action('wallet_withdraw', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    if (!user || !user.card_number) {
+      return ctx.reply('❌ ابتدا باید شماره کارت خود را ثبت کنید. از منوی کیف پول گزینه «افزودن کارت جدید» را انتخاب کنید.');
+    }
+    const cards = await getUserCards(ctx.from.id);
+    if (cards.length === 1) {
+      sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { card: cards[0].card_number } };
+      return ctx.reply(await withdrawAmountPrompt());
+    }
+    sessions[ctx.from.id] = { flow: 'withdraw', step: 'waiting_card', lang: (user && user.language) || 'fa', data: {} };
+    const buttons = cards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `wcard:${i}` }]);
+    return ctx.reply('کارت مقصد واریز را انتخاب کنید:', { reply_markup: { inline_keyboard: buttons } });
+  });
+
+  bot.action(/^wcard:(\d+)$/, async (ctx) => {
+    ctx.answerCbQuery();
+    const session = sessions[ctx.from.id];
+    if (!session || session.flow !== 'withdraw' || session.step !== 'waiting_card') return;
+    const cards = await getUserCards(ctx.from.id);
+    const idx = parseInt(ctx.match[1], 10);
+    const card = cards[idx];
+    if (!card) return ctx.reply('❌ کارت یافت نشد. دوباره تلاش کنید.');
+    try { await ctx.deleteMessage(); } catch (e) {}
+    session.data.card = card.card_number;
+    session.step = 'waiting_amount';
+    return ctx.reply(await withdrawAmountPrompt());
+  });
+
+  // ==================== احراز طلایی / کارت جدید / رفرال ====================
+  bot.action('wallet_gold_verify', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    if (user && user.verification_status === 'gold') {
+      return ctx.reply('✅ شما قبلاً احراز هویت طلایی شده‌اید.');
+    }
+    const pendingReq = await pool.query(`SELECT id FROM wallet_requests WHERE telegram_id = $1 AND type = 'gold_verify' AND status = 'pending'`, [String(ctx.from.id)]);
+    if (pendingReq.rows.length > 0) {
+      return ctx.reply('🟡 درخواست احراز هویت شما در حال بررسی است. لطفاً صبر کنید.');
+    }
+    const msg =
+      R.HEADER +
+      `💎 احراز هویت طلایی | Vochino⁰¹\n` +
+      `🔐 یک قدم تا سقف خرید بالاتر\n` +
+      `کافیست یک تصویر واضح و شفاف از\n` +
+      `🪪 کارت ملی در کنار 💳 کارت بانکی\n` +
+      `ارسال نمایید.\n` +
+      `✅ پس از بررسی توسط پشتیبانی و تأیید مدارک، درخواست افزایش سقف خرید شما انجام خواهد شد.\n\n` +
+      `💛 Vochino⁰¹ | تجربه‌ای متفاوت`;
+    sessions[ctx.from.id] = { flow: 'gold_verify', step: 'waiting_photo', lang: 'fa' };
+    return ctx.reply(msg, { parse_mode: 'Markdown' });
+  });
+
+  bot.action('wallet_add_card', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    sessions[ctx.from.id] = { flow: 'add_card', step: 'waiting_number', lang: (user && user.language) || 'fa' };
+    return ctx.reply('شماره کارت جدید را وارد کنید (۱۶ رقم):');
+  });
+
+  bot.action('wallet_referral', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    if (!user) return;
+    const refLink = `https://t.me/${ctx.botInfo.username}?start=${user.telegram_id}`;
+
+    const bonusActive = await getSetting('bonus_referral_active', 'false');
+    const bonusGift = await getSetting('bonus_referral_gift', '0');
+    const percentActive = await getSetting('bonus_referral_percent_active', 'false');
+    const percentValue = await getSetting('bonus_referral_percent', '0');
+
+    if (percentActive === 'true' && Number(percentValue) > 0) {
+      const msg =
+        R.HEADER +
+        `\n♾️ طرح سود مادام‌العمر\n\n` +
+        `👥 دعوت موفق\n` +
+        `📈 درصد سود: ${percentValue}٪\n\n` +
+        `هر خریدِ دعوت‌شده،\n` +
+        `برای شما سهم ایجاد می‌کند.`;
+      return ctx.reply(msg, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}` }],
+            [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
+          ]
+        }
+      });
+    }
+
+    const gift = bonusActive === 'true' ? Number(bonusGift).toLocaleString('en-US') : '××××';
+    const msg =
+      R.HEADER +
+      `\n👥 دعوت از تو بونوس از ووچینو⁰¹\n\n` +
+      `🪎پاداش هر دعوت: ${gift} تومان\n\n` +
+      `🔗 لینک اختصاصی خودت رو بساز\n` +
+      `و از دعوت‌های موفق پاداش بگیر.`;
+    return ctx.reply(msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}` }],
+          [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
+        ]
+      }
+    });
+  });
+
+  // ==================== تأیید/رد واریز از روی رسید ارسالی ادمین ====================
+  bot.action(/^dep_ok:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
+    ctx.answerCbQuery();
+    const id = parseInt(ctx.match[1], 10);
+    // ⚠️ رفع باگ حیاتی: این درخواست واریز از Dو مسیر کاملاً جدا قابل تأییده — این دکمه (روی
+    // پیام رسید عکس) و دکمه‌ی «✅ تایید» توی لیست «درخواست‌های کیف پول» پنل ادمین
+    // (handlers/admin.js → admin_approve_). قبلاً هر دو مسیر جدا SELECT می‌کردن و جدا UPDATE،
+    // پس اگه یک ادمین از این دکمه و یکی دیگه (یا همون ادمین) از اون لیست تقریباً هم‌زمان تأیید
+    // می‌زدن، کاربر می‌تونست برای یک واریز، دو بار شارژ بشه. الان خودِ UPDATE وضعیت اول و اتمیک
+    // انجام می‌شه (AND status='pending')؛ هر دو مسیر روی همین یک شرط رقابت می‌کنن و فقط
+    // دقیقاً یکی‌شون می‌تونه برنده بشه — فرقی نمی‌کنه از کدوم دکمه باشه.
+    const upd = await pool.query(
+      `UPDATE wallet_requests SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
+      [id]
+    );
+    if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+    const req = upd.rows[0];
+
+    await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [Number(req.amount), req.telegram_id]);
+    try { await logTransaction(req.telegram_id, 'deposit', Number(req.amount), 'شارژ کیف پول'); } catch (e) {}
+
+    const userAfter = await getUser(req.telegram_id);
+    try {
+      await ctx.telegram.sendMessage(req.telegram_id, R.buildDepositReceipt({
+        amount: Number(req.amount), status: 'success', tracking: req.tracking_code,
+        newBalance: userAfter ? userAfter.balance : 0, createdAt: new Date()
+      }));
+    } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return ctx.reply(`✅ واریز ${Number(req.amount).toLocaleString('en-US')} تومانی تأیید و رسید برای کاربر ارسال شد.`);
+  });
+
+  bot.action(/^dep_no:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
+    ctx.answerCbQuery();
+    const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'dep_reject', step: 'waiting_reason', data: { id } };
+    return ctx.reply('❌ دلیل رد این واریز را بنویسید (همین متن برای کاربر ارسال می‌شود):');
+  });
+
+  // ==================== تأیید/رد احراز هویت طلایی ====================
+  bot.action(/^gold_ok:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
+    ctx.answerCbQuery();
+    const id = parseInt(ctx.match[1], 10);
+    // ⚠️ اتمیک: همون الگوی رفع ریس‌کاندیشن بالا (شرط status='pending' داخل خودِ UPDATE)
+    const upd = await pool.query(
+      `UPDATE wallet_requests SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
+      [id]
+    );
+    if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+    const req = upd.rows[0];
+
+    await pool.query(`UPDATE users SET verification_status = 'gold' WHERE telegram_id = $1`, [req.telegram_id]);
+
+    const limit = await getSetting('gold_daily_limit', '10000000');
+    try {
+      await ctx.telegram.sendMessage(req.telegram_id,
+        R.HEADER +
+        `\n🏅 احراز هویت طلایی تأیید شد\n\n` +
+        `✅ حساب شما با موفقیت ارتقا یافت.\n\n` +
+        `💰 سقف خرید روزانه:\n${Number(limit).toLocaleString('en-US')} تومان\n\n` +
+        `🔐 سقف جدید از همین حالا برای حساب شما فعال است.\n\n` +
+        `🤝 اعتماد شما، اعتبار ماست.`
+      );
+    } catch (e) {}
+    try { await ctx.deleteMessage(); } catch (e) {}
+    return ctx.reply('✅ احراز هویت طلایی تأیید شد و پیام برای کاربر ارسال شد.');
+  });
+
+  bot.action(/^gold_no:(\d+)$/, async (ctx) => {
+    if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
+    ctx.answerCbQuery();
+    const id = parseInt(ctx.match[1], 10);
+    try { await ctx.deleteMessage(); } catch (e) {}
+    sessions[ctx.from.id] = { flow: 'gold_reject', step: 'waiting_reason', data: { id } };
+    return ctx.reply('❌ دلیل رد احراز هویت را بنویسید (همین متن برای کاربر ارسال می‌شود):');
+  });
+
+  // ==================== ورودی‌های متنی ====================
+  bot.on('text', async (ctx, next) => {
+    const session = sessions[ctx.from.id];
+    if (!session) return next();
+
+    if (session.flow === 'dep_reject' && session.step === 'waiting_reason') {
+      const reason = ctx.message.text.trim();
+      const id = session.data.id;
+      delete sessions[ctx.from.id];
+      // ⚠️ اتمیک: شرط status='pending' داخل خودِ UPDATE
+      const upd = await pool.query(
+        "UPDATE wallet_requests SET status = 'rejected', reject_reason = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
+        [id, reason]
+      );
+      if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+      const req = upd.rows[0];
+      try {
+        await ctx.telegram.sendMessage(req.telegram_id, R.buildDepositReceipt({
+          amount: Number(req.amount), status: 'failed', tracking: req.tracking_code, createdAt: new Date(), reason
+        }));
+      } catch (e) {}
+      return ctx.reply('❌ درخواست رد شد و رسید ناموفق برای کاربر ارسال شد.');
+    }
+
+    if (session.flow === 'gold_reject' && session.step === 'waiting_reason') {
+      const reason = ctx.message.text.trim();
+      const id = session.data.id;
+      delete sessions[ctx.from.id];
+      // ⚠️ اتمیک: شرط status='pending' داخل خودِ UPDATE
+      const upd = await pool.query(
+        "UPDATE wallet_requests SET status = 'rejected', reject_reason = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
+        [id, reason]
+      );
+      if (upd.rows.length === 0) return ctx.reply('⚠️ این درخواست یافت نشد یا قبلاً بررسی شده است.');
+      const req = upd.rows[0];
+      try {
+        await ctx.telegram.sendMessage(req.telegram_id,
+          R.HEADER + `\n❌ احراز هویت طلایی رد شد\n\n📝 دلیل: ${reason}\n\nمی‌توانید مجدداً با مدارک صحیح اقدام کنید.`
+        );
+      } catch (e) {}
+      return ctx.reply('❌ احراز هویت رد شد و پیام برای کاربر ارسال شد.');
+    }
+
+    if (session.flow === 'deposit_card' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
+      if (!amount || amount <= 0) {
+        return ctx.reply('❌ مبلغ نامعتبر. یک عدد وارد کنید:');
+      }
+      session.amount = amount;
+      session.step = 'waiting_photo';
+      return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
+    }
+
+    if (session.flow === 'gateway_deposit' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      if (!amount || amount <= 0) {
+        return ctx.reply('❌ مبلغ نامعتبر. یک عدد وارد کنید:');
+      }
+      delete sessions[ctx.from.id];
+
+      const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
+      // یک رکورد pending محلی قبل از صدا زدن API: هم برای نمایش در «گزارش تراکنش‌ها» مثل بقیه
+      // انواع واریز، هم گارد idempotency ما وقتی وبهوک می‌رسد (finalizeGatewayDeposit در db.js)
+      const ins = await pool.query(
+        `INSERT INTO wallet_requests (telegram_id, type, amount, status, created_at, tracking_code, gateway)
+         VALUES ($1, 'deposit', $2, 'pending', NOW(), $3, 'aban') RETURNING id`,
+        [String(ctx.from.id), amount, trackCode]
+      );
+      const reqId = ins.rows[0].id;
+
+      const appUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://vochino-telegram-bot.onrender.com';
+      const invoice = await abanGateway.createInvoice({
+        amountToman: amount,
+        orderId: trackCode,
+        callbackUrl: `${appUrl}/webhook/aban`,
+        description: `شارژ کیف پول Vochino — ${ctx.from.id}`,
+        metadata: { telegram_id: String(ctx.from.id), wallet_request_id: reqId }
+      });
+
+      if (!invoice.success) {
+        await pool.query(`UPDATE wallet_requests SET status = 'failed' WHERE id = $1`, [reqId]);
+        console.log('❌ خطا در ساخت فاکتور آبان گیت‌وی:', invoice.error);
+        return ctx.reply('⚠️ در حال حاضر امکان اتصال به درگاه پرداخت نیست. لطفاً از «💳 کارت به کارت» استفاده کنید یا کمی بعد دوباره تلاش کنید.');
+      }
+
+      await pool.query(
+        `UPDATE wallet_requests SET gateway_invoice_id = $2, payable_toman = $3 WHERE id = $1`,
+        [reqId, invoice.invoiceId, invoice.payableToman]
+      );
+
+      return ctx.reply(
+        R.HEADER +
+        `🌐 فاکتور شما ساخته شد\n\n` +
+        `💰 مبلغ دقیق پرداخت: ${invoice.payableToman.toLocaleString('en-US')} تومان\n` +
+        `⚠️ دقیقاً همین مبلغ را واریز کنید؛ چند تومان با مبلغ درخواستی شما فرق دارد و همین اختلاف فاکتورتان را شناسایی می‌کند.\n` +
+        `🔖 کد پیگیری: ${trackCode}\n\n` +
+        `روی دکمه‌ی زیر بزنید، پرداخت را انجام دهید و برگردید — موجودی‌تان خودکار شارژ می‌شود.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `💳 پرداخت ${invoice.payableToman.toLocaleString('en-US')} تومان`, url: invoice.paymentUrl }],
+              [{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]
+            ]
+          }
+        }
+      );
+    }
+
+    if (session.flow === 'withdraw' && session.step === 'waiting_amount') {
+      const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''), 10);
+      const min = Number(await getSetting('min_withdraw', MIN_WITHDRAW.toString()));
+      if (!amount || amount < min) {
+        return ctx.reply(`حداقل مبلغ برداشت ${min.toLocaleString('en-US')} تومان است. لطفاً دوباره وارد کنید:`);
+      }
+      const user = await getUser(ctx.from.id);
+      if (amount > Number(user.balance)) {
+        return ctx.reply(`❌ موجودی کیف پولت کافی نیست.\nمبلغ برداشت: ${amount.toLocaleString('en-US')} تومان\nموجودی فعلی: ${Number(user.balance).toLocaleString('en-US')} تومان\n\nاول کیف پولت رو شارژ کن، بعد دوباره امتحان کن.`);
+      }
+      const destCard = (session.data && session.data.card) || user.card_number;
+
+      // کارمزد برداشت — از پنل قابل تنظیم (درصدی یا ثابت)؛ اگر تنظیم نشده باشد صفر است (رفتار قبلی حفظ می‌شود)
+      const feeType = await getSetting('withdraw_fee_type', 'none');
+      const feeValue = await getSetting('withdraw_fee_value', '0');
+      const commission = calculateCommission(feeType, feeValue, amount);
+      const payoutAmount = Math.max(0, amount - commission);
+
+      const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
+      await pool.query(
+        `INSERT INTO wallet_requests (telegram_id, type, amount, card_number, status, created_at, tracking_code, commission, payout_amount)
+         VALUES ($1, 'withdraw', $2, $3, 'pending', NOW(), $4, $5, $6)`,
+        [String(ctx.from.id), amount, destCard, trackCode, commission, payoutAmount]
+      );
+
+      delete sessions[ctx.from.id];
+      const feeLine = commission > 0
+        ? `💳 کارمزد برداشت: ${commission.toLocaleString('en-US')} تومان\n💵 مبلغ قابل واریز به کارت: ${payoutAmount.toLocaleString('en-US')} تومان\n\n`
+        : '';
+      ctx.reply(`درخواست برداشت شما ثبت شد ✅\n${feeLine}پس از بررسی توسط پشتیبانی، مبلغ به کارت شما واریز خواهد شد.\n\n📍 کد پیگیری: \`${trackCode}\``, { parse_mode: 'Markdown' });
+
+      const ids = await adminIdsList();
+      const adminFeeLine = commission > 0 ? `\n💳 کارمزد: ${commission.toLocaleString()} تومان\n💵 واریزی به کارت: ${payoutAmount.toLocaleString()} تومان` : '';
+      return ids.forEach(id => ctx.telegram.sendMessage(id, `📤 درخواست برداشت\n👤 ${user.full_name} (${ctx.from.id})\n📱 ${user.phone || '---'}\n💳 ${destCard}\n💰 مبلغ درخواستی: ${amount.toLocaleString()} تومان${adminFeeLine}\n📍 کد: ${trackCode}`).catch(console.error));
+    }
+
+    if (session.flow === 'add_card' && session.step === 'waiting_number') {
+      let card = ctx.message.text.replace(/\s/g, '');
+      if (!/^\d{16}$/.test(card)) {
+        return ctx.reply('❌ شماره کارت نامعتبر. ۱۶ رقم وارد کنید:');
+      }
+      const myCards = await getUserCards(ctx.from.id);
+      if (myCards.some(c => c.card_number === card)) {
+        return ctx.reply('❌ این شماره کارت قبلاً برای شما ثبت شده است. یک کارت دیگر وارد کنید:');
+      }
+      const user = await getUser(ctx.from.id);
+      if (user && user.card_number) {
+        await pool.query('INSERT INTO cards (telegram_id, card_number) VALUES ($1, $2)', [String(ctx.from.id), card]);
+      } else {
+        await pool.query('UPDATE users SET card_number = $1 WHERE telegram_id = $2', [card, String(ctx.from.id)]);
+      }
+      delete sessions[ctx.from.id];
+      ctx.reply('کارت جدید با موفقیت ثبت شد ✅');
+      return;
+    }
+
+    return next();
+  });
+
+  // ==================== دریافت عکس رسید / مدارک ====================
+  bot.on('photo', async (ctx, next) => {
+    const session = sessions[ctx.from.id];
+    if (!session) return next();
+
+    if ((session.flow === 'deposit_card' || session.flow === 'gold_verify') && session.step === 'waiting_photo') {
+      const fileId = ctx.message.photo.slice(-1)[0].file_id;
+
+      if (session.flow === 'deposit_card') {
+        const amount = session.amount;
+        const sourceCard = (session.data && session.data.sourceCard) || null;
+        const user = await getUser(ctx.from.id);
+        const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
+        const ins = await pool.query(
+          `INSERT INTO wallet_requests (telegram_id, type, amount, card_number, receipt_file_id, status, created_at, tracking_code)
+           VALUES ($1, 'deposit', $2, $3, $4, 'pending', NOW(), $5) RETURNING id`,
+          [String(ctx.from.id), amount, sourceCard, fileId, trackCode]
+        );
+        const reqId = ins.rows[0].id;
+
+        delete sessions[ctx.from.id];
+
+        // پیام تأیید دریافت رسید برای مشتری (طبق طرح تأییدشده)
+        ctx.reply(
+          R.HEADER +
+          `📋 تأیید دریافت رسید\n\n` +
+          `💰 مبلغ شارژ: ${amount.toLocaleString('en-US')} تومان\n` +
+          `👤 نام و نام خانوادگی: ${user ? (user.full_name || 'ثبت نشده') : 'ثبت نشده'}\n` +
+          `💳 شماره کارت: ${sourceCard || (user ? (user.card_number || 'ثبت نشده') : 'ثبت نشده')}\n` +
+          `🔖 کد پیگیری: ${trackCode}\n\n` +
+          `✅ رسید شما ثبت و به واحد مالی ارسال شد.\n` +
+          `⏳ پس از بررسی، نتیجه در همین ربات اعلام می‌شود.`,
+          { parse_mode: 'Markdown' }
+        );
+
+        // ارسال رسید به همه ادمین‌ها همراه دکمه‌های تأیید/ردِ همین درخواست
+        const ids = await adminIdsList();
+        const caption =
+          `📥 رسید واریز جدید\n` +
+          `👤 کاربر: ${ctx.from.id}\n` +
+          `👤 نام: ${user ? (user.full_name || '---') : '---'}\n` +
+          `📱 تلفن: ${user ? (user.phone || '---') : '---'}\n` +
+          `💳 کارت: ${sourceCard || (user ? (user.card_number || '---') : '---')}\n` +
+          `🔖 کد سفارش: ${trackCode}\n` +
+          `💰 مبلغ: ${amount.toLocaleString('en-US')} تومان\n` +
+          `🧾 نوع تراکنش: واریز کارت‌به‌کارت\n` +
+          `🕐 ${R.formatDateTime(new Date())}`;
+        for (const id of ids) {
+          try {
+            await ctx.telegram.sendPhoto(id, fileId, {
+              caption,
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '✅ تأیید واریز', callback_data: `dep_ok:${reqId}` }],
+                  [{ text: '❌ رد واریز', callback_data: `dep_no:${reqId}` }]
+                ]
+              }
+            });
+          } catch (e) { console.error('خطا در ارسال رسید به ادمین:', e.message); }
+        }
+        return;
+      }
+
+      if (session.flow === 'gold_verify') {
+        const user = await getUser(ctx.from.id);
+        const ids = await adminIdsList();
+        const ins = await pool.query(
+          `INSERT INTO wallet_requests (telegram_id, type, amount, receipt_file_id, status, created_at, tracking_code)
+           VALUES ($1, 'gold_verify', 0, $2, 'pending', NOW(), $3) RETURNING id`,
+          [String(ctx.from.id), fileId, 'GOLD-' + Math.floor(1000000 + Math.random() * 9000000)]
+        );
+        const reqId = ins.rows[0].id;
+        for (const adminId of ids) {
+          try {
+            await ctx.telegram.sendPhoto(adminId, fileId, {
+              caption: `📸 مدارک احراز طلایی\n👤 ${user.full_name || '---'}\n🆔 \`${user.telegram_id}\`\n📱 ${user.phone || '---'}\n💳 ${user.card_number || '---'}`,
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '✅ تأیید احراز', callback_data: `gold_ok:${reqId}` }],
+                  [{ text: '❌ رد احراز', callback_data: `gold_no:${reqId}` }]
+                ]
+              }
+            });
+          } catch (e) { console.error(e); }
+        }
+        delete sessions[ctx.from.id];
+        ctx.reply('✅ مدارک شما ارسال شد. پس از بررسی نتیجه اطلاع داده خواهد شد.');
+        return;
+      }
+
+      return next();
+    }
+    return next();
+  });
 };
