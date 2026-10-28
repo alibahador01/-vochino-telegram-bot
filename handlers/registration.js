@@ -20,7 +20,7 @@ const {
   validateFullName, validateNationalId, validateCardNumber, maskCardNumber, normalizePhone
 } = require('../util/validators');
 const { showMainMenu, reactToMessage } = require('../utils');
-const { ensurePersistentKeyboard, sendSticker, STICKERS } = require('./homeMenu');
+const { ensurePersistentKeyboard, sendSticker, STICKERS, persistentKeyboard } = require('./homeMenu');
 const { pool, getUser, createUser, getSetting } = require('../db');
 const { checkAndGrantBonuses } = require('./bonusEngine');
 const { classifyUserState, pickBackStepForMissingFields } = require('./registrationState');
@@ -262,9 +262,11 @@ module.exports = function registerRegistrationHandlers(bot) {
       if (ctx.message && ctx.message.message_id) {
         reactToMessage(ctx, ctx.chat.id, ctx.message.message_id, true);
       }
-      await sendSticker(ctx, STICKERS.START);
-      await showMainMenu(ctx);
-      return ensurePersistentKeyboard(ctx);
+      // ⚠️ رفع درخواست: قبلاً هر بار /start یک پیام تنهای «🔘» هم اضافه می‌آمد (ensurePersistentKeyboard)،
+      // فقط برای چسباندن کیبورد پایین (Home/Live Price). حالا همان کیبورد به همین استیکر START
+      // (که در هر صورت همیشه فرستاده می‌شود) چسبانده می‌شود — بدون هیچ پیام اضافه‌ای.
+      await sendSticker(ctx, STICKERS.START, { reply_markup: persistentKeyboard() });
+      return showMainMenu(ctx);
     }
 
     return renderCurrentState(ctx, user);
