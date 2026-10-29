@@ -72,7 +72,10 @@ function buildPriceLine(emoji, label, realPrice, priceKey, barChar, emptyChar, s
   return `${emoji}${label}: ${fmtPrice(displayPrice)}\n${arrow} ${bar} ${pct}%`;
 }
 
-async function buildLivePriceText() {
+// ⚠️ منبع مشترک اعداد: هم نسخه‌ی متنی (buildLivePriceText) و هم نسخه‌ی عکسی جدید (buildLivePriceImage)
+// از همین یک تابع می‌خوانند — یعنی هیچ‌وقت ممکن نیست عکس و متن دو عدد متفاوت نشان بدهند، و منطق
+// fetch/تبدیل فقط یک‌جا نگهداری می‌شود.
+async function computeLivePriceNumbers() {
   const prices = await priceService.getPrices(); 
   const p = prices || {};
   let usdRate = await getUsdRate(); 
@@ -122,50 +125,71 @@ async function buildLivePriceText() {
   const utopiaBuyToman = isFinite(utopiaBaseToman) ? utopiaBaseToman * (1 + USD_TOMAN_SPREAD) : NaN;
   const utopiaSellToman = isFinite(utopiaBaseToman) ? utopiaBaseToman * (1 - USD_TOMAN_SPREAD) : NaN;
 
-  // ⚠️ بازطراحی ظاهری (درخواست: شبیه کارت‌های تمیز یک کانال نمونه): تلگرام جدول/کارت واقعی
-  // تو پیام متنی رندر نمی‌کند (آن نمونه یک رسید پرداخت بومی تلگرام بود، نه متن ساده)، پس همان
-  // مکانیزم فعلی (نوار + درصد) عیناً حفظ شده و فقط هر جفت خرید/فروش داخل یک قاب ساده بسته‌بندی
-  // شده تا مثل یک کارت جدا و تمیز دیده شود.
-  function frameBlock(content) {
-    return '┌─────────────────┐\n\n' + content + '\n\n└─────────────────┘';
-  }
+  return {
+    prices, u_buy, u_sell, premium_buy, premium_sell, hot_buy, hot_sell,
+    dollarBuyToman, dollarSellToman, utopiaBuyToman, utopiaSellToman
+  };
+}
+
+function frameBlock(content) {
+  return '┌─────────────────┐\n\n' + content + '\n\n└─────────────────┘';
+}
+
+async function buildLivePriceText() {
+  const n = await computeLivePriceNumbers();
 
   const blocks = [
     frameBlock(
-      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_buy, 'buy_u_voucher', '▰', '▱', 8) + '\n\n' +
-      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', u_sell, 'sell_u_voucher', '▰', '▱', 8)
+      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', n.u_buy, 'buy_u_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑼-𝑽𝒐𝒖𝒄𝒉𝒆𝒓', n.u_sell, 'sell_u_voucher', '▰', '▱', 8)
     ),
 
     frameBlock(
-      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_buy, 'buy_pr_voucher', '▰', '▱', 8) + '\n\n' +
-      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', premium_sell, 'sell_pr_voucher', '▰', '▱', 8)
+      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', n.premium_buy, 'buy_pr_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑷𝒓 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', n.premium_sell, 'sell_pr_voucher', '▰', '▱', 8)
     ),
 
     frameBlock(
-      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_buy, 'buy_hot_voucher', '▰', '▱', 8) + '\n\n' +
-      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', hot_sell, 'sell_hot_voucher', '▰', '▱', 8)
+      buildPriceLine('🎫 ', '𝑩𝒖𝒚 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', n.hot_buy, 'buy_hot_voucher', '▰', '▱', 8) + '\n\n' +
+      buildPriceLine('🎫 ', '𝑺𝒆𝒍𝒍 𝑯𝒐𝒕 𝑽𝒐𝒖𝒄𝒉𝒆𝒓', n.hot_sell, 'sell_hot_voucher', '▰', '▱', 8)
     ),
 
     frameBlock(
-      buildPriceLine('💲', '𝑩𝒖𝒚 𝑫𝒐𝒍𝒍𝒂𝒓', dollarBuyToman, 'buy_dollar', '⬢', '⬡', 5) + '\n\n' +
-      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑫𝒐𝒍𝒍𝒂𝒓', dollarSellToman, 'sell_dollar', '⬢', '⬡', 5)
+      buildPriceLine('💲', '𝑩𝒖𝒚 𝑫𝒐𝒍𝒍𝒂𝒓', n.dollarBuyToman, 'buy_dollar', '⬢', '⬡', 5) + '\n\n' +
+      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑫𝒐𝒍𝒍𝒂𝒓', n.dollarSellToman, 'sell_dollar', '⬢', '⬡', 5)
     ),
 
     frameBlock(
-      buildPriceLine('💲', '𝑩𝒖𝒚 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaBuyToman, 'buy_utopia', '⬢', '⬡', 5) + '\n\n' +
-      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑼𝒕𝒐𝒑𝒊𝒂', utopiaSellToman, 'sell_utopia', '⬢', '⬡', 5)
+      buildPriceLine('💲', '𝑩𝒖𝒚 𝑼𝒕𝒐𝒑𝒊𝒂', n.utopiaBuyToman, 'buy_utopia', '⬢', '⬡', 5) + '\n\n' +
+      buildPriceLine('💲', '𝑺𝒆𝒍𝒍 𝑼𝒕𝒐𝒑𝒊𝒂', n.utopiaSellToman, 'sell_utopia', '⬢', '⬡', 5)
     )
   ];
 
   let text = '╭〰 ➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫ 〰╮\n\n' + blocks.join('\n\n');
 
-  if (!prices) {
+  if (!n.prices) {
     text += '\n\n⚠️ سرویس قیمت موقتاً در دسترس نیست — این لیست بدون قیمت لحظه‌ای است.';
-  } else if (prices.stale) {
+  } else if (n.prices.stale) {
     text += '\n\n⚠️ آخرین قیمت معتبر نمایش داده شد (اتصال لحظه‌ای برقرار نشد).';
   }
 
   return text;
+}
+
+// ⚠️ نسخه‌ی عکسی جدید (درخواست: شبیه کارت‌های تمیز یک کانال نمونه، با کتابخانه‌ی ساخت تصویر).
+// اگر هر جایی از رندر عکس خطا بدهد (مثلاً فونت هنوز روی سرور نیست)، هندلر پایین همین تابع را
+// try/catch می‌کند و بی‌صدا به buildLivePriceText برمی‌گردد — یک باگ اینجا هرگز کل قابلیت
+// Live Price را از کار نمی‌اندازد.
+async function buildLivePriceImage() {
+  const n = await computeLivePriceNumbers();
+  const { renderLivePriceCard } = require('../priceCard');
+  return renderLivePriceCard([
+    { label: '🎫 یو ووچر', buy: n.u_buy, sell: n.u_sell },
+    { label: '🎫 پریمیوم ووچر', buy: n.premium_buy, sell: n.premium_sell },
+    { label: '🔥 هات ووچر', buy: n.hot_buy, sell: n.hot_sell },
+    { label: '💲 دلار', buy: n.dollarBuyToman, sell: n.dollarSellToman },
+    { label: '💲 یوتوپیا', buy: n.utopiaBuyToman, sell: n.utopiaSellToman }
+  ]);
 }
 
 function registerHomeMenuHandlers(bot) {
@@ -188,8 +212,15 @@ function registerHomeMenuHandlers(bot) {
   bot.hears(LIVE_PRICE_BTN_TEXT, async (ctx) => {
     delete sessions[ctx.from.id];
     await sendSticker(ctx, STICKERS.LIVE_PRICE);
-    const text = await buildLivePriceText();
-    return ctx.reply(text);
+    try {
+      const buffer = await buildLivePriceImage();
+      return ctx.replyWithPhoto({ source: buffer });
+    } catch (e) {
+      // فال‌بک امن: عکس هر دلیلی نشد (فونت نصب نشده، @napi-rs/canvas هنوز دیپلوی نشده، و...)
+      console.log('⚠️ رندر عکس Live Price ناموفق بود، برگشت به حالت متنی:', describeError(e));
+      const text = await buildLivePriceText();
+      return ctx.reply(text);
+    }
   });
 }
 
