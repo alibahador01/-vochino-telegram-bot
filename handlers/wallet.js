@@ -59,13 +59,16 @@ module.exports = function registerWalletHandlers(bot) {
       `👥 افراد دعوت‌شده: ${inviteCount} نفر`;
 
     const keyboard = [
-      [{ text: '⊕ افزایش موجودی', callback_data: 'wallet_deposit' }],
-      [{ text: '⊖ برداشت موجودی', callback_data: 'wallet_withdraw' }],
-      [{ text: '𖣠 افزایش سقف خرید', callback_data: 'wallet_gold_verify' }],
-      [{ text: '⧉ افزودن کارت جدید', callback_data: 'wallet_add_card' }],
-      [{ text: '⟳ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
-      [{ text: '✦ کسب درآمد', callback_data: 'wallet_referral' }],
-      [backToMenuButton()]
+      [{ text: '⧉ افزایش موجودی', callback_data: 'wallet_deposit' }],
+      [{ text: '⧉ برداشت موجودی', callback_data: 'wallet_withdraw' }],
+      [{ text: '⎙ افزایش سقف خرید', callback_data: 'wallet_gold_verify' }],
+      [{ text: '⎗ افزودن کارت جدید', callback_data: 'wallet_add_card' }],
+      [{ text: '↺ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
+      [{ text: '߷ کسب درآمد', callback_data: 'wallet_referral' }],
+      // ⚠️ عمداً دکمه‌ی اختصاصی همین صفحه، نه backToMenuButton() مشترک: اون هلپر تو کل پروژه
+      // استفاده می‌شه و متنش رو پنل ادمین کنترل می‌کنه؛ برای اینکه فقط همین صفحه عوض بشه (نه
+      // همه‌ی صفحات)، یه دکمه‌ی مستقل با همون callback_data پیش‌فرض ساخته شده
+      [{ text: '➬ بازگشت به منو', callback_data: 'back_main_menu' }]
     ];
 
     ctx.reply(profileText, {
