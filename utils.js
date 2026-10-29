@@ -147,6 +147,7 @@ async function showMainMenu(ctx) {
     '╭〰✨⫹𓆩🏦𓆪⫺✨〰╮\n' +
     '⚡️                              ⚡️\n' +
     '╰〰➫ 𝑽𝒐𝒄𝒉𝒊𝒏𝒐 ➫〰╯\n' +
+    '🜲 صرافی ووچینو⁰¹\n' +
     i18n.t(lang, 'menu.header');
   return ctx.reply(headerText, { reply_markup: { inline_keyboard: rows } });
 }
