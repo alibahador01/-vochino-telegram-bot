@@ -5,20 +5,17 @@
   "main": "index.js",
   "license": "UNLICENSED",
   "private": true,
-  "engines": {
-    "node": "20.x"
-  },
   "scripts": {
     "start": "node index.js",
     "test": "node tests/run.js"
   },
   "dependencies": {
-    "express": "4.21.2",
-    "pg": "8.11.5",
-    "telegraf": "4.16.3",
-    "ejs": "3.1.10",
-    "jimp": "0.22.12",
-    "qrcode": "1.5.4",
-    "@napi-rs/canvas": "0.1.90"
+    "express": "^4.21.2",
+    "pg": "^8.11.5",
+    "telegraf": "^4.16.3",
+    "ejs": "^3.1.10",
+    "jimp": "^0.22.12",
+    "qrcode": "^1.5.4",
+    "@napi-rs/canvas": "^0.1.90"
   }
 }
