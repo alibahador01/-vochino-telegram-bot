@@ -352,11 +352,31 @@ module.exports = function registerRegistrationHandlers(bot) {
       return ctx.reply(i18n.t(lang, 'phone.invalid_owner'));
     }
 
+    // اگر ثبت اولیه از Mini App شروع شده باشد، شماره‌ی واردشده فقط pending است.
+    // مالکیت آن باید با Contact رسمی تلگرام و شناسه‌ی صاحب Contact تطبیق داده شود.
+    let miniAppPhoneMismatch = false;
+    if (user.webapp_pending_phone) {
+      const pendingPhone = normalizePhone(user.webapp_pending_phone);
+      // تلگرام بسته به کلاینت، Contact را گاهی با 09 و گاهی با 989 برمی‌گرداند.
+      // هر دو نمایش را به قالب +989 تبدیل می‌کنیم تا یک شماره‌ی یکسان، اشتباهاً متفاوت نشود.
+      const canonicalIranPhone = (value) => value.replace(/^\+09(?=\d{9}$)/, '+989');
+      miniAppPhoneMismatch = !pendingPhone.ok
+        || canonicalIranPhone(pendingPhone.value) !== canonicalIranPhone(phoneCheck.value);
+    }
+
+    // Contact مالکیت‌دار تلگرام مرجع نهایی شماره است؛ شماره‌ی تایپ‌شده در Mini App
+    // صرفاً پیش‌ورودی است و در صورت اختلاف، Contact معتبر جایگزین آن می‌شود.
     await pool.query(
-      `UPDATE users SET registration_data = registration_data || $2::jsonb, registration_step = 'name'
+      `UPDATE users
+          SET registration_data = registration_data || $2::jsonb,
+              registration_step = 'name',
+              webapp_pending_phone = NULL
         WHERE telegram_id = $1 AND registration_step = 'phone'`,
       [String(ctx.from.id), JSON.stringify({ phone: phoneCheck.value })]
     );
+    if (miniAppPhoneMismatch) {
+      await ctx.reply('ℹ️ شماره‌ای که در مینی‌آپ وارد کرده بودید با شماره Contact متفاوت بود. برای حفظ امنیت، شماره رسمی تأییدشده تلگرام به‌عنوان شماره حساب ثبت شد.');
+    }
     return sendNameStep(ctx, lang);
   });
 
