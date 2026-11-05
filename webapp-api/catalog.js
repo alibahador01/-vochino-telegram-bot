@@ -1,5 +1,10 @@
 'use strict';
 
+/**
+ * Canonical catalogue for the Vochino Mini App.
+ * IDs intentionally match the asset IDs already used by the supplied index.html.
+ * Database product keys match the existing Telegram bot schema.
+ */
 const ASSETS = Object.freeze([
   Object.freeze({
     id: 'utopia',
