@@ -109,6 +109,7 @@ function validateTelegramInitData(rawInitData, botToken, options = {}) {
     },
     authDate,
     queryId: params.get('query_id') || null,
+    startParam: params.get('start_param') || null,
   };
 }
 
@@ -139,6 +140,7 @@ function createTelegramAuthMiddleware(options = {}) {
       req.telegram = validated.user;
       req.telegramAuthDate = validated.authDate;
       req.telegramQueryId = validated.queryId;
+      req.telegramStartParam = validated.startParam;
       return next();
     } catch (error) {
       if (error instanceof TelegramAuthError) {
