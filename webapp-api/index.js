@@ -17,6 +17,7 @@ const { isOnlineBuyProduct } = priceService;
 const { validateVoucherCodeFormat } = require('../uwallet');
 const { ASSETS, ASSET_BY_ID, ASSET_ID_BY_PRODUCT_KEY } = require('./catalog');
 const { createTelegramAuthMiddleware } = require('./telegram-auth');
+const { registerPasswordAuthRoutes, createRequireAppSession } = require('./password-auth');
 
 const MAX_POSTGRES_INTEGER = 2_147_483_647;
 const DEFAULT_PAGE_SIZE = 20;
@@ -134,7 +135,7 @@ function createCorsMiddleware() {
       }
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key, X-Vochino-Session');
       res.setHeader('Access-Control-Max-Age', '600');
     }
 
@@ -155,8 +156,9 @@ function createSecurityHeaders() {
 
 async function loadUserByTelegramId(telegramId) {
   const result = await pool.query(
-    `SELECT telegram_id, full_name, phone, language, balance, bonus_balance,
-            registered_at, verification_status, registration_step, is_blocked
+    `SELECT telegram_id, full_name, phone, language, balance,
+            registered_at, verification_status, registration_step, registration_data,
+            is_blocked, password_hash, webapp_pending_phone
        FROM users
       WHERE telegram_id = $1
       LIMIT 1`,
@@ -184,11 +186,11 @@ function createRequireUserMiddleware() {
 }
 
 function requireCompletedRegistration(req) {
-  if (!req.dbUser || req.dbUser.registration_step !== 'completed') {
+  if (!req.dbUser || req.dbUser.registration_step !== 'completed' || !['silver', 'gold'].includes(req.dbUser.verification_status)) {
     throw new ApiError(
       403,
       'REGISTRATION_REQUIRED',
-      'برای انجام معامله، ابتدا مراحل ثبت‌نام و احراز هویت ربات را کامل کنید.',
+      'برای انجام معامله، ابتدا ثبت‌نام و احراز نقره‌ای را در مسیر رسمی ربات تکمیل کنید.',
     );
   }
 }
@@ -358,11 +360,11 @@ async function assertDailyLimit(client, user, requestedAmount) {
        (SELECT COALESCE(SUM(amount), 0) FROM orders
          WHERE telegram_id = $1
            AND status IN ('pending_delivery', 'completed')
-           AND created_at >= CURRENT_DATE) AS buy_total,
+           AND created_at::date = NOW()::date) AS buy_total,
        (SELECT COALESCE(SUM(amount), 0) FROM sell_orders
          WHERE telegram_id = $1
-           AND status IN ('pending_review', 'approved', 'pending_uwallet')
-           AND created_at >= CURRENT_DATE) AS sell_total`,
+           AND status IN ('pending_review', 'approved')
+           AND created_at::date = NOW()::date) AS sell_total`,
     [String(user.telegram_id)],
   );
   const used = asFiniteNumber(totals.rows[0].buy_total, 0) + asFiniteNumber(totals.rows[0].sell_total, 0);
@@ -529,8 +531,8 @@ async function getLockedUser(client, telegramId) {
   const user = result.rows[0];
   if (!user) throw new ApiError(404, 'USER_NOT_FOUND', 'حساب کاربری در دیتابیس ربات پیدا نشد.');
   if (dbFlag(user.is_blocked)) throw new ApiError(403, 'USER_BLOCKED', 'دسترسی این حساب به خدمات ووچینو مسدود است.');
-  if (user.registration_step !== 'completed') {
-    throw new ApiError(403, 'REGISTRATION_REQUIRED', 'برای انجام معامله، ابتدا ثبت‌نام ربات را کامل کنید.');
+  if (user.registration_step !== 'completed' || !['silver', 'gold'].includes(user.verification_status)) {
+    throw new ApiError(403, 'REGISTRATION_REQUIRED', 'برای انجام معامله، ابتدا ثبت‌نام و احراز نقره‌ای را در مسیر رسمی ربات تکمیل کنید.');
   }
   return user;
 }
@@ -683,8 +685,9 @@ async function createBuyOrder({ telegramId, asset, amount, idempotencyKey, reque
   // Existing exchangeEngine owns provider execution and status transitions.
   // It is deliberately called after the DB transaction commits; a provider timeout
   // must not roll back a debited balance and a durable order.
+  let autoResult = { executed: false, reason: 'unknown_error' };
   try {
-    await tryAutoFulfillBuy({
+    autoResult = await tryAutoFulfillBuy({
       orderId: createdOrderId,
       telegramId,
       productKey: asset.buyProductKey,
@@ -697,6 +700,18 @@ async function createBuyOrder({ telegramId, asset, amount, idempotencyKey, reque
       trackingCode,
       error: error && error.message ? error.message : 'unknown error',
     });
+  }
+  if (!autoResult.executed && ['all_providers_failed', 'unknown_error'].includes(autoResult.reason)) {
+    response.manual_fallback = true;
+    response.fallback_message = 'موجودی منبع کافی نیست، سفارش شما برای بررسی دستی به مدیریت ارسال شد.';
+    try {
+      await bot.telegram.sendMessage(
+        String(telegramId),
+        `${response.fallback_message}\nکد پیگیری: ${trackingCode}`,
+      );
+    } catch (error) {
+      console.error('[webapp-api] fallback notification to buyer failed', trackingCode, error.message);
+    }
   }
 
   const orderStateBeforeNotify = await pool.query(
@@ -853,8 +868,9 @@ async function createSellOrder({ telegramId, asset, voucherCode, idempotencyKey,
     client.release();
   }
 
+  let autoResult = { executed: false, reason: 'unknown_error' };
   try {
-    await tryAutoFulfillSell({
+    autoResult = await tryAutoFulfillSell({
       sellOrderId: createdOrderId,
       telegramId,
       productKey: asset.sellProductKey,
@@ -868,6 +884,18 @@ async function createSellOrder({ telegramId, asset, voucherCode, idempotencyKey,
       trackingCode,
       error: error && error.message ? error.message : 'unknown error',
     });
+  }
+  if (!autoResult.executed && ['all_providers_failed', 'unknown_error'].includes(autoResult.reason)) {
+    response.manual_fallback = true;
+    response.fallback_message = 'موجودی منبع کافی نیست، سفارش شما برای بررسی دستی به مدیریت ارسال شد.';
+    try {
+      await bot.telegram.sendMessage(
+        String(telegramId),
+        `${response.fallback_message}\nکد پیگیری: ${trackingCode}`,
+      );
+    } catch (error) {
+      console.error('[webapp-api] fallback notification to buyer failed', trackingCode, error.message);
+    }
   }
 
   const orderStateBeforeNotify = await pool.query(
@@ -928,6 +956,8 @@ function createWebAppApiRouter(options = {}) {
     keyGenerator: (req) => `trade:${req.telegram ? req.telegram.id : (req.ip || 'unknown')}`,
   });
 
+  // Apply CORS/security/rate-limit middleware before every route (including auth/status).
+  // Auth/status and password endpoints are cross-origin Mini App requests too.
   router.use((req, res, next) => {
     req.requestId = crypto.randomUUID();
     res.setHeader('X-Request-ID', req.requestId);
@@ -937,12 +967,58 @@ function createWebAppApiRouter(options = {}) {
   router.use(createCorsMiddleware());
   router.use(perIpLimit);
 
-  router.get('/user', authenticate, requireUser, asyncRoute(async (req, res) => {
-    const referralsResult = await pool.query(
-      'SELECT COUNT(*)::int AS count FROM users WHERE referrer_id = $1',
-      [String(req.telegram.id)],
-    );
+  const requireAppSession = createRequireAppSession({ pool, ApiError, asyncRoute });
+  registerPasswordAuthRoutes(router, {
+    pool,
+    authenticate,
+    ApiError,
+    asyncRoute,
+    loadUserByTelegramId,
+  });
+
+  router.get('/user', authenticate, requireUser, requireAppSession, asyncRoute(async (req, res) => {
+    const telegramId = String(req.telegram.id);
+    const isVerified = ['silver', 'gold'].includes(req.dbUser.verification_status);
+    const [referralsResult, goldRequestResult] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE referral_counted = TRUE)::int AS qualified
+           FROM users WHERE referrer_id = $1`,
+        [telegramId],
+      ),
+      pool.query(
+        `SELECT status FROM wallet_requests
+          WHERE telegram_id = $1 AND type = 'gold_verify'
+          ORDER BY created_at DESC, id DESC LIMIT 1`,
+        [telegramId],
+      ),
+    ]);
+
+    let dailyLimit = null;
+    let dailyUsed = 0;
+    if (isVerified) {
+      const settingKey = req.dbUser.verification_status === 'gold' ? 'gold_daily_limit' : 'silver_daily_limit';
+      const fallbackLimit = req.dbUser.verification_status === 'gold' ? 10_000_000 : 2_000_000;
+      const [settingResult, totalsResult] = await Promise.all([
+        pool.query('SELECT value FROM settings WHERE key = $1 LIMIT 1', [settingKey]),
+        pool.query(
+          `SELECT
+             (SELECT COALESCE(SUM(amount), 0) FROM orders
+               WHERE telegram_id = $1 AND status IN ('pending_delivery', 'completed') AND created_at::date = NOW()::date) AS buy_total,
+             (SELECT COALESCE(SUM(amount), 0) FROM sell_orders
+               WHERE telegram_id = $1 AND status IN ('pending_review', 'approved') AND created_at::date = NOW()::date) AS sell_total`,
+          [telegramId],
+        ),
+      ]);
+      dailyLimit = Math.max(0, asFiniteNumber(settingResult.rows[0] && settingResult.rows[0].value, fallbackLimit));
+      dailyUsed = asFiniteNumber(totalsResult.rows[0].buy_total, 0) + asFiniteNumber(totalsResult.rows[0].sell_total, 0);
+    }
+
     const telegramName = [req.telegram.first_name, req.telegram.last_name].filter(Boolean).join(' ').trim();
+    const registrationCompleted = req.dbUser.registration_step === 'completed' && isVerified;
+    const goldRequestStatus = req.dbUser.verification_status === 'gold'
+      ? 'approved'
+      : (goldRequestResult.rows[0] ? goldRequestResult.rows[0].status : 'not_requested');
 
     return res.json({
       user: {
@@ -953,13 +1029,18 @@ function createWebAppApiRouter(options = {}) {
         display_name: req.dbUser.full_name || telegramName || req.telegram.username || 'کاربر ووچینو',
         language: req.dbUser.language || req.telegram.language_code || 'fa',
         balance_toman: asFiniteNumber(req.dbUser.balance, 0),
-        bonus_balance_toman: asFiniteNumber(req.dbUser.bonus_balance, 0),
         verification_status: req.dbUser.verification_status || 'none',
-        registration_completed: req.dbUser.registration_step === 'completed',
+        registration_completed: registrationCompleted,
         registration_step: req.dbUser.registration_step || null,
         registered_at: req.dbUser.registered_at,
-        referrals_count: Number(referralsResult.rows[0].count || 0),
-        can_trade: req.dbUser.registration_step === 'completed' && !dbFlag(req.dbUser.is_blocked),
+        referrals_count: Number(referralsResult.rows[0].total || 0),
+        qualified_referrals_count: Number(referralsResult.rows[0].qualified || 0),
+        can_trade: registrationCompleted && !dbFlag(req.dbUser.is_blocked),
+        daily_limit_toman: dailyLimit,
+        daily_used_toman: dailyUsed,
+        daily_remaining_toman: dailyLimit === null ? null : Math.max(0, dailyLimit - dailyUsed),
+        gold_verification_status: goldRequestStatus,
+        is_blocked: dbFlag(req.dbUser.is_blocked),
       },
     });
   }));
@@ -969,7 +1050,7 @@ function createWebAppApiRouter(options = {}) {
     return res.json({ market });
   }));
 
-  router.get('/cards', authenticate, requireUser, asyncRoute(async (req, res) => {
+  router.get('/cards', authenticate, requireUser, requireAppSession, asyncRoute(async (req, res) => {
     const [extraCards, userResult] = await Promise.all([
       pool.query(
         `SELECT id, card_number, created_at
@@ -1007,7 +1088,7 @@ function createWebAppApiRouter(options = {}) {
     return res.json({ cards });
   }));
 
-  router.get('/transactions', authenticate, requireUser, asyncRoute(async (req, res) => {
+  router.get('/transactions', authenticate, requireUser, requireAppSession, asyncRoute(async (req, res) => {
     const limit = parsePositiveInteger(req.query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
     const offsetRaw = Number(req.query.offset || 0);
     const offset = Number.isSafeInteger(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 50_000) : 0;
@@ -1131,6 +1212,7 @@ function createWebAppApiRouter(options = {}) {
     express.json({ limit: '16kb', strict: true, type: 'application/json' }),
     authenticate,
     requireUser,
+    requireAppSession,
     tradeLimit,
     asyncRoute(async (req, res) => {
       requireCompletedRegistration(req);
