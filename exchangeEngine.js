@@ -18,6 +18,13 @@ const priceService = require('./priceService');
 const { isOnlineBuyProduct } = require('./priceService');
 const { checkAndGrantBonuses, checkAndGrantReferralCommission } = require('./handlers/bonusEngine');
 
+// Premium Voucher طبق سیاست محصول باید در تمام کانال‌ها دستی تحویل شود؛
+// یوووچر و هات‌ووچر همچنان از زنجیره‌ی API و تنظیم اجرای خودکار پنل استفاده می‌کنند.
+const MANUAL_ONLY_PRODUCT_KEYS = new Set(['premium_voucher', 'premiumvoucher']);
+function isManualOnlyProduct(productKey) {
+  return MANUAL_ONLY_PRODUCT_KEYS.has(String(productKey || '').trim().toLowerCase());
+}
+
 // ==================== محاسبه کارمزد (منبع واحد، هم برای دستی هم API) ====================
 function calculateCommission(commissionType, commissionValue, baseAmount) {
   const value = parseFloat(commissionValue) || 0;
@@ -315,6 +322,10 @@ async function callProviderApi(apiSource, action, payload) {
 // چون برای صرافی‌هایی مثل uWallet لازم است coin_code محصول (مثلاً UUSD/HotVoucher) را بدانیم —
 // چیزی که فقط از روی productKey قابل استخراج نیست و باید از ردیف محصول خوانده شود.
 async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trackingCode, product }, bot) {
+  if (isManualOnlyProduct(productKey)) {
+    console.log(`ℹ️ [خرید خودکار] محصول «${productKey}» طبق سیاست ووچینو فقط دستی تحویل می‌شود — سفارش ${trackingCode} دستی می‌ماند.`);
+    return { executed: false, reason: 'manual_only_product' };
+  }
   // 🔎 لاگ‌های واضح طبق درخواست: از همین خط مشخصه آیا اصلاً صرافی فراخوانی می‌شه یا نه، و چرا نه
   if (!(await isAutoExecutionEnabled())) {
     console.log(`ℹ️ [خرید خودکار] حالت اجرا روی «دستی»ست (تنظیمات پنل) — هیچ صرافی‌ای فراخوانی نمی‌شود. سفارش ${trackingCode} دستی می‌ماند.`);
@@ -408,6 +419,10 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
 
 // ==================== اجرای خودکار سفارش فروش ====================
 async function tryAutoFulfillSell({ sellOrderId, telegramId, productKey, amount, product, trackingCode, voucherCode }, bot) {
+  if (isManualOnlyProduct(productKey)) {
+    console.log(`ℹ️ [فروش خودکار] محصول «${productKey}» طبق سیاست ووچینو فقط دستی بررسی می‌شود — سفارش ${trackingCode} دستی می‌ماند.`);
+    return { executed: false, reason: 'manual_only_product' };
+  }
   if (!(await isAutoExecutionEnabled())) {
     console.log(`ℹ️ [فروش خودکار] حالت اجرا روی «دستی»ست (تنظیمات پنل) — سفارش فروش ${trackingCode} دستی می‌ماند.`);
     return { executed: false, reason: 'manual_mode' };
