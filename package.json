@@ -1,21 +1,26 @@
 {
   "name": "vochino-telegram-bot",
   "version": "1.0.0",
-  "description": "Vochino Telegram Bot",
+  "description": "Vochino Telegram Bot - High-Performance Crypto & Voucher Exchange",
   "main": "index.js",
   "license": "UNLICENSED",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "start": "node index.js",
-    "test": "node tests/run.js"
+    "test": "node tests/run.js",
+    "audit": "npm audit --audit-level=high"
   },
   "dependencies": {
-    "express": "^4.21.2",
-    "pg": "^8.11.5",
-    "telegraf": "^4.16.3",
+    "@napi-rs/canvas": "^0.1.90",
     "ejs": "^3.1.10",
+    "express": "^4.21.2",
     "jimp": "^0.22.12",
+    "multer": "^2.5.0",
+    "pg": "^8.11.5",
     "qrcode": "^1.5.4",
-    "@napi-rs/canvas": "^0.1.90"
+    "telegraf": "^4.16.3"
   }
 }
