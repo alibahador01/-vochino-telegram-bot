@@ -58,12 +58,10 @@ async function getUserStats() {
   const total = await pool.query('SELECT COUNT(*)::int AS count FROM users');
   const registered = await pool.query("SELECT COUNT(*)::int AS count FROM users WHERE full_name IS NOT NULL AND phone IS NOT NULL AND card_number IS NOT NULL");
   const balance = await pool.query('SELECT COALESCE(SUM(balance), 0) AS total FROM users');
-  const bonus = await pool.query('SELECT COALESCE(SUM(bonus_balance), 0) AS total FROM users');
   return {
     totalUsers: Number(total.rows[0].count),
     registeredUsers: Number(registered.rows[0].count),
-    totalBalance: Number(balance.rows[0].total),
-    totalBonus: Number(bonus.rows[0].total)
+    totalBalance: Number(balance.rows[0].total)
   };
 }
 
@@ -1253,6 +1251,26 @@ async function initDb() {
     );
   } catch (e) { console.log('خطا در مهاجرت وضعیت ثبت‌نام:', e.message); }
 
+  // مهاجرت موجودیِ بونوسِ قدیمی به کیف‌پول واقعی (idempotent و غیرمخرب): سیستم بونوس/بازی حذف شده و از
+  // این‌پس همه‌ی هدیه‌ها مستقیم روی balance واقعی اعمال می‌شوند؛ هر مبلغی که کاربرها قبلاً زیر عنوان
+  // bonus_balance جمع کرده بودند (و دیگر هیچ جایی از کد به آن اضافه نمی‌کند) اینجا یک‌بار به balance
+  // واقعی‌شان منتقل و bonus_balance صفر می‌شود تا هیچ پولی گم یا قفل نماند. چون شرط آن
+  // «WHERE bonus_balance > 0» است، بعد از اولین اجرای موفق هیچ ردیفی دیگر مطابقت نمی‌دهد و اجراهای
+  // بعدی (هر ری‌استارت) کاملاً بی‌اثرند. هیچ ستون یا جدولی (bonus_balance، referral_wagering_remaining،
+  // bonus_withdrawals و ...) حذف نمی‌شود — فقط مقدار صفر می‌شود تا تاریخچه/امکان بررسی حفظ بماند.
+  try {
+    const migrated = await pool.query(
+      `UPDATE users
+          SET balance = balance + bonus_balance,
+              bonus_balance = 0,
+              referral_wagering_remaining = 0
+        WHERE bonus_balance > 0`
+    );
+    if (migrated.rowCount > 0) {
+      console.log(`✅ مهاجرت بونوسِ قدیمی: موجودیِ ${migrated.rowCount} کاربر به کیف پول واقعی منتقل شد.`);
+    }
+  } catch (e) { console.log('خطا در مهاجرت بونوسِ قدیمی به کیف پول:', e.message); }
+
   // --- تنظیمات پیش‌فرض ---
   // ⚠️ رفع باگ پایداری تنظیمات: قبلاً این INSERT با «ON CONFLICT DO UPDATE» در هر راه‌اندازیِ مجدد، همه‌ی
   // مقادیر تنظیم‌شده از پنل مدیریت (سقف روزانه‌ی نقره‌ای/طلایی، نرخ دلار، بونوس‌ها، عضویت اجباری، ...) را
@@ -1266,17 +1284,7 @@ async function initDb() {
         ('sell_margin', '10', NOW()),
         ('buy_mode', 'MANUAL', NOW()),
         ('sell_mode', 'MANUAL', NOW()),
-        ('referral_bonus', '5000', NOW()),
-        ('referral_enabled', 'true', NOW()),
-        ('game_rtp', '50', NOW()),
-        ('game_require_purchase', 'true', NOW()),
         ('force_join_enabled', 'true', NOW()),
-        ('disableBalanceGame', 'false', NOW()),
-        ('disableBonusGame', 'false', NOW()),
-        ('winRateBalance', '50', NOW()),
-        ('winRateBonus', '50', NOW()),
-        ('gameMultiplier', '2', NOW()),
-        ('minPurchaseForGame', '0', NOW()),
         ('min_withdraw', '100000', NOW()),
         ('withdraw_fee_type', 'none', NOW()),
         ('withdraw_fee_value', '0', NOW()),
@@ -1330,11 +1338,11 @@ async function initDb() {
 
   // --- محصولات پیش‌فرض ---
   const buyProducts = [
-    { key: 'voucher', name: '🎟 یوووچر', min_amount: 1, price_type: 'usd', active: 1, hidden: 0 },
-    { key: 'hotvoucher', name: '🎟 هات ووچر', min_amount: 50000, price_type: 'toman', active: 1, hidden: 0 },
+    { key: 'voucher', name: '🎫 یوووچر', min_amount: 1, price_type: 'usd', active: 1, hidden: 0 },
+    { key: 'hotvoucher', name: '🎫 هات ووچر', min_amount: 50000, price_type: 'toman', active: 1, hidden: 0 },
     // ⚠️ باگ قبلی: این دو محصول با hidden:1 ساخته می‌شدند و در بخش خرید اصلاً دیده نمی‌شدند.
     // طبق تصمیم پروژه باید توی جدول باشند و در لیست خرید دیده شوند (اتصال API‌شان جداگانه و بعداً انجام می‌شود).
-    { key: 'premium_voucher', name: '🎟 پریمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 1, hidden: 0 },
+    { key: 'premium_voucher', name: '🎫 پریمیوم ووچر', min_amount: 100000, price_type: 'toman', active: 1, hidden: 0 },
     { key: 'ps_voucher', name: '🔵 پی‌اس ووچر', min_amount: 185081, price_type: 'toman', active: 1, hidden: 0 },
     { key: 'perfect_money', name: '💵 پرفکت مانی', min_amount: 1, price_type: 'usd', active: 0, hidden: 1 },
     { key: 'crypto_dollar', name: '💲 دلار (کریپتو)', min_amount: 10, price_type: 'usd', active: 0, hidden: 1 },
