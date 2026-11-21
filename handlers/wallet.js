@@ -39,7 +39,6 @@ module.exports = function registerWalletHandlers(bot) {
     }
 
     const balance = Number(user.balance);
-    const bonusBalance = Number(user.bonus_balance || 0);
     const name = user.full_name || 'ثبت نشده';
     const phone = user.phone || 'ثبت نشده';
     const card = user.card_number || 'ثبت نشده';
@@ -54,7 +53,6 @@ module.exports = function registerWalletHandlers(bot) {
       `📱 شماره تلفن: ${phone}\n` +
       `💳 شماره کارت: ${card}\n` +
       `💰 موجودی: ${balance.toLocaleString('en-US')} تومان\n` +
-      `🪎 موجودی بونوس: ${bonusBalance.toLocaleString('en-US')} تومان\n` +
       `🎗 سطح احراز: ${level}\n` +
       `👥 افراد دعوت‌شده: ${inviteCount} نفر`;
 
@@ -389,41 +387,49 @@ module.exports = function registerWalletHandlers(bot) {
     const user = await getUser(ctx.from.id);
     if (!user) return;
     const refLink = `https://t.me/${ctx.botInfo.username}?start=${user.telegram_id}`;
+    // متن پیشنهادی تلگرام برای وقتی کاربر لینک رو شیر می‌کنه (قبلاً این لینک فقط url داشت، بدون متن)
+    const shareText = 'دوست دارم ووچینو⁰۱ رو بهت معرفی کنم؛ صرافی سریع و مطمئن برای خرید و فروش ووچر 🤝\nاز همین لینک وارد شو و شروع کن:';
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(shareText)}`;
 
-    const bonusActive = await getSetting('bonus_referral_active', 'false');
-    const bonusGift = await getSetting('bonus_referral_gift', '0');
     const percentActive = await getSetting('bonus_referral_percent_active', 'false');
     const percentValue = await getSetting('bonus_referral_percent', '0');
 
     if (percentActive === 'true' && Number(percentValue) > 0) {
       const msg =
         R.HEADER +
-        `\n♾️ طرح سود مادام‌العمر\n\n` +
-        `👥 دعوت موفق\n` +
-        `📈 درصد سود: ${percentValue}٪\n\n` +
-        `هر خریدِ دعوت‌شده،\n` +
-        `برای شما سهم ایجاد می‌کند.`;
+        `\n♾️ طرح سود مادام‌العمر | Vochino⁰¹\n\n` +
+        `📈 سهم شما از هر خرید دوستانی که دعوت می‌کنید: ${percentValue}٪\n\n` +
+        `🔗 لینک اختصاصی‌ات رو با دوستانت به اشتراک بذار؛\n` +
+        `از همون اولین خریدشون، سهمت مستقیم و بدون محدودیت به کیف پولت اضافه می‌شه ✨`;
       return ctx.reply(msg, {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}` }],
+            [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: shareUrl }],
             [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
           ]
         }
       });
     }
 
-    const gift = bonusActive === 'true' ? Number(bonusGift).toLocaleString('en-US') : '××××';
+    const giftActive = await getSetting('bonus_referral_active', 'false');
+    const giftAmount = await getSetting('bonus_referral_gift', '0');
+    // ⚠️ رفع یک ابهام واقعی: قبلاً این پیام همیشه می‌نوشت «پاداش هر دعوت»، درحالی‌که منطق واقعی
+    // (handlers/adminGifts.js + handlers/bonusEngine.js) پاداش را هر N دعوتِ موفق می‌دهد، نه هر
+    // دعوت. الان threshold واقعی از همون تنظیمات خوانده و در متن منعکس می‌شود تا با چیزی که واقعاً
+    // اتفاق می‌افتد یکی باشد.
+    const giftThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10) || 1;
+    const gift = giftActive === 'true' ? Number(giftAmount).toLocaleString('en-US') : '××××';
+    const perLabel = giftThreshold > 1 ? `به‌ازای هر ${giftThreshold} دعوت موفق` : 'به‌ازای هر دعوت موفق';
     const msg =
       R.HEADER +
-      `\n👥 دعوت از تو بونوس از ووچینو⁰¹\n\n` +
-      `🪎پاداش هر دعوت: ${gift} تومان\n\n` +
-      `🔗 لینک اختصاصی خودت رو بساز\n` +
-      `و از دعوت‌های موفق پاداش بگیر.`;
+      `\n👥 کسب درآمد از دعوت دوستان | Vochino⁰¹\n\n` +
+      `🎁 ${perLabel}: ${gift} تومان\n\n` +
+      `🔗 همین حالا لینک اختصاصی‌ات رو بساز،\n` +
+      `با دوستانت به اشتراک بذار و پاداشت رو مستقیم توی کیف پولت ببین ✨`;
     return ctx.reply(msg, {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}` }],
+          [{ text: '🔗 ساخت و اشتراک‌گذاری لینک دعوت', url: shareUrl }],
           [{ text: '🔴 بازگشت', callback_data: 'menu_wallet' }]
         ]
       }
