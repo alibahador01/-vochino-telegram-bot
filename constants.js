@@ -1,4 +1,5 @@
 // constants.js
+
 const ADMIN_IDS = [8231962200];
 const SUPER_ADMIN_ID = 8231962200; // مالک اصلی ربات
 const DAILY_LIMIT_TEXT = '2,000,000';
@@ -14,16 +15,45 @@ const ALLOWED_REACTIONS = [
   '😘', '💊', '🙊', '😎', '👾', '🤷‍♂️', '🤷', '🤷‍♀️', '😡'
 ];
 
+// اطلاعات کارت‌ها و شباها
 const DEPOSIT_CARDS = [
-  { number: '6219861819068106', owner: 'علی بهادر' },
-  { number: '5047061669481125', owner: 'علی بهادر' }
+  { 
+    card: '6219861819068106', 
+    sheba: 'IR840560611828006151570001', 
+    owner: 'علی بهادر' 
+  },
+  { 
+    card: '5047061040216331', // دقت کن: این شماره با شماره قبلی فرق داره، طبق متن خودت گذاشتم
+    sheba: 'IR660610000007001007794357', 
+    owner: 'علی بهادر' 
+  }
 ];
+
+// متن نهایی پرداخت با قابلیت کپی (استفاده از تگ <code> مخصوص تلگرام)
+const PAYMENT_MESSAGE_TEMPLATE = `
+𝑽𝒐𝒄𝒉𝒊𝒏𝒐-𝑯𝒖𝒃⁰¹
+
+🜲  پرداخت اًمن آسان 
+🃎  مبلغ وایز 15میلیون روش کارت به کارت استفاده کنید ➬
+🀙  وایز بالای 15 میلیون  روش شبا استفاده کنید ➬
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+         ⫹ <code>6219 8618 1906 8106</code> ⫺
+⫹ <code>IR840560611828006151570001</code> ⫺
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+                               ⫹⫹  علی   بهادر  ⫺⫺
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+         ⫹ <code>5047 0610 4021 6331</code> ⫺
+⫹ <code>IR660610000007001007794357</code> ⫺
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+➬  پس از پرداخت رسید وایزی را ارسال کنید همان لحظه
+➬  اتوماتیک به کیف پولتون اضافه می‌شود
+`;
 
 const mainMenuButtons = [
   { key: 'buy',          text: '✨ خرید' },
   { key: 'sell',         text: '✨ فروش' },
   { key: 'wallet',       text: '🧳 کیف پول' },
-  { key: 'bonus',        text: '🧩 بونوس' },
+  { key: 'miniapp',      url: 'https://t.me/Vochino_bh01_bot/app' },
   { key: 'hochino_chat', text: '🐽 هوچینو AI گفتگو' },
   { key: 'hochino_main', text: '🐽 هوچینو AI برتر⁰¹' },
   { key: 'support',      text: '🎧 هوچینو AI دستیار⁰¹' }
@@ -92,6 +122,7 @@ module.exports = {
   DEFAULT_USD_RATE,
   ALLOWED_REACTIONS,
   DEPOSIT_CARDS,
+  PAYMENT_MESSAGE_TEMPLATE, // متن جدید که به صورت تمپلیت اضافه شد
   mainMenuButtons,
   ADMIN_BUTTON,
   BROADCAST_SETTINGS,
