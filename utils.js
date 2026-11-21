@@ -7,26 +7,10 @@ const { normalizeTelegramLink } = require('./util/validators');
 
 const sessions = {};
 
-/**
- * دکمه‌ی یکپارچه و قابل‌استفاده‌ی مجدد «بازگشت به منو».
- * متنِ روی دکمه از سیستم متن‌های قابل‌ویرایش ربات خوانده می‌شود (کلید navBackToMenu،
- * دسته‌بندی navigation) — یعنی هیچ متنی اینجا هاردکد نشده؛ ادمین از پنل مدیریت
- * (📝 مدیریت متن‌های ربات ← navigation ← navBackToMenu) می‌تواند نوشته‌ی روی این دکمه
- * را هر وقت خواست عوض کند و همه‌جا که از این تابع استفاده شده با هم به‌روز می‌شود.
- * پیش‌فرض «🔙 بازگشت به منو» فقط برای زمانی است که هنوز از پنل چیزی تنظیم نشده باشد.
- *
- * @param {string} callbackData - کال‌بک دکمه؛ پیش‌فرض 'back_main_menu' (بازگشت به منوی اصلی ربات)
- * @returns {{text: string, callback_data: string}}
- */
 function backToMenuButton(callbackData = 'back_main_menu') {
   return { text: getText('navBackToMenu', '🔙 بازگشت به منو'), callback_data: callbackData };
 }
 
-/**
- * ری‌اکشن روی یک پیام مشخص می‌گذارد (با ایموجی تنظیم‌شده در پنل ادمین).
- * isBig=true یعنی حالت شناور/بزرگ (فقط برای /start)، isBig=false یعنی ری‌اکشن ساده (مثلاً بازگشت به منو).
- * خطای این تابع هیچ‌وقت نباید کل فلو را متوقف کند، برای همین کاملاً safe است.
- */
 async function reactToMessage(ctx, chatId, messageId, isBig) {
   try {
     const reactionEmoji = await getSetting('start_reaction', '🎉');
@@ -69,20 +53,16 @@ async function sendTracked(ctx, session, text, extra) {
   return sent;
 }
 
-// کلید i18n متنِ هر دکمه‌ی منو بر اساس key داخلی مشترک (زبان‌مستقل) در constants.mainMenuButtons.
-// شناسه‌ی callback_data («menu_buy» و ...) همیشه همین key ثابت می‌ماند؛ فقط متنِ روی دکمه ترجمه می‌شود.
 const MENU_BUTTON_I18N_KEY = {
   buy: 'menu.buy',
   sell: 'menu.sell',
   wallet: 'menu.wallet',
-  bonus: 'menu.bonus',
+  miniapp: 'menu.miniapp',
   hochino_chat: 'menu.hochino_chat',
   hochino_main: 'menu.hochino_main',
   support: 'menu.support'
 };
 
-// گزینه‌ی «کانال و نرخ‌های آنلاین» فقط وقتی برگردانده می‌شود که حداقل یک کانال/گروهِ فعال با لینک واقعاً
-// معتبر در پنل مدیریت ثبت شده باشد؛ در غیر این صورت null (یعنی دکمه‌ای ساخته نمی‌شود، نه دکمه‌ی خالی).
 async function getActiveMenuChannel() {
   let channels;
   try {
@@ -97,23 +77,17 @@ async function getActiveMenuChannel() {
     sawInvalidLink = true;
   }
   if (sawInvalidLink) {
-    // خطای پیکربندی قابل‌تشخیص برای ادمین: کانال فعال است ولی لینکش یک آدرس واقعی تلگرام نیست —
-    // به‌جای ساختن دکمه‌ی خراب، فقط لاگ می‌کنیم و دکمه را کلاً نشان نمی‌دهیم.
     console.error('[menu] کانال(های) فعال در required_channels بدون لینک معتبر تلگرام — دکمه‌ی «کانال و نرخ‌های آنلاین» پنهان ماند. لینک را در پنل مدیریت بررسی کنید.');
   }
   return null;
 }
 
-/**
- * نمایش منوی اصلی، به زبان ذخیره‌شده‌ی کاربر (fa/en/tr)، با چیدمان دوستونه‌ی فعلی؛
- * اگر در پنل مدیریت کانال/گروه معتبری تنظیم شده باشد، دکمه‌ی «کانال و نرخ‌های آنلاین» هم اضافه می‌شود.
- */
 async function showMainMenu(ctx) {
   const isAdmin = ADMIN_IDS.includes(Number(ctx.from.id));
   const user = await getUser(ctx.from.id).catch(() => null);
   const lang = i18n.normalizeLang(user && user.language) || 'en';
 
-  const buttons = mainMenuButtons.map(b => ({ key: b.key, text: i18n.t(lang, MENU_BUTTON_I18N_KEY[b.key]) }));
+  const buttons = mainMenuButtons.map(b => ({ key: b.key, text: i18n.t(lang, MENU_BUTTON_I18N_KEY[b.key]), url: b.url }));
 
   const activeChannel = await getActiveMenuChannel();
   if (activeChannel) {
@@ -124,22 +98,20 @@ async function showMainMenu(ctx) {
     buttons.push({ key: ADMIN_BUTTON.key, text: i18n.t(lang, 'menu.admin_panel') });
   }
 
-  // رنگ دکمه‌های شیشه‌ای منو از تنظیم «تم دکمه‌ها»ی پنل ادمین خونده می‌شه
   const themeKey = await getSetting('ai_theme', AI_DEFAULT_THEME);
   const theme = AI_THEMES.find(t => t.key === themeKey) || AI_THEMES[0];
   const styleField = theme && theme.style ? { style: theme.style } : {};
 
+  const buildBtn = (b) => (b.url
+    ? { text: b.text, url: b.url, ...styleField }
+    : { text: b.text, callback_data: 'menu_' + b.key, ...styleField });
+
   const rows = [];
   for (let i = 0; i < buttons.length; i += 2) {
     if (i + 1 < buttons.length) {
-      rows.push([
-        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key, ...styleField },
-        { text: buttons[i + 1].text, callback_data: 'menu_' + buttons[i + 1].key, ...styleField }
-      ]);
+      rows.push([buildBtn(buttons[i]), buildBtn(buttons[i + 1])]);
     } else {
-      rows.push([
-        { text: buttons[i].text, callback_data: 'menu_' + buttons[i].key, ...styleField }
-      ]);
+      rows.push([buildBtn(buttons[i])]);
     }
   }
 
