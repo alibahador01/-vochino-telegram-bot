@@ -1,17 +1,19 @@
 // handlers/bonusEngine.js
 const { pool, getUser, getSetting } = require('../db');
 
-/**
- * بررسی و اعطای بونوس‌های سه‌گانه (ثبت‌نام، اولین خرید، دعوت)
- * @param {object} ctx - context تلگرام
- * @param {string} userId - telegram_id
- * @param {string} eventType - 'registration', 'purchase', 'referral'
- */
+async function logGift(telegramId, amount, afterBalance, description) {
+  try {
+    await pool.query(
+      'INSERT INTO transaction_logs (telegram_id, type, amount, balance_before, balance_after, description, created_at) VALUES ($1,$2,$3,$4,$5,$6,NOW())',
+      [String(telegramId), 'gift', amount, afterBalance - amount, afterBalance, description]
+    );
+  } catch (e) {}
+}
+
 async function checkAndGrantBonuses(ctx, userId, eventType) {
   const user = await getUser(userId);
   if (!user) return;
 
-  // --- بونوس ثبت‌نام ---
   if (eventType === 'registration') {
     const regActive = (await getSetting('bonus_registration_active', 'false')) === 'true';
     const regActivatedAt = await getSetting('bonus_registration_activated_at', null);
@@ -21,21 +23,27 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
         const activatedDate = new Date(regActivatedAt);
         const userRegDate = new Date(user.registered_at);
         if (userRegDate >= activatedDate) {
-          // ⚠️ اتمیک: شرط reg_bonus_received=false داخل خودِ UPDATE — جلوگیری از اعطای دوباره‌ی
-          // بونوس اگه این تابع دوبار (مثلاً دو event تقریباً هم‌زمان) برای یک کاربر صدا زده بشه.
           const upd = await pool.query(
-            'UPDATE users SET bonus_balance = bonus_balance + $1, reg_bonus_received = true WHERE telegram_id = $2 AND reg_bonus_received = false',
+            'UPDATE users SET balance = balance + $1, reg_bonus_received = true WHERE telegram_id = $2 AND reg_bonus_received = false RETURNING balance',
             [regGift, userId]
           );
           if (upd.rowCount > 0) {
-            try { ctx.telegram.sendMessage(userId, `🎁 بونوس ثبت‌نام: ${regGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+            const after = Number(upd.rows[0].balance);
+            await logGift(userId, regGift, after, 'هدیه‌ی خوش‌آمدگویی ثبت‌نام');
+            try {
+              ctx.telegram.sendMessage(
+                userId,
+                '🎉 به ووچینو⁰۱ خوش اومدی!\n\n' +
+                `🎁 ${regGift.toLocaleString()} تومان هدیه‌ی خوش‌آمدگویی همین الان به کیف پولت اضافه شد.\n\n` +
+                'همین حالا هم می‌تونی ازش برای خرید استفاده کنی ✨'
+              );
+            } catch (e) {}
           }
         }
       }
     }
   }
 
-  // --- بونوس اولین خرید ---
   if (eventType === 'purchase') {
     const buyActive = (await getSetting('bonus_first_purchase_active', 'false')) === 'true';
     const buyMinAmount = parseInt(await getSetting('bonus_first_purchase_min_amount', '0'), 10);
@@ -51,28 +59,32 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
       const res = await pool.query(query, params);
       const total = Number(res.rows[0].total);
       if (total >= buyMinAmount && total > 0) {
-        // ⚠️ اتمیک: شرط first_purchase_bonus_received=false داخل خودِ UPDATE
         const upd = await pool.query(
-          'UPDATE users SET bonus_balance = bonus_balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2 AND first_purchase_bonus_received = false',
+          'UPDATE users SET balance = balance + $1, first_purchase_bonus_received = true WHERE telegram_id = $2 AND first_purchase_bonus_received = false RETURNING balance',
           [buyGift, userId]
         );
         if (upd.rowCount > 0) {
-          try { ctx.telegram.sendMessage(userId, `🎁 بونوس اولین خرید: ${buyGift.toLocaleString()} تومان به بونوس شما اضافه شد.`); } catch (e) {}
+          const after = Number(upd.rows[0].balance);
+          await logGift(userId, buyGift, after, 'هدیه‌ی اولین خرید');
+          try {
+            ctx.telegram.sendMessage(
+              userId,
+              '🛍 هدیه‌ی اولین خرید\n\n' +
+              `🎁 ${buyGift.toLocaleString()} تومان مستقیم به کیف پولت اضافه شد.\n\n` +
+              'ممنون که ووچینو⁰۱ رو برای اولین خریدت انتخاب کردی 💙'
+            );
+          } catch (e) {}
         }
       }
     }
   }
 
-  // --- بونوس دعوت (ثبت‌نام دعوت‌شونده) ---
   if (eventType === 'referral') {
     const refActive = (await getSetting('bonus_referral_active', 'false')) === 'true';
     const refThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10);
     const refGift = parseInt(await getSetting('bonus_referral_gift', '0'), 10);
     const refActivatedAt = await getSetting('bonus_referral_activated_at', null);
     if (refActive && refGift > 0 && refThreshold > 0) {
-      // ⚠️ رفع حفره‌ی سوءاستفاده: قبلاً این شمارش هر ردیفی با referrer_id=$1 رو می‌شمرد، یعنی صرفِ
-      // /start زدنِ یه اکانت الکی هم «دعوت موفق» حساب می‌شد. الان فقط کاربرهایی شمرده می‌شن که
-      // واقعاً احراز هویت نقره‌ای رو کامل کردن (پرچم referral_counted که در verification.js ست می‌شه).
       let query = "SELECT COUNT(*)::int AS cnt FROM users WHERE referrer_id = $1 AND referral_counted = true";
       const params = [userId];
       if (refActivatedAt) {
@@ -86,26 +98,20 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
       const eligibleBonuses = Math.floor(totalReferrals / refThreshold) - receivedCount;
       if (eligibleBonuses > 0) {
         const totalGift = eligibleBonuses * refGift;
-        // شرط گردش: بونوس دعوت باید در بازی‌ها چرخانده شود تا قابل برداشت شود
-        const wagerMultiplier = parseFloat(await getSetting('referral_wagering_multiplier', '1')) || 1;
-        const wagerRequirement = Math.round(totalGift * wagerMultiplier);
-        // ⚠️ اتمیک (compare-and-swap روی ref_bonus_count): اگه این تابع برای یک دعوت‌کننده دوبار
-        // تقریباً هم‌زمان صدا زده بشه (مثلاً دو نفر تقریباً هم‌زمان با لینکش ثبت‌نام کنن)، هر دو
-        // می‌تونستن همون receivedCount قدیمی رو بخونن و هر دو eligibleBonuses رو جدا محاسبه و
-        // اعطا کنن — یعنی بونوس دعوت دوبار حساب بشه. با شرط «AND ref_bonus_count = $5» (مقدار
-        // قدیمی که همین تابع خونده)، فقط همون تلاشی که هنوز مقدار رو عوض‌نشده می‌بینه برنده
-        // می‌شه؛ تلاش بازنده عملاً کاری نمی‌کنه (دفعه‌ی بعد که دوباره تریگر بشه، خودش را با
-        // مقدار جدید دوباره محاسبه می‌کنه، پس هیچ بونوسی گم نمی‌شه، فقط دوبار داده نمی‌شه).
         const upd = await pool.query(
-          'UPDATE users SET bonus_balance = bonus_balance + $1, ref_bonus_count = $2, referral_wagering_remaining = referral_wagering_remaining + $3 WHERE telegram_id = $4 AND ref_bonus_count = $5',
-          [totalGift, receivedCount + eligibleBonuses, wagerRequirement, userId, receivedCount]
+          'UPDATE users SET balance = balance + $1, ref_bonus_count = $2 WHERE telegram_id = $3 AND ref_bonus_count = $4 RETURNING balance',
+          [totalGift, receivedCount + eligibleBonuses, userId, receivedCount]
         );
         if (upd.rowCount > 0) {
+          const after = Number(upd.rows[0].balance);
+          await logGift(userId, totalGift, after, `هدیه‌ی دعوت دوستان (${eligibleBonuses}×)`);
           try {
             ctx.telegram.sendMessage(
               userId,
-              `🎁 بونوس دعوت (${eligibleBonuses}×): ${totalGift.toLocaleString()} تومان به بونوس شما اضافه شد.\n` +
-              `🔄 برای برداشت این بونوس، ابتدا باید آن را در بخش «🎮 بازی‌ها» بچرخانید (شرط گردش: ${wagerRequirement.toLocaleString()} تومان).`
+              '🎁 هدیه‌ی دعوت دوستان\n\n' +
+              `به‌خاطر ${eligibleBonuses} دعوت موفق، ${totalGift.toLocaleString()} تومان مستقیم به کیف پولت اضافه شد.\n\n` +
+              'همین الان هم قابل‌استفاده و قابل‌برداشته ✨\n' +
+              'ممنون که ووچینو⁰۱ رو به دوستات معرفی می‌کنی 🙏'
             );
           } catch (e) {}
         }
@@ -114,14 +120,6 @@ async function checkAndGrantBonuses(ctx, userId, eventType) {
   }
 }
 
-/**
- * طرح سود مادام‌العمر: به‌ازای هر خرید موفقِ کاربر دعوت‌شده، درصدی از مبلغ خرید
- * مستقیم و بلافاصله به موجودی اصلی (کیف پول) دعوت‌کننده واریز می‌شود.
- * فقط زمانی فعال است که bonus_referral_percent_active روشن باشد؛ مستقل از بونوس ثبت‌نامی دعوت است.
- * @param {object} ctx - context تلگرام
- * @param {string} buyerId - telegram_id خریدار (دعوت‌شونده)
- * @param {number} purchaseAmount - مبلغ خرید (پایه، بدون کارمزد خود سیستم)
- */
 async function checkAndGrantReferralCommission(ctx, buyerId, purchaseAmount) {
   const percentActive = (await getSetting('bonus_referral_percent_active', 'false')) === 'true';
   const percentValue = parseFloat(await getSetting('bonus_referral_percent', '0'));
@@ -136,14 +134,16 @@ async function checkAndGrantReferralCommission(ctx, buyerId, purchaseAmount) {
   const commission = Math.round(Number(purchaseAmount) * (percentValue / 100));
   if (commission <= 0) return;
 
-  await pool.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [commission, referrer.telegram_id]);
-  try {
-    const { logTransaction } = require('../db');
-    await logTransaction(referrer.telegram_id, 'bonus', commission, `سود مادام‌العمر از خرید کاربر دعوت‌شده (${percentValue}٪)`);
-  } catch (e) {}
+  const upd = await pool.query(
+    'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 RETURNING balance',
+    [commission, referrer.telegram_id]
+  );
+  const after = Number(upd.rows[0].balance);
+  await logGift(referrer.telegram_id, commission, after, `سود مادام‌العمر از خرید کاربر دعوت‌شده (${percentValue}٪)`);
   try {
     await ctx.telegram.sendMessage(referrer.telegram_id,
-      `♾️ سود دعوت شما\n\n💰 ${commission.toLocaleString('en-US')} تومان (${percentValue}٪ از خرید یکی از دعوت‌شده‌هایتان) به کیف پول شما اضافه شد.`
+      '♾️ سود دعوت شما\n\n' +
+      `💰 ${commission.toLocaleString('en-US')} تومان (${percentValue}٪ از خرید یکی از دعوت‌شده‌هات) به کیف پولت اضافه شد.`
     );
   } catch (e) {}
 }
