@@ -63,9 +63,6 @@ module.exports = function registerWalletHandlers(bot) {
       [{ text: '⎗ افزودن کارت جدید', callback_data: 'wallet_add_card' }],
       [{ text: '↺ گزارش تراکنش‌ها', callback_data: 'wallet_history' }],
       [{ text: '߷ کسب درآمد', callback_data: 'wallet_referral' }],
-      // ⚠️ عمداً دکمه‌ی اختصاصی همین صفحه، نه backToMenuButton() مشترک: اون هلپر تو کل پروژه
-      // استفاده می‌شه و متنش رو پنل ادمین کنترل می‌کنه؛ برای اینکه فقط همین صفحه عوض بشه (نه
-      // همه‌ی صفحات)، یه دکمه‌ی مستقل با همون callback_data پیش‌فرض ساخته شده
       [{ text: '➬ بازگشت به منو', callback_data: 'back_main_menu' }]
     ];
 
@@ -233,9 +230,6 @@ module.exports = function registerWalletHandlers(bot) {
         inline_keyboard: [
           [{ text: '💳 کارت به کارت', callback_data: 'deposit_card' }],
           [{ text: '🪙 ترون (تتر)', callback_data: 'deposit_crypto' }],
-          // ⚠️ موقتاً مخفی (تا تأیید اینماد): فقط همین دکمه از لیست برداشته شده؛ هندلر
-          // deposit_gateway و کل مسیر آبان گیت‌وی دست‌نخورده و متصل مانده — برای فعال‌سازی
-          // دوباره، کافیست همین یک خط را از کامنت دربیاورید
           // [{ text: '🌐 درگاه پرداخت', callback_data: 'deposit_gateway' }],
           [{ text: '🟡 بازگشت', callback_data: 'menu_wallet' }]
         ]
@@ -243,67 +237,19 @@ module.exports = function registerWalletHandlers(bot) {
     });
   });
 
+  // 💡 تغییر ۱: اول مبلغ رو می‌پرسیم، نه کارت رو!
   bot.action('deposit_card', async (ctx) => {
     ctx.answerCbQuery();
     try { await ctx.deleteMessage(); } catch (e) {}
-    const cards = require('../constants').DEPOSIT_CARDS;
-    let msg = R.HEADER + '💳 کارت به کارت\n\n✅ پرداخت شما مستقیماً و بدون واسطه به حساب رسمی مجموعه واریز می‌شود.\n💚 هزاران کاربر با خیال راحت از این روش استفاده کرده‌اند.\n\nلطفاً مبلغ واریزی خود را به یکی از کارت‌های زیر واریز کنید:\n';
-    cards.forEach(c => { msg += `💳 ${c.number} (${c.owner})\n`; });
-
+    
     const user = await getUser(ctx.from.id);
-    const myCards = await getUserCards(ctx.from.id);
-
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
-
-    if (myCards.length > 1) {
-      sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_source_card', lang: (user && user.language) || 'fa', data: {} };
-      const buttons = myCards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `dcard:${i}` }]);
-      return ctx.reply('واریز را از کدام کارت خودتان انجام می‌دهید؟', { reply_markup: { inline_keyboard: buttons } });
-    }
-
-    sessions[ctx.from.id] = { flow: 'deposit_card', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: { sourceCard: myCards[0] ? myCards[0].card_number : null } };
-    return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
-  });
-
-  bot.action(/^dcard:(\d+)$/, async (ctx) => {
-    ctx.answerCbQuery();
-    const session = sessions[ctx.from.id];
-    if (!session || session.flow !== 'deposit_card' || session.step !== 'waiting_source_card') return;
-    const myCards = await getUserCards(ctx.from.id);
-    const idx = parseInt(ctx.match[1], 10);
-    const card = myCards[idx];
-    if (!card) return ctx.reply('❌ کارت یافت نشد. دوباره تلاش کنید.');
-    try { await ctx.deleteMessage(); } catch (e) {}
-    session.data.sourceCard = card.card_number;
-    session.step = 'waiting_amount';
-    return ctx.reply('مبلغ واریزی خود را به تومان وارد کنید:');
-  });
-
-  bot.action('deposit_crypto', async (ctx) => {
-    ctx.answerCbQuery();
-    return ctx.reply('🪙 بخش ارز دیجیتال به‌زودی فعال می‌شود.', {
-      reply_markup: { inline_keyboard: [[{ text: '🟡 بازگشت', callback_data: 'wallet_deposit' }]] }
-    });
-  });
-
-  bot.action('deposit_gateway', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    const user = await getUser(ctx.from.id);
-    sessions[ctx.from.id] = { flow: 'gateway_deposit', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: {} };
-    return ctx.reply(
-      R.HEADER +
-      '🌐 پرداخت از طریق درگاه\n\n' +
-      '✅ پرداخت شما کارت‌به‌کارت و کاملاً خودکار تأیید می‌شود — نیازی به ارسال رسید نیست.\n\n' +
-      '📥 لطفاً مبلغ واریزی خود را به تومان وارد کنید:'
-    );
-  });
-
-  bot.action('wallet_cancel', async (ctx) => {
-    ctx.answerCbQuery();
-    try { await ctx.deleteMessage(); } catch (e) {}
-    delete sessions[ctx.from.id];
-    return showWalletPage(ctx);
+    sessions[ctx.from.id] = { 
+      flow: 'deposit_card', 
+      step: 'waiting_amount', 
+      lang: (user && user.language) || 'fa', 
+      data: {} 
+    };
+    return ctx.reply('لطفاً مبلغ واریزی خود را به تومان وارد کنید:');
   });
 
   // ==================== برداشت ====================
@@ -387,7 +333,6 @@ module.exports = function registerWalletHandlers(bot) {
     const user = await getUser(ctx.from.id);
     if (!user) return;
     const refLink = `https://t.me/${ctx.botInfo.username}?start=${user.telegram_id}`;
-    // متن پیشنهادی تلگرام برای وقتی کاربر لینک رو شیر می‌کنه (قبلاً این لینک فقط url داشت، بدون متن)
     const shareText = 'دوست دارم ووچینو⁰۱ رو بهت معرفی کنم؛ صرافی سریع و مطمئن برای خرید و فروش ووچر 🤝\nاز همین لینک وارد شو و شروع کن:';
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(shareText)}`;
 
@@ -413,10 +358,6 @@ module.exports = function registerWalletHandlers(bot) {
 
     const giftActive = await getSetting('bonus_referral_active', 'false');
     const giftAmount = await getSetting('bonus_referral_gift', '0');
-    // ⚠️ رفع یک ابهام واقعی: قبلاً این پیام همیشه می‌نوشت «پاداش هر دعوت»، درحالی‌که منطق واقعی
-    // (handlers/adminGifts.js + handlers/bonusEngine.js) پاداش را هر N دعوتِ موفق می‌دهد، نه هر
-    // دعوت. الان threshold واقعی از همون تنظیمات خوانده و در متن منعکس می‌شود تا با چیزی که واقعاً
-    // اتفاق می‌افتد یکی باشد.
     const giftThreshold = parseInt(await getSetting('bonus_referral_threshold', '1'), 10) || 1;
     const gift = giftActive === 'true' ? Number(giftAmount).toLocaleString('en-US') : '××××';
     const perLabel = giftThreshold > 1 ? `به‌ازای هر ${giftThreshold} دعوت موفق` : 'به‌ازای هر دعوت موفق';
@@ -441,13 +382,6 @@ module.exports = function registerWalletHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
-    // ⚠️ رفع باگ حیاتی: این درخواست واریز از Dو مسیر کاملاً جدا قابل تأییده — این دکمه (روی
-    // پیام رسید عکس) و دکمه‌ی «✅ تایید» توی لیست «درخواست‌های کیف پول» پنل ادمین
-    // (handlers/admin.js → admin_approve_). قبلاً هر دو مسیر جدا SELECT می‌کردن و جدا UPDATE،
-    // پس اگه یک ادمین از این دکمه و یکی دیگه (یا همون ادمین) از اون لیست تقریباً هم‌زمان تأیید
-    // می‌زدن، کاربر می‌تونست برای یک واریز، دو بار شارژ بشه. الان خودِ UPDATE وضعیت اول و اتمیک
-    // انجام می‌شه (AND status='pending')؛ هر دو مسیر روی همین یک شرط رقابت می‌کنن و فقط
-    // دقیقاً یکی‌شون می‌تونه برنده بشه — فرقی نمی‌کنه از کدوم دکمه باشه.
     const upd = await pool.query(
       `UPDATE wallet_requests SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
       [id]
@@ -483,7 +417,6 @@ module.exports = function registerWalletHandlers(bot) {
     if (!(await isAdminUser(ctx.from.id))) return ctx.answerCbQuery('⛔ دسترسی ندارید', { show_alert: true });
     ctx.answerCbQuery();
     const id = parseInt(ctx.match[1], 10);
-    // ⚠️ اتمیک: همون الگوی رفع ریس‌کاندیشن بالا (شرط status='pending' داخل خودِ UPDATE)
     const upd = await pool.query(
       `UPDATE wallet_requests SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING *`,
       [id]
@@ -526,7 +459,6 @@ module.exports = function registerWalletHandlers(bot) {
       const reason = ctx.message.text.trim();
       const id = session.data.id;
       delete sessions[ctx.from.id];
-      // ⚠️ اتمیک: شرط status='pending' داخل خودِ UPDATE
       const upd = await pool.query(
         "UPDATE wallet_requests SET status = 'rejected', reject_reason = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
         [id, reason]
@@ -545,7 +477,6 @@ module.exports = function registerWalletHandlers(bot) {
       const reason = ctx.message.text.trim();
       const id = session.data.id;
       delete sessions[ctx.from.id];
-      // ⚠️ اتمیک: شرط status='pending' داخل خودِ UPDATE
       const upd = await pool.query(
         "UPDATE wallet_requests SET status = 'rejected', reject_reason = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
         [id, reason]
@@ -560,14 +491,50 @@ module.exports = function registerWalletHandlers(bot) {
       return ctx.reply('❌ احراز هویت رد شد و پیام برای کاربر ارسال شد.');
     }
 
+    // 💡 تغییر ۲: وقتی کاربر مبلغ رو وارد کرد، حالا متن زیبای تو رو با قابلیت کپی نشون میدیم و میریم سراغ رسید!
     if (session.flow === 'deposit_card' && session.step === 'waiting_amount') {
       const amount = parseInt(ctx.message.text.replace(/[^0-9]/g, ''));
       if (!amount || amount <= 0) {
         return ctx.reply('❌ مبلغ نامعتبر. یک عدد وارد کنید:');
       }
+      
       session.amount = amount;
-      session.step = 'waiting_photo';
-      return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
+
+      // متن اختصاصی و شیک شما با قابلیت کپی (تگ <code>)
+      const paymentMsg = `𝑽𝒐𝒄𝒉𝒊𝒏𝒐-𝑯𝒖𝒃⁰¹
+
+🜲  پرداخت اًمن آسان 
+🃎  مبلغ وایز 15میلیون روش کارت به کارت استفاده کنید ➬
+🀙  وایز بالای 15 میلیون  روش شبا استفاده کنید ➬
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+         ⫹ <code>6219 8618 1906 8106</code> ⫺
+⫹ <code>IR840560611828006151570001</code> ⫺
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+                               ⫹⫹  علی   بهادر  ⫺⫺
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+         ⫹ <code>5047 0610 4021 6331</code> ⫺
+⫹ <code>IR660610000007001007794357</code> ⫺
+〰〰〰〰〰〰〰〰〰〰〰〰〰
+➬  پس از پرداخت رسید وایزی را ارسال کنید همان لحظه
+➬  اتوماتیک به کیف پولتون اضافه می‌شود`;
+
+      // ارسال متن با فرمت HTML برای فعال شدن قابلیت کپی
+      await ctx.reply(paymentMsg, { parse_mode: 'HTML' });
+
+      // بررسی اینکه کاربر چند تا کارت داره
+      const user = await getUser(ctx.from.id);
+      const myCards = await getUserCards(ctx.from.id);
+
+      if (myCards.length > 1) {
+        session.step = 'waiting_source_card';
+        const buttons = myCards.map((c, i) => [{ text: `💳 •••• ${c.card_number.slice(-4)}`, callback_data: `dcard:${i}` }]);
+        return ctx.reply('واریز را از کدام کارت خودتان انجام می‌دهید؟', { reply_markup: { inline_keyboard: buttons } });
+      } else {
+        session.step = 'waiting_photo';
+        session.data = session.data || {};
+        session.data.sourceCard = myCards[0] ? myCards[0].card_number : null;
+        return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
+      }
     }
 
     if (session.flow === 'gateway_deposit' && session.step === 'waiting_amount') {
@@ -578,8 +545,6 @@ module.exports = function registerWalletHandlers(bot) {
       delete sessions[ctx.from.id];
 
       const trackCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
-      // یک رکورد pending محلی قبل از صدا زدن API: هم برای نمایش در «گزارش تراکنش‌ها» مثل بقیه
-      // انواع واریز، هم گارد idempotency ما وقتی وبهوک می‌رسد (finalizeGatewayDeposit در db.js)
       const ins = await pool.query(
         `INSERT INTO wallet_requests (telegram_id, type, amount, status, created_at, tracking_code, gateway)
          VALUES ($1, 'deposit', $2, 'pending', NOW(), $3, 'aban') RETURNING id`,
@@ -638,7 +603,6 @@ module.exports = function registerWalletHandlers(bot) {
       }
       const destCard = (session.data && session.data.card) || user.card_number;
 
-      // کارمزد برداشت — از پنل قابل تنظیم (درصدی یا ثابت)؛ اگر تنظیم نشده باشد صفر است (رفتار قبلی حفظ می‌شود)
       const feeType = await getSetting('withdraw_fee_type', 'none');
       const feeValue = await getSetting('withdraw_fee_value', '0');
       const commission = calculateCommission(feeType, feeValue, amount);
@@ -685,6 +649,53 @@ module.exports = function registerWalletHandlers(bot) {
     return next();
   });
 
+  // ==================== هندلر مربوط به انتخاب کارت مبدا ====================
+  bot.action(/^dcard:(\d+)$/, async (ctx) => {
+    ctx.answerCbQuery();
+    const session = sessions[ctx.from.id];
+    if (!session || session.flow !== 'deposit_card' || session.step !== 'waiting_source_card') return;
+    
+    const myCards = await getUserCards(ctx.from.id);
+    const idx = parseInt(ctx.match[1], 10);
+    const card = myCards[idx];
+    
+    if (!card) return ctx.reply('❌ کارت یافت نشد. دوباره تلاش کنید.');
+    
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    session.data = session.data || {};
+    session.data.sourceCard = card.card_number;
+    session.step = 'waiting_photo';
+    return ctx.reply('📎 حالا رسید (فیش) پرداخت خود را همینجا ارسال کنید 📎');
+  });
+
+  bot.action('deposit_crypto', async (ctx) => {
+    ctx.answerCbQuery();
+    return ctx.reply('🪙 بخش ارز دیجیتال به‌زودی فعال می‌شود.', {
+      reply_markup: { inline_keyboard: [[{ text: '🟡 بازگشت', callback_data: 'wallet_deposit' }]] }
+    });
+  });
+
+  bot.action('deposit_gateway', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    const user = await getUser(ctx.from.id);
+    sessions[ctx.from.id] = { flow: 'gateway_deposit', step: 'waiting_amount', lang: (user && user.language) || 'fa', data: {} };
+    return ctx.reply(
+      R.HEADER +
+      '🌐 پرداخت از طریق درگاه\n\n' +
+      '✅ پرداخت شما کارت‌به‌کارت و کاملاً خودکار تأیید می‌شود — نیازی به ارسال رسید نیست.\n\n' +
+      '📥 لطفاً مبلغ واریزی خود را به تومان وارد کنید:'
+    );
+  });
+
+  bot.action('wallet_cancel', async (ctx) => {
+    ctx.answerCbQuery();
+    try { await ctx.deleteMessage(); } catch (e) {}
+    delete sessions[ctx.from.id];
+    return showWalletPage(ctx);
+  });
+
   // ==================== دریافت عکس رسید / مدارک ====================
   bot.on('photo', async (ctx, next) => {
     const session = sessions[ctx.from.id];
@@ -707,7 +718,6 @@ module.exports = function registerWalletHandlers(bot) {
 
         delete sessions[ctx.from.id];
 
-        // پیام تأیید دریافت رسید برای مشتری (طبق طرح تأییدشده)
         ctx.reply(
           R.HEADER +
           `📋 تأیید دریافت رسید\n\n` +
@@ -720,7 +730,6 @@ module.exports = function registerWalletHandlers(bot) {
           { parse_mode: 'Markdown' }
         );
 
-        // ارسال رسید به همه ادمین‌ها همراه دکمه‌های تأیید/ردِ همین درخواست
         const ids = await adminIdsList();
         const caption =
           `📥 رسید واریز جدید\n` +
