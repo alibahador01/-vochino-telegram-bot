@@ -23,7 +23,6 @@ module.exports = function registerProfileHandlers(bot) {
       '📱 **شماره:** ' + (user.phone || '-') + '\n' +
       '💳 **کارت:** ' + (user.card_number || '-') + '\n' +
       '💰 **موجودی جیب:** ' + Number(user.balance).toLocaleString('en-US') + ' تومان\n' +
-      '🧩 **موجودی بونوس:** ' + Number(user.bonus_balance).toLocaleString('en-US') + ' تومان\n' +
       '👥 **زیرمجموعه:** ' + referrals + ' نفر\n' +
       '🏅 **سطح کاربری:** ' + userLevel + '\n';
 
