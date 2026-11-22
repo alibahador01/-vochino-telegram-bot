@@ -16,7 +16,6 @@ const AntiSleepBot = require('./AntiSleepBot');
 const { calculateSellPayout } = require('./exchangeEngine');
 const exchangePolling = require('./exchangePolling');
 const abanGateway = require('./abanGateway');
-const createWebAppApi = require('./webapp-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,12 +23,14 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// ==================== مسیرهای سلامت ====================
 app.get('/', (req, res) => res.send('Bot is alive and connected to Supabase!'));
 app.get('/health', (req, res) => res.send('OK'));
 app.get('/ping', (req, res) => res.send('PONG'));
 app.get('/keep-alive', (req, res) => res.send('ALIVE'));
 app.get('/api/status', (req, res) => res.json({ status: 'ok' }));
 
+// ==================== مسیر سابسکرایب VPN ====================
 app.get('/sub/:userId', async (req, res) => {
   const userId = req.params.userId;
   try {
@@ -70,25 +71,34 @@ app.get('/sub/:userId', async (req, res) => {
   }
 });
 
+// ==================== API واقعی برای داشبورد سایت ====================
+// مسیر قدیمی داشبورد با userId قابل حدس، احراز هویت نداشت؛ عمداً غیرفعال است.
 app.get('/api/dashboard/:userId', (_req, res) => {
   return res.status(410).json({
     error: { code: 'ENDPOINT_RETIRED', message: 'Use authenticated Mini App API.' }
   });
 });
 
+// ==================== وبهوک uWallet ====================
+// طبق مستندات uWallet: هر تراکنشی که به وضعیت نهایی (confirm/reject) برسد اینجا پوش می‌شود.
+// همیشه باید 200 برگردانیم، وگرنه uWallet تا ۳ بار دیگر (۱ دقیقه بعد، ۱ ساعت بعد) دوباره تلاش می‌کند
+// که همان تلاش‌های تکراری دقیقاً همان چیزی است که finalizeSellOrderUwallet (اتمیک) در برابرش ایمن است.
 app.post('/webhook/uwallet', express.json(), async (req, res) => {
-  res.status(200).send('OK');
+  res.status(200).send('OK'); // طبق مستندات: پاسخ همیشه باید فوری 200 باشد
   try {
     const tx = req.body;
     if (!tx || !tx.id || !tx.status) return;
-    if (tx.status !== 'confirm' && tx.status !== 'reject') return;
+    if (tx.status !== 'confirm' && tx.status !== 'reject') return; // فقط وضعیت نهایی پردازش می‌شود
 
     const sellOrder = await getSellOrderByProviderTxId(tx.id);
     if (sellOrder) {
+      // ممکن است این سفارش قبلاً توسط exchangePolling.js نهایی شده باشد — finalizeSellOrderUwallet
+      // به‌صورت اتمیک این را چک می‌کند و در آن صورت applied=false برمی‌گرداند (بدون شارژ دوباره).
       const product = await getSellProductByKey(sellOrder.product_type);
       const { commission, payout } = calculateSellPayout(Number(sellOrder.amount || 0), product || {});
       const outcome = tx.status === 'confirm' ? 'approved' : 'rejected';
 
+      // کارمزد دقیق uWallet (fee) رو ترجیح می‌دیم؛ وبهوک طبق مستندات این فیلد رو مستقیم می‌فرسته
       const providerCost = tx.fee !== undefined ? Number(tx.fee) : (tx.receive !== undefined ? Number(tx.receive) : 0);
       const fin = await finalizeSellOrderUwallet(sellOrder.id, {
         outcome,
@@ -116,6 +126,8 @@ app.post('/webhook/uwallet', express.json(), async (req, res) => {
       return;
     }
 
+    // اگر مربوط به سفارش فروشی نبود، شاید یک سفارش خرید (create voucher) باشد — خرید همگام است
+    // و معمولاً قبلاً completed شده؛ این فقط برای لاگ/رهگیری دیرهنگام است، نیازی به اقدام نیست.
     const buyOrder = await getOrderByProviderTxId(tx.id);
     if (buyOrder) {
       console.log(`ℹ️ وبهوک uWallet برای سفارش خرید ${buyOrder.tracking_code} دریافت شد (status=${tx.status}).`);
@@ -125,8 +137,16 @@ app.post('/webhook/uwallet', express.json(), async (req, res) => {
   }
 });
 
+// ==================== وبهوک آبان گیت‌وی (شارژ خودکار کیف پول از درگاه پرداخت) ====================
+// درباره‌ی امضا: صفحه‌ی «مستندات API» که برای این قابلیت فرستاده شد فقط API فاکتورها را مستند
+// می‌کند — هیچ بخش/هدر امضای وب‌هوکی در آن نیست. به‌جای حدس‌زدن یک الگوریتم امضا (که اگر غلط
+// باشد از نبودنش هم خطرناک‌تره)، دقیقاً همان الگویی پیاده شده که بسته‌ی رسمی PHP آبان توصیه
+// می‌کند: به بدنه‌ی وب‌هوک اعتماد نکن، فقط محرک بگیرش و بلافاصله با توکن Bearer واقعی‌مان از
+// endpoint یک‌بارمصرف verify تأیید بگیر. امنیتش از توکن واقعی ماست، و idempotency یک‌بارمصرف
+// verify (۴۰۹ already_verified) هم رایگان میاد — روی همین finalizeGatewayDeposit یک گارد محلی
+// دوم هم دارد (db.js)، دقیقاً مثل finalizeSellOrderUwallet برای وبهوک uWallet بالا.
 app.post('/webhook/aban', express.json(), async (req, res) => {
-  res.status(200).send('OK');
+  res.status(200).send('OK'); // طبق همان منطق وبهوک uWallet بالا: همیشه فوری 200، وگرنه آبان دوباره تلاش می‌کند
   try {
     const body = req.body || {};
     const invoiceId = body.invoice_id || (body.data && body.data.invoice_id) || (body.invoice && body.invoice.invoice_id);
@@ -134,9 +154,12 @@ app.post('/webhook/aban', express.json(), async (req, res) => {
 
     const reqRow = await getWalletRequestByInvoiceId(invoiceId);
     if (!reqRow) { console.log('⚠️ وبهوک آبان برای فاکتور ناشناخته:', invoiceId); return; }
-    if (reqRow.gateway_credited) return;
+    if (reqRow.gateway_credited) return; // قبلاً شارژ شده — کاری نیست (وبهوک تکراری)
 
     const verify = await abanGateway.verifyInvoice(invoiceId);
+    // هم verified:true (اولین تأیید موفق) و هم alreadyVerified (مثلاً وبهوک قبلی رسیده ولی بین
+    // verify موفق و شارژ کیف‌پول کرش کرده بودیم) باید منجر به شارژ شوند — چون reqRow.gateway_credited
+    // بالا false بود، یعنی هنوز خودمان شارژش نکرده‌ایم، صرف‌نظر از اینکه آبان قبلاً verify کرده یا نه.
     if (!verify.success && !verify.alreadyVerified) {
       console.log(`ℹ️ وبهوک آبان برای فاکتور ${invoiceId}: ${verify.error || 'هنوز تأیید نشده'}`);
       return;
@@ -160,6 +183,7 @@ app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
+// ==================== ضدخواب ====================
 if (process.env.NODE_ENV !== 'development') {
   const antiSleep = new AntiSleepBot(
     process.env.RENDER_EXTERNAL_URL ||
@@ -175,16 +199,29 @@ if (process.env.NODE_ENV !== 'development') {
   }, 14 * 60 * 1000);
 }
 
+// ==================== ربات تلگرام ====================
 const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.use(session());
 
+// ==================== هندلرهای صرافی (دست‌نخورده) ====================
+// ⚠️ registration.js اکنون کل مسیر ورود (زبان ← قوانین ← شماره ← نام ← کد ملی ← کارت ← بررسی ← نتیجه)
+// را یکپارچه پیاده می‌کند؛ فایل جداگانه‌ی handlers/verification.js (فلوی قدیمیِ session-محور که وسط
+// خرید/فروش فعال می‌شد) حذف شده — سقف روزانه‌ی آن اکنون در handlers/limits.js است (بدون تغییر منطق).
 require('./handlers/registration')(bot);
+// ⚠️ باید زودتر از هندلرهای سشن‌محور (خرید/فروش/...) ثبت شود تا دکمه‌ی ☰ Home همیشه،
+// حتی وسط یک فلوی نیمه‌کاره، کار کند
 require('./handlers/homeMenu')(bot);
 require('./handlers/wallet')(bot);
 require('./handlers/buy')(bot);
 require('./handlers/sell')(bot);
+// ⚠️ بخش «بازی‌ها/بازی بونوس» (handlers/game.js) به طور کامل از ربات حذف شد —
+// دکمه‌ی آن در منوی اصلی اکنون مستقیم به مینی‌آپ می‌رود (constants.js → key: 'miniapp').
+// ⚠️ orderAdmin باید قبل از admin ثبت شود
 require('./handlers/orderAdmin')(bot);
 require('./handlers/admin')(bot);
+// ⚠️ handlers/adminBonus.js با handlers/adminGifts.js جایگزین شد: پنل «مدیریت هدایا»ی واحد
+// (هدیه‌ی ثبت‌نام/خرید اول/دعوت نقدی/سود مادام‌العمر دعوت + هدیه‌ی دستی به کاربران دلخواه +
+// هدیه‌ی همگانی) — همان رفع باگِ قبلی (این فایل باید require شود) همچنان برقرار است.
 require('./handlers/adminGifts')(bot);
 require('./handlers/misc')(bot);
 require('./handlers/aiSupport')(bot);
@@ -193,8 +230,10 @@ const registerVpnHandlers = require('./handlers/vpn');
 registerVpnHandlers(bot);
 require('./handlers/currencyFeed')(bot);
 
+// ==================== ماژول هوچینو⁰¹ (کاملاً مستقل) ====================
 require('./hochino_module')(bot);
 
+// ==================== مدیریت خطا ====================
 process.on('unhandledRejection', (err) => {
   console.log('UNHANDLED REJECTION:', err.message);
 });
@@ -205,6 +244,9 @@ process.on('uncaughtException', (err) => {
 });
 
 bot.catch((err, ctx) => {
+  // ⚠️ قبلاً فقط err.message لاگ می‌شد — برای باگ «message is too long» این کافی نیست، چون
+  // نمی‌فهمیم کدوم ctx.reply/sendMessage تو کدوم فایل این متن طولانی رو ساخته. الان stack
+  // trace کامل هم چاپ می‌شه تا خط دقیق مشخص بشه.
   console.log('BOT ERROR:', err.message);
   console.log(err.stack);
   try {
@@ -220,15 +262,16 @@ bot.catch((err, ctx) => {
   } catch (e) {}
 });
 
+// ==================== راه‌اندازی ====================
 async function init() {
   await initDb();
 
-  app.use('/api', createWebAppApi({ bot }));
-  app.use('/api', (_req, res) => {
-    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'API endpoint not found.' } });
-  });
+  // ⚠️ مینی‌آپ کاملاً از ربات جدا شد — دیگر هیچ API ای زیر مسیر /api سرو نمی‌شود.
   app.get('*', (_req, res) => res.send('Vochino Bot Active'));
 
+  // ⚠️ رفع باگ ریس بین initDb() و سلامت‌سنجی VPN: این دیگه زمان require (بالای فایل) اجرا
+  // نمی‌شه، بلکه فقط بعد از تمام‌شدن initDb() — همون چیزی که باعث خطای تکراری «افزودن ستون
+  // vpn_servers» می‌شد.
   registerVpnHandlers.startVpnHealthCheck(bot);
 
   const cacheLoaded = await loadTextsCache();
@@ -242,6 +285,7 @@ async function init() {
     console.log('خطا در ارسال نرخ:', e.message);
   }
 
+  // پولینگ ۳۰ ثانیه‌ای uWallet برای سفارش‌های فروشِ pending (باگ #۱ از سند — exchangePolling.js)
   exchangePolling.start(bot);
 
   bot.launch();
