@@ -68,6 +68,32 @@ function translateError(data, httpStatus, rawText) {
   return { code: isNaN(code) ? null : code, message: msg };
 }
 
+// ==================== باز کردن پوشش احتمالی پاسخ uWallet ====================
+// ⚠️ باگ ریشه‌ای پیدا شده (همین الان، نه فرضی): خودِ تست curl ادمین (کامنت بالای translateError)
+// نشون داد یه پاسخ «موفق» uWallet می‌تونه به‌شکل {"message":200,"data":{...امکان دارد...}} باشه —
+// یعنی فیلدهای واقعی (code/transactionId/status/آرایه‌ی موجودی‌ها) ممکنه یک لایه پایین‌تر، داخل
+// data.data باشن، نه مستقیم روی data. تا امروز createVoucher/useVoucher/getTransactionStatus/
+// getWalletBalances همیشه مستقیم روی data می‌خوندن — دقیقاً همین چیزی که احتمالاً باعث شده
+// «خرید/فروش واقعاً رو uWallet انجام شد ولی ربات گفت پاسخ ناقصه و افتاد رو حالت دستی» (چون
+// data.code/data.transactionId/data.status همیشه undefined بودن، نه چون واقعاً خالی بودن) —
+// و همین باعث شده admin_uwallet_coins همیشه «لیست خالیه» نشون بده با اینکه UUSD واقعاً تست شده.
+// این دو تابع هر دو حالت را امتحان می‌کنند: اول مستقیم خودِ آبجکت/آرایه، و فقط اگر فیلد/آرایه‌ی
+// لازم آنجا نبود ولی data.data داشتش، از اون استفاده می‌کنن. یعنی اگه فرض «بدون پوشش» از اول درست
+// بوده، هیچ رفتاری عوض نمی‌شه؛ اگه غلط بوده (که شواهد نشون می‌ده همینه)، از الان درست پارس می‌شه.
+function unwrapObject(data, requiredKeys) {
+  if (!data || typeof data !== 'object') return data;
+  if (requiredKeys.some(k => data[k] !== undefined)) return data;
+  if (data.data && typeof data.data === 'object' && requiredKeys.some(k => data.data[k] !== undefined)) {
+    return data.data;
+  }
+  return data;
+}
+function unwrapArray(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && Array.isArray(data.data)) return data.data;
+  return null;
+}
+
 // ⚠️ .trim() اینجا هم (نه فقط موقع ذخیره تو admin.js): اگه یه توکن/base_url قبلاً با فاصله یا
 // خط جدید اضافه تو دیتابیس ذخیره شده، نیازی به حذف و دوباره‌ثبت صرافی نیست — همینجا خودش پاک می‌شه.
 function baseUrlOf(apiSource) {
@@ -125,11 +151,15 @@ async function createVoucher(apiSource, { coin, amount }) {
     amount: String(amount)
   });
   if (!result.success) return result;
-  const data = result.data || {};
+  const data = unwrapObject(result.data || {}, ['code', 'transactionId']);
   if (!data.code || !data.transactionId) {
-    return { success: false, error: 'پاسخ ساخت ووچر از uWallet ناقص بود (بدون code یا transactionId).', raw: data };
+    // ⚠️ همیشه بدنه‌ی خام را لاگ کن: این دقیقاً جایی‌ست که اگه uWallet ووچر واقعی ساخته باشه
+    // (پول/موجودی ما نزدشون واقعاً مصرف شده) ولی ما نتونیم کدش رو پیدا کنیم، تنها راه عدم گم‌شدن
+    // کد همینه — بدون این لاگ، کد ووچر ساخته‌شده برای همیشه گم می‌شه.
+    console.log('❌ [uWallet] پاسخ ساخت ووچر ناقص/فرمت غیرمنتظره — بدنه‌ی خام کامل:', JSON.stringify(result.data));
+    return { success: false, error: 'پاسخ ساخت ووچر از uWallet ناقص بود (بدون code یا transactionId). بدنه‌ی خام در لاگ سرور ثبت شد.', raw: result.data };
   }
-  return { success: true, transactionId: data.transactionId, code: data.code, raw: data };
+  return { success: true, transactionId: data.transactionId, code: data.code, raw: result.data };
 }
 
 // ==================== فعال‌سازی ووچر (سمت فروش ما: کد ووچر مشتری را روی uWallet فعال می‌کنیم) ====================
@@ -137,9 +167,12 @@ async function createVoucher(apiSource, { coin, amount }) {
 async function useVoucher(apiSource, { coin, code }) {
   const result = await callUwallet(apiSource, 'POST', '/v1/voucher/use', { coin, code });
   if (!result.success) return result;
-  const data = result.data || {};
+  const data = unwrapObject(result.data || {}, ['transactionId', 'status']);
   if (!data.transactionId || !data.status) {
-    return { success: false, error: 'پاسخ فعال‌سازی ووچر از uWallet ناقص بود (بدون status یا transactionId).', raw: data };
+    // ⚠️ همیشه بدنه‌ی خام را لاگ کن: این دقیقاً جایی‌ست که ممکنه ووچر مشتری روی uWallet واقعاً
+    // فعال/فروخته شده باشه ولی ما نتونیم status رو تشخیص بدیم — بدون این لاگ هیچ‌وقت نمی‌فهمیم.
+    console.log('❌ [uWallet] پاسخ فعال‌سازی ووچر ناقص/فرمت غیرمنتظره — بدنه‌ی خام کامل:', JSON.stringify(result.data));
+    return { success: false, error: 'پاسخ فعال‌سازی ووچر از uWallet ناقص بود (بدون status یا transactionId). بدنه‌ی خام در لاگ سرور ثبت شد.', raw: result.data };
   }
   return {
     success: true,
@@ -147,7 +180,7 @@ async function useVoucher(apiSource, { coin, code }) {
     transactionId: data.transactionId,
     receive: data.receive !== undefined ? Number(data.receive) : undefined,
     batchId: data.batchId,
-    raw: data
+    raw: result.data
   };
 }
 
@@ -160,11 +193,15 @@ async function getTransactionStatus(apiSource, transactionId) {
     '/v1/transaction?id=' + encodeURIComponent(transactionId)
   );
   if (!result.success) return result;
-  // طبق مستندات، GET /v1/transaction آرایه برمی‌گرداند؛ وقتی با id فیلتر می‌شود انتظار یک آیتم داریم
-  const data = result.data;
-  const row = Array.isArray(data) ? data[0] : data;
+  // طبق مستندات، GET /v1/transaction آرایه برمی‌گرداند؛ وقتی با id فیلتر می‌شود انتظار یک آیتم داریم.
+  // ⚠️ اگه پاسخ داخل پوشش {message,data:[...]} بیاد، unwrapArray همون آرایه‌ی داخلی رو پیدا می‌کنه؛
+  // بدون این، یه تراکنش واقعاً pending/confirm‌شده همیشه «پیدا نشد» گزارش می‌شد و پولینگ ۳۰ثانیه‌ای
+  // (exchangePolling.js) هیچ‌وقت نمی‌تونست نهایی‌اش کنه.
+  const arr = unwrapArray(result.data);
+  const row = arr ? arr[0] : unwrapObject(result.data, ['status']);
   if (!row || !row.status) {
-    return { success: false, error: 'تراکنش با این شناسه روی uWallet پیدا نشد.' };
+    console.log('❌ [uWallet] GET /v1/transaction — تراکنش پیدا نشد یا فرمت غیرمنتظره — بدنه‌ی خام کامل:', JSON.stringify(result.data));
+    return { success: false, error: 'تراکنش با این شناسه روی uWallet پیدا نشد.', raw: result.data };
   }
   return {
     success: true,
@@ -184,7 +221,15 @@ async function getTransactionStatus(apiSource, transactionId) {
 async function getWalletBalances(apiSource) {
   const result = await callUwallet(apiSource, 'GET', '/v1/wallet');
   if (!result.success) return result;
-  const rows = Array.isArray(result.data) ? result.data : [];
+  // ⚠️ همون رفع باگ unwrap بالا: قبلاً اگه پاسخ داخل پوشش {message,data:[...]} می‌اومد (دقیقاً
+  // همون شکلی که تست curl ادمین یک‌بار نشونش داد)، Array.isArray(result.data) همیشه false بود
+  // (چون result.data خودش یه object بود نه array) و لیست همیشه «خالی» گزارش می‌شد — حتی وقتی
+  // حساب واقعاً موجودی/تراکنش داشت. این دقیقاً همونیه که باعث شده admin_uwallet_coins همیشه
+  // «لیست خالیه» نشون بده.
+  const rows = unwrapArray(result.data) || [];
+  if (rows.length === 0) {
+    console.log('ℹ️ [uWallet] GET /v1/wallet آرایه‌ی خالی برگرداند — بدنه‌ی خام کامل (برای تشخیص باگ پارس در برابر خالی‌بودن واقعی):', JSON.stringify(result.data));
+  }
   return { success: true, balances: rows, raw: result.data };
 }
 
