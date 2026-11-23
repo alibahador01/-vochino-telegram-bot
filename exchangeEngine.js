@@ -209,7 +209,13 @@ async function callProviderApi(apiSource, action, payload) {
       const r = await uwallet.createVoucher(apiSource, { coin, amount: apiAmount });
       // ⚠️ errorCode رو هم برمی‌گردونیم (نه فقط پیام) تا caller (tryAutoFulfillBuy) بتونه دقیقاً
       // تشخیص بده خطا از نوع «موجودی کافی نیست» (کد ۱۰۰۲۲ طبق مستندات uWallet) بوده یا نه
-      if (!r.success) return { success: false, error: r.error, errorCode: r.errorCode };
+      // ⚠️ رفع باگ «راست خام گم می‌شد»: قبلاً r.raw اینجا دور ریخته می‌شد و caller فقط پیام کلی
+      // «ناقص بود» رو می‌دید، نه بدنه‌ی واقعی پاسخ uWallet — دقیقاً همون چیزی که تشخیص این باگ رو
+      // سخت کرده بود. الان raw هم برمی‌گرده تا اگه یه روز دیگه چیزی غیرمنتظره برگشت، فوری تو لاگ دیده بشه.
+      if (!r.success) {
+        console.log(`❌ [uWallet/createVoucher] شکست — کوین: ${coin} — بدنه خام:`, JSON.stringify(r.raw));
+        return { success: false, error: r.error, errorCode: r.errorCode, raw: r.raw };
+      }
       return {
         success: true,
         providerTxId: r.transactionId,
@@ -224,7 +230,12 @@ async function callProviderApi(apiSource, action, payload) {
       // فروش کاربر به ما = ما کد ووچر مشتری را روی uWallet فعال (use) می‌کنیم
       const voucherCode = (payload.meta && payload.meta.voucherCode) || '';
       const r = await uwallet.useVoucher(apiSource, { coin, code: voucherCode });
-      if (!r.success) return { success: false, error: r.error, errorCode: r.errorCode };
+      // ⚠️ همون رفع باگ «راست خام گم می‌شد» بالا (شاخه‌ی خرید): اگه ووچر مشتری واقعاً روی uWallet
+      // فعال/فروخته شده باشه ولی ما نتونیم parse کنیم، این لاگ تنها راه دیدن بدنه‌ی واقعیه.
+      if (!r.success) {
+        console.log(`❌ [uWallet/useVoucher] شکست — کوین: ${coin} — بدنه خام:`, JSON.stringify(r.raw));
+        return { success: false, error: r.error, errorCode: r.errorCode, raw: r.raw };
+      }
 
       // ⚠️ جداسازی دقیق کارمزد uWallet از کارمزد پنل: پاسخ همزمان POST /voucher/use فقط
       // receive برمی‌گردونه، نه fee یا amount (طبق مستندات رسمی uWallet). برای این‌که
