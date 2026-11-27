@@ -20,6 +20,14 @@ const { isOnlineBuyProduct } = require('./priceService');
 const { checkAndGrantBonuses, checkAndGrantReferralCommission } = require('./handlers/bonusEngine');
 const { ADMIN_IDS } = require('./constants');
 
+function escapeHtml(val) {
+  return String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // Premium Voucher طبق سیاست محصول باید در تمام کانال‌ها دستی تحویل شود؛
 // یوووچر و هات‌ووچر همچنان از زنجیره‌ی API و تنظیم اجرای خودکار پنل استفاده می‌کنند.
 const MANUAL_ONLY_PRODUCT_KEYS = new Set(['premium_voucher', 'premiumvoucher']);
@@ -482,10 +490,13 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
       } catch (e) {}
       if (bot) {
         try {
-          await bot.telegram.sendMessage(telegramId,
-            `🎉 سفارش شما به‌صورت خودکار انجام شد!\n🆔 ${trackingCode}` +
-            (result.deliveredCode ? `\n📦 کد ووچر:\n${result.deliveredCode}` : '') +
-            (result.deliveredHash ? `\n🔐 هش ووچر:\n${result.deliveredHash}` : '')
+          await bot.telegram.sendMessage(
+            telegramId,
+            `🎉 سفارش شما به‌صورت خودکار انجام شد!\n` +
+            `🆔 <code>${escapeHtml(trackingCode)}</code>` +
+            (result.deliveredCode ? `\n📦 کد ووچر:\n<code>${escapeHtml(result.deliveredCode)}</code>` : '') +
+            (result.deliveredHash ? `\n🔐 هش ووچر:\n<code>${escapeHtml(result.deliveredHash)}</code>` : ''),
+            { parse_mode: 'HTML' }
           );
         } catch (e) {}
         // ⚠️ همون رفع باگ «بونوس اولین خرید هیچ‌وقت صدا زده نمی‌شد» — برای مسیر خودکار (API) هم لازمه،
