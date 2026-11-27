@@ -126,7 +126,11 @@ module.exports = function registerSellHandlers(bot) {
     }
 
     const trackingCode = 'VOC-' + Math.floor(1000000 + Math.random() * 9000000);
-    const estimatedAmount = Number(session.data.unitPrice || 0);
+    const rawUnitPrice = Number(session.data.unitPrice || 0);
+    // ستون amount در جدول sell_orders از نوع عدد صحیح (INTEGER) است؛ اگر نرخ اعشاری مثل
+    // 0.0975 مستقیماً به پارامتر $4 داده شود، Postgres خطای 22P02 می‌دهد. بنابراین مقدار
+    // ستون amount را به عدد صحیح گرد می‌کنیم تا INSERT همیشه معتبر باشد.
+    const estimatedAmount = Number.isFinite(rawUnitPrice) && rawUnitPrice > 0 ? Math.round(rawUnitPrice) : 0;
     const productKey = session.data.productType;
 
     try {
@@ -154,7 +158,7 @@ module.exports = function registerSellHandlers(bot) {
       try {
         const product = await getSellProductByKey(productKey);
         autoResult = await tryAutoFulfillSell(
-          { sellOrderId: orderId, telegramId: ctx.from.id, productKey, amount: estimatedAmount, product, trackingCode, voucherCode },
+          { sellOrderId: orderId, telegramId: ctx.from.id, productKey, amount: rawUnitPrice, product, trackingCode, voucherCode },
           bot
         );
       } catch (e) { console.error('خطا در اجرای خودکار سفارش فروش:', e.message); }
