@@ -51,7 +51,18 @@ function computeRealSellBaseAmountToman(coin, receiveAmount, referenceUnitPriceT
   const receive = Number(receiveAmount);
   if (!receive || receive <= 0 || isNaN(receive)) return null;
   if (RIAL_PEGGED_COINS.includes(coin)) {
-    return receive / 10;
+    // ⚠️ فاز سودِ هات‌ووچر (سمت فروش): receive همیشه «تعداد واحد خام» کد بازخریدی‌ست (۱ واحد
+    // خام = ۱ ریال = ۰.۱ تومان، طبق پگ ثابت بالای فایل). قبلاً همیشه receive/10 برمی‌گشت —
+    // یعنی دقیقاً همان پگ خام بدون هیچ سود. الان referenceUnitPriceToman همان قیمت زنده‌ی
+    // hot_sell است (caller آن را از priceService، به همان واحدِ «تومان به ازای ۱ واحد خام»،
+    // از قبل می‌خواند و پاس می‌دهد — دقیقاً مثل hot_buy سمت خرید). چون hot_sell همیشه کمی
+    // کمتر از ۰.۱ ست می‌شود (مثلاً ۰.۰۹۷۵)، receive * hot_sell همیشه کمی کمتر از receive/10
+    // تومان به کاربر می‌دهد — همان فاصله‌ی خرید/فروشِ صرافی، این‌بار سمت فروش.
+    // فال‌بک امن: اگر قیمت زنده (هنوز) در دسترس نبود، دقیقاً مثل قبل peg خام بدون سود استفاده
+    // می‌شود (هرگز حدسِ پرریسک‌تر از قبل، فقط محافظه‌کارانه‌تر).
+    const sellRate = Number(referenceUnitPriceToman);
+    if (!sellRate || sellRate <= 0 || isNaN(sellRate)) return receive / 10;
+    return receive * sellRate;
   }
   const unitPrice = Number(referenceUnitPriceToman);
   if (!unitPrice || unitPrice <= 0 || isNaN(unitPrice)) return null;
@@ -224,7 +235,30 @@ async function callProviderApi(apiSource, action, payload) {
       // ⚠️ RIAL_PEGGED_COINS الان بالای فایل (منبع حقیقت مشترک با سمت فروش) تعریف شده — اینجا دیگر تعریف محلی ندارد.
       let apiAmount;
       if (RIAL_PEGGED_COINS.includes(coin)) {
-        apiAmount = Number(payload.amount) * 10;
+        // ⚠️ فاز سودِ هات‌ووچر (سمت خرید) — جایگزینِ فرمول قدیمیِ «amount*10» (که دقیقاً پگ خام
+        // بدون هیچ سودی بود). منطق: مثل یو ووچر، ابتدا تعداد «واحد» را از روی قیمت زنده‌ی
+        // hot_buy حساب می‌کنیم (unitsFromAmount، دقیقاً همان تابعی که برای UUSD استفاده می‌شود)،
+        // سپس چون در پگ ثابت پروژه «۱ واحد خام هات‌ووچر = ۱ ریال» است، همان عدد مستقیماً به
+        // uWallet فرستاده می‌شود — بدون ضرب دوباره در ۱۰.
+        // 🚨 نکته‌ی حیاتی (رفع یک اشتباه واقعی که حین پیاده‌سازی پیدا شد، نه فرضی): اگر اینجا
+        // «units * 10» بشود (یعنی دوباره در ۱۰ ضرب شود)، چون hot_buy خودش از قبل در مقیاس
+        // «تومان به ازای ۱ واحد خام» ست می‌شود (مثلاً ۰.۱۰۷، یعنی کمی بالاتر از نرخ واقعیِ ۰.۱)،
+        // نتیجه ۱۰ برابر بیشتر از ارزش واقعی پول کاربر ووچر صادر می‌کند (ضررِ فاجعه‌بار، دقیقاً
+        // از جنس باگ ۲۷۱,۴۶۷ تومانی قبلی، نه سود). محاسبه‌ی عددی (برای ۲۵,۰۰۰ تومان با
+        // hot_buy=0.107): بدون ضرب در ۱۰ → ارزش واقعی کد ≈ ۲۳,۳۶۴ تومان (~۶.۵٪ سود، درست)؛
+        // با ضرب در ۱۰ → ارزش واقعی کد ≈ ۲۳۳,۶۴۴ تومان (~۹.۳۴ برابر بیشتر از پول کاربر، فاجعه).
+        // پس عمداً اینجا هیچ «*10» نیست.
+        const hotBuyPrice = Number(payload.unitPrice) || 0;
+        if (!hotBuyPrice || hotBuyPrice <= 0) {
+          return { success: false, error: 'قیمت زنده‌ی خرید (hot_buy) برای HotVoucher در دسترس نیست؛ محاسبه‌ی سود ممکن نیست.' };
+        }
+        const rawUnits = unitsFromAmount(payload.amount, hotBuyPrice);
+        if (!rawUnits || rawUnits < 1) {
+          return { success: false, error: `مقدار محاسبه‌شده برای uWallet معتبر نیست (قیمت واحد hot_buy: ${hotBuyPrice})` };
+        }
+        // رو به پایین گرد می‌کنیم: هم چون واحد خام کسری معنی ندارد (۱ واحد = ۱ ریال، کوچک‌ترین
+        // واحد تقسیم‌ناپذیر)، هم طبق همان قاعده‌ی همیشگی پروژه که هرگز بیشتر از پول کاربر صادر نشود.
+        apiAmount = Math.floor(rawUnits);
       } else if (payload.isOnlinePriced) {
         // ⚠️ یو ووچر/پریمیوم/پی‌اس قیمت آنلاین دارن: کاربر مبلغ «تومان» وارد می‌کند، ولی uWallet
         // مقدار «واحد کوین» (مثلاً USD برای UUSD) می‌خواهد. پس مقدار = مبلغ ÷ قیمت واحد آنلاین،
@@ -399,13 +433,19 @@ async function tryAutoFulfillBuy({ orderId, telegramId, productKey, amount, trac
 
   // محصولات با قیمت آنلاین (یو/پریمیوم/پی‌اس ووچر): مقدار واحد کوین باید با قیمت واحد آنلاین
   // محاسبه شود، نه مبلغ تومانی خام. قیمت واحد همین لحظه خوانده می‌شود (price-service، با فال‌بک دستی).
+  // ⚠️ هات ووچر عمداً در isOnlineBuyProduct نیست (priceService.js توضیح داده چرا — حداقل خرید
+  // زیر ۱ واحد هم مجاز است)، ولی از فاز سودِ هات‌ووچر به بعد، او هم به یک قیمت زنده (hot_buy)
+  // برای محاسبه‌ی سود نیاز دارد — پس همان fetch بالا، جدا و اضافه، برای کوین‌های RIAL_PEGGED_COINS
+  // هم انجام می‌شود (منطق خودِ تبدیل amount→apiAmount داخل callProviderApi/RIAL_PEGGED_COINS است؛
+  // اینجا فقط قیمتش را می‌خوانیم و در payload.unitPrice پاس می‌دهیم).
   const isOnlinePriced = isOnlineBuyProduct(productKey);
+  const isRialPegged = !!(product && RIAL_PEGGED_COINS.includes(product.coin_code));
   let onlineUnitPrice = 0;
-  if (isOnlinePriced && product) {
+  if ((isOnlinePriced || isRialPegged) && product) {
     const { price } = await getEffectiveUnitPrice(product, 'buy');
     onlineUnitPrice = Number(price) || 0;
     if (onlineUnitPrice <= 0) {
-      console.log(`⚠️ [خرید خودکار] قیمت واحد آنلاین برای «${productKey}» معتبر نیست — سفارش ${trackingCode} دستی می‌ماند.`);
+      console.log(`⚠️ [خرید خودکار] قیمت واحد آنلاین/hot_buy برای «${productKey}» معتبر نیست — سفارش ${trackingCode} دستی می‌ماند.`);
       return { executed: false, reason: 'no_unit_price' };
     }
   }
