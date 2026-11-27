@@ -56,6 +56,15 @@ function cosmeticTrailingDigits(key, maxValue = 600, periodMs = 5 * 60 * 1000) {
 function localDecoratePrice(realPrice, key) {
   const n = Number(realPrice);
   if (!isFinite(n) || isNaN(n)) return realPrice;
+  // ⚠️ باگ واقعی پیدا‌شده (با اسکرین‌شاتِ خودِ کاربر از ربات خودش، «خرید هات‌ووچر: ۶۴ / فروش
+  // هات‌ووچر: ۶۰۰» — دو عدد کاملاً نامرتبط و حتی برعکسِ قیمت واقعی): این چرخشِ تزئینیِ «۳ رقم
+  // آخر» فقط وقتی معنی داره که خودِ قیمت واقعی در مقیاس هزارها (یا بیشتر) باشه — یو/پریمیوم
+  // ووچر و دلار/یوتوپیا همین‌طورن (~۳۰۰,۰۰۰ تومان). اما برای هر قیمتی که خودش از ۱۰۰۰ کوچیک‌تره
+  // (هات ووچر: hot_buy≈۰.۱۰۷ / hot_sell≈۰.۰۹۷۵ — یا هر ارز مشابه دیگری که بعداً اضافه بشه)،
+  // Math.floor(n/1000)*1000 همیشه صفر می‌شود و کل عددِ نمایشی فقط همون نویزِ تزئینیِ ۰ تا ۶۰۰
+  // می‌مونه، بدون هیچ ربطی به قیمت واقعی. عمداً این شرط روی «مقیاس عدد» است، نه روی اسم محصول
+  // (هات‌ووچر)، تا هر ارز دیگری با همین مقیاسِ کوچک، در آینده هم خودکار درست نمایش داده شود.
+  if (Math.abs(n) < 1000) return n;
   const base = Math.floor(n / 1000) * 1000;
   return base + cosmeticTrailingDigits(key);
 }
@@ -230,5 +239,8 @@ registerHomeMenuHandlers.sendSticker = sendSticker;
 registerHomeMenuHandlers.STICKERS = STICKERS;
 registerHomeMenuHandlers.HOME_BTN_TEXT = HOME_BTN_TEXT;
 registerHomeMenuHandlers.LIVE_PRICE_BTN_TEXT = LIVE_PRICE_BTN_TEXT;
+// ⚠️ فقط برای تست خودکار (tests/hotvoucher-display.test.js) اکسپورت شده — هیچ رفتاری عوض نشده،
+// فقط این تابع خالص از بیرون هم قابل صدا زدن است.
+registerHomeMenuHandlers.localDecoratePrice = localDecoratePrice;
 
 module.exports = registerHomeMenuHandlers;
